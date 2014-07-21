@@ -33,7 +33,7 @@ VAR
  Addr: sockaddr;
  Socket: TSocket;
  databuf: array [0..4096] of byte;
- dataLen: Word;
+ dataLen: 0..65535;
  tmp: Cardinal;
  Inputf: file;
 
