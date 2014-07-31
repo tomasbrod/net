@@ -1,0 +1,23 @@
+date: 31.07.2014 09:40
+
+Brod Net concept
+================
+
+The network is going to cover two modes of operation.
+
+1. Mesh network
+2. Owerlay network
+
+Discovery
+---------
+
+The node finds its peers by sending a local area broadcasts (LAND). It is 
+performed by sending ASK-ST packet to all devices in range of all network 
+interfaces.
+
+The second mode of discovery is wide area node discovery (WAND). It is 
+performed by sending an ASK-ND packet to all peers in node list. The node 
+then tryies to send ASK-ST packet to theese nodes directly. If successfull 
+(eg: in Internet), it uses them as peers. If unsuccessfull (eg: in 
+Meshnet), it updates its routing table.
+
