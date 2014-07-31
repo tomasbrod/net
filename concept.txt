@@ -8,6 +8,13 @@ The network is going to cover two modes of operation.
 1. Mesh network
 2. Owerlay network
 
+And should serve the following
+
+1. Name Verifiable Files
+2. Updateable LiNks
+3. KeyWord Searches
+4. MeSsaGes
+
 Discovery
 ---------
 
@@ -21,3 +28,18 @@ then tryies to send ASK-ST packet to theese nodes directly. If successfull
 (eg: in Internet), it uses them as peers. If unsuccessfull (eg: in 
 Meshnet), it updates its routing table.
 
+Areas
+-----
+
+Each node has an area record. A node can find its area record from its 
+peers. The area record is used to accelerate routing.
+
+The area record is just list of area codes. An area code is 32bit 
+number and specifies a geological or fictional location of the node.
+There are usually more area codes in area record of a given node.
+
+When there are too much nodes in an area, new area should be created. When 
+there are too litle nodes in area, the area code is abadoned.
+
+The area codes could be possibly created and managed autmomatically, but 
+now they are managed by administrator.
