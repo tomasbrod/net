@@ -1,11 +1,11 @@
 unit DataGram;
 
-INTERFCE
+INTERFACE
 
 type
  T =record
   length :SizeUInt;
-  data :array [0..MAX_INT] of byte;
+  data :array [0..0] of byte;
  end;
 
 IMPLEMENTATION
