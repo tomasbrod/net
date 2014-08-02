@@ -23,10 +23,12 @@ var
 PROCEDURE ProcessPacket;
 begin
  case InPk^.pktype of
-  PingPacket.cT: PingPacket.T(InPk^).Handle;
+  PingPacket.pktype: PingPacket.T(InPk^).Handle;
   else abort;
  end;
 end;
+
+{ Bullshit follows }
 
 procedure CheckSocket;
 begin

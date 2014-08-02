@@ -3,7 +3,7 @@ unit PingPacket;
 INTERFACE
 uses GeneralPacket;
 
-const cT=1;
+const pktype=1;
 
 
 type
