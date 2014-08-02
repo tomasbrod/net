@@ -3,14 +3,14 @@ UNIT GeneralPacket;
 INTERFACE
 
 var 
-  RecvProc: procedure(var Data; MaxLen:LongInt) of object;
-  SendProc: procedure(var Data; MaxLen:LongInt) of object;
+  RecvProc: procedure(var Data; MaxLen:LongInt);
+  ReplProc: procedure(var Data; MaxLen:LongInt);
 
 type 
  T =object
   pktype :byte;
   procedure Recv(MaxLen:LongInt);
-  procedure Send(MaxLen:LongInt);
+  procedure Repl(MaxLen:LongInt);
  end;
 
 IMPLEMENTATION
@@ -20,9 +20,9 @@ begin
  RecvProc(self,MaxLen);
 end;
 
-procedure T.Send(MaxLen:LongInt);
+procedure T.Repl(MaxLen:LongInt);
 begin
- SendProc(self,MaxLen);
+ ReplProc(self,MaxLen);
 end;
 
 END.

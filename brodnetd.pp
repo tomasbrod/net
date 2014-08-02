@@ -15,53 +15,71 @@ USES SysUtils
 	,PingPacket
 	;
 
+
+var
+ InPkMem :array [1..1152] of byte; //MTU is 1280
+ InPk :^GeneralPacket.T;
+
+PROCEDURE ProcessPacket;
+begin
+ case InPk^.pktype of
+  PingPacket.cT: PingPacket.T(InPk^).Handle;
+  else abort;
+ end;
+end;
+
 procedure CheckSocket;
 begin
  if SocketError<>0 then raise Exception.Create('Socket error '+IntToStr(SocketError));
 end;
 
-var
- Packet: array [1..1152] of byte; //MTU is 1280
-
-PROCEDURE ProcessPacket;
-begin
- case GeneralPacket.T((@Packet)^).pktype of
-  PingPacket.cT: PingPacket.T((@Packet)^).Handle;
-  {this should error PingPacket.cT: halt(42);}
- end;
-end;
-
-PROCEDURE LoopOnSocket;
- experimental;
-const sock :tSocket =0;
-var DataLen :LongWord;
 var SockAddr :array [0..512] of byte;
     SockAddrLen :LongWord;
+    (* Usefull to send reply *)
+
+procedure RecvImpl(var Data; MaxLen:LongInt);
+const sock :tSocket =0;
+var DataLen :LongWord;
 begin
- repeat
   //Recieve the incoming packet
   DataLen:= 
      fpRecvFrom(
      sock,
-     @Packet,
-     sizeof(Packet),
+     @Data,
+     MaxLen,
      0,
      @SockAddr,
      @SockAddrLen
   );CheckSocket;
+end;
+
+procedure ReplImpl(var Data; MaxLen:LongInt);
+ unimplemented;
+begin
+ AbstractError;
+end;
+
+PROCEDURE LoopOnSocket;
+begin
+ RecvProc:=@RecvImpl;
+ ReplProc:=@ReplImpl;
+ repeat
+  InPk^.Recv(sizeof(InPkMem));
   ProcessPacket;
  until false;
 end;
 
 PROCEDURE LoopOnCharDev;
- unimplemented;
 begin
- abort;
+ AbstractError;
 end;
 
 BEGIN
+ assert(sizeof(InPkMem)<2048);
+ InPk:=@InPkMem;
  case paramstr(1) of
   'S' : LoopOnSocket;
   'C' : LoopOnCharDev;
+  else abort;
  end;
 END.
