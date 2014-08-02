@@ -39,7 +39,7 @@ var SockAddr :array [0..512] of byte;
     SockAddrLen :LongWord;
     (* Usefull to send reply *)
 
-procedure RecvImpl(var Data; MaxLen:LongInt);
+procedure SocketRecvImpl(var Data; MaxLen:LongInt);
 const sock :tSocket =0;
 var DataLen :LongWord;
 begin
@@ -55,7 +55,7 @@ begin
   );CheckSocket;
 end;
 
-procedure ReplImpl(var Data; MaxLen:LongInt);
+procedure SocketReplImpl(var Data; MaxLen:LongInt);
  unimplemented;
 begin
  AbstractError;
@@ -63,8 +63,8 @@ end;
 
 PROCEDURE LoopOnSocket;
 begin
- RecvProc:=@RecvImpl;
- ReplProc:=@ReplImpl;
+ RecvProc:=@SocketRecvImpl;
+ ReplProc:=@SocketReplImpl;
  repeat
   InPk^.Recv(sizeof(InPkMem));
   ProcessPacket;
