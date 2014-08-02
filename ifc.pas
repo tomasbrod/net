@@ -51,16 +51,7 @@ type Tmcq=packed record {multicast join request}
 
 procedure INetInit;
 var SAddr :TInetSockAddr;
-var mcq :packed record
-     multi :in_addr;
-     local :in_addr;
-     iface :cint;
-    end;
-const ourmulticast:in_addr=(s_bytes:(127,0,0,1));
- {OMG preco to neslo zadat priamo ako inline constant????
-  A co sakra je dotted quad? }
 begin
- mcq.multi:=OurMulticast;
 
  SAddr.sin_family:=AF_INET;
  SAddr.sin_addr.s_addr:=INADDR_ANY;
