@@ -29,6 +29,13 @@ to discovered nodes directly. If successfull (eg: in Internet), it uses
 them as peers. If unsuccessfull (eg: in Meshnet), it updates its routing 
 table.
 
+### Note on key sizes
+
+2048 RSA signing keys with SHA256 digest are ok (about 0.5kiB). DSA keys are preffered.
+The whole hello.dat.gpg has to fit in one UDP packet (max 1kiB).
+
+The hello.dat has one 10B Fingerprint, and like 48 4B Area codes ==213B.
+
 Key Retrival
 ------------
 
