@@ -10,23 +10,32 @@ The network is going to cover two modes of operation.
 
 And should serve the following
 
-1. Name Verifiable Files
-2. Updateable LiNks
-3. KeyWord Searches
-4. MeSsaGes
+1. Verifiable Files
+2. Named Files
+3. Keyword Searches
+4. MeSsages
 
 Discovery
 ---------
 
 The node finds its peers by sending a local area broadcasts (LAND). It is 
-performed by sending ASK-ST packet to all devices in range of all network 
+performed by sending Hello packet to all devices in range of all network 
 interfaces.
 
 The second mode of discovery is wide area node discovery (WAND). It is 
-performed by sending an ASK-ND packet to all peers in node list. The node 
-then tryies to send ASK-ST packet to theese nodes directly. If successfull 
-(eg: in Internet), it uses them as peers. If unsuccessfull (eg: in 
-Meshnet), it updates its routing table.
+performed by sending an AskNodes packet to all peers in node list, which 
+should reply with list of nodes. The node then tryies to send Hello packet 
+to discovered nodes directly. If successfull (eg: in Internet), it uses 
+them as peers. If unsuccessfull (eg: in Meshnet), it updates its routing 
+table.
+
+Key Retrival
+------------
+
+Becouse the Hello packets are signed with pgp public key, this key has to 
+be retrived to verifi the authenticity of the packets.
+
+Keys are retrived as normal VFs identified as /vf/gpg/<fingerprint>.
 
 Areas
 -----
