@@ -15,6 +15,14 @@ And should serve the following
 3. Keyword Searches
 4. MeSsages
 
+Programs
+--------
+
+INetD (or WhatnotNetD) listens for incomming connections. When packet 
+arrives, brodnetd is started to handle it and all subsequent packets. When 
+the instance of brodnetd terminates or detaches itsevf, the corresponding 
+NetD can start another instance when a packet arrives.
+
 Discovery
 ---------
 
@@ -34,7 +42,18 @@ table.
 2048 RSA signing keys with SHA256 digest are ok (about 0.5kiB). DSA keys are preffered.
 The whole hello.dat.gpg has to fit in one UDP packet (max 1kiB).
 
-The hello.dat has one 10B Fingerprint, and like 48 4B Area codes ==213B.
+The hello.dat has one 20B Fingerprint, and like 48 4B Area codes ==212B.
+
+The signature is MAX 512B.
+
+Packet is 725B.
+
+Greetings (Hellos)
+------------------
+
+LANs are greeted periodically for LAND.
+
+All peers are greeted periodically.
 
 Key Retrival
 ------------
