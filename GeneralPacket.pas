@@ -10,6 +10,7 @@ type
  T =object
   pktype :byte;
   procedure Recv(MaxLen:LongInt);
+  procedure Create;
   procedure Repl(MaxLen:LongInt);
  end;
 
@@ -24,5 +25,9 @@ procedure T.Repl(MaxLen:LongInt);
 begin
  ReplProc(self,MaxLen);
 end;
+
+procedure T.Create;
+begin end;
+
 
 END.
