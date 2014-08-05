@@ -5,6 +5,7 @@ PROGRAM brodnetd;
    %1 ... io type
      ='S' -> io is socket
      ='C' -> io is character device
+   %2 ... data dir
  *)
  
 {$MODE OBJFPC}{$C+}
@@ -79,6 +80,7 @@ end;
 BEGIN
  assert(sizeof(InPkMem)<2048);
  InPk:=@InPkMem;
+ If paramcount<2 then abort;
  case paramstr(1) of
   'S' : LoopOnSocket;
   'C' : LoopOnCharDev;
