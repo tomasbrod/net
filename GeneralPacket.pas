@@ -6,11 +6,12 @@ var
   RecvProc: procedure(var Data; MaxLen:LongInt);
   ReplProc: procedure(var Data; MaxLen:LongInt);
 
-type 
+type
+ tPktype =byte;
  T =object
-  pktype :byte;
+  pktype :tPktype;
   procedure Recv(MaxLen:LongInt);
-  procedure Create;
+  procedure Create (itp :tPktype);
   procedure Repl(MaxLen:LongInt);
  end;
 
@@ -26,8 +27,10 @@ begin
  ReplProc(self,MaxLen);
 end;
 
-procedure T.Create;
-begin end;
+procedure T.Create (itp :tPktype);
+begin
+ pktype := itp;
+end;
 
 
 END.
