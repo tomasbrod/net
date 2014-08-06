@@ -19,9 +19,16 @@ Programs
 --------
 
 INetD (or WhatnotNetD) listens for incomming connections. When packet 
-arrives, brodnetd is started to handle it and all subsequent packets. When 
-the instance of brodnetd terminates or detaches itsevf, the corresponding 
-NetD can start another instance when a packet arrives.
+arrives, brodnetd is started (STDIN is the socket) to handle it and all 
+subsequent packets. When the instance of brodnetd terminates or detaches 
+itsevf, the corresponding NetD can start another instance when a packet 
+arrives.
+
+When the brodnetd wants to send a packet, it reuses the socket it possible. 
+Othervise a new socket is created.
+
+This means that there can be possibly multiple instances of brodnetd 
+running, so approportiate database locking should be implemented.
 
 Discovery
 ---------
@@ -51,9 +58,22 @@ Packet is 725B.
 Greetings (Hellos)
 ------------------
 
-LANs are greeted periodically for LAND.
+Hello consist only of fingerprint. It has to be short for effective 
+broadcast. Hello is used to find new peers (LAND) as well as to check 
+availability of peers.
 
-All peers are greeted periodically.
+### If node recieves an Hello
+
+- in cHelloCooldown since last Hello from the same peer,
+  no further actions are performed
+
+- it sends Hi in reply.
+  Hi packet consist of fingerprint and network address of the sender of the 
+  Hello. This could be possibly used for STUN.
+
+- it adds the sender to list of peers.
+ 
+ 
 
 Key Retrival
 ------------
