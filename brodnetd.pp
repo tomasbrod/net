@@ -23,6 +23,7 @@ var
 
 PROCEDURE ProcessPacket;
 begin
+ GeneralPacket.SomewhatPassTheSenderSockAddr;
  case InPk^.pktype of
   PingPacket.pktype: PingPacket.T(InPk^).Handle;
   else abort;

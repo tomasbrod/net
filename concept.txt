@@ -73,7 +73,11 @@ availability of peers.
 
 - it adds the sender to list of peers.
  
- 
+Greetings (Hi)
+--------------
+
+Hi packets are used as a reply for Hello. They inform the sender of the 
+Hello of his SockAddr.
 
 Key Retrival
 ------------

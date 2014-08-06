@@ -20,8 +20,6 @@ type
  end;
 
 IMPLEMENTATION
-uses Peers
-    ;
 
 PROCEDURE tPacket.Handle;
  unimplemented {
