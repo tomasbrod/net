@@ -13,7 +13,7 @@ USES SysUtils
 	,Sockets
 	,UnixType
 	,GeneralPacket
-	,PingPacket
+	,Hello
 	;
 
 
@@ -25,7 +25,7 @@ PROCEDURE ProcessPacket;
 begin
  GeneralPacket.SomewhatPassTheSenderSockAddr;
  case InPk^.pktype of
-  PingPacket.pktype: PingPacket.T(InPk^).Handle;
+  Hello.pktype: Hello.T(InPk^).Handle;
   else abort;
  end;
 end;

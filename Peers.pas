@@ -3,6 +3,8 @@ unit Peers;
 INTERFACE
 uses Sockets
     ,UnixType
+    ,GeneralPacket
+    ,Keys
     ;
 
 TYPE{s}
@@ -20,6 +22,14 @@ TYPE{s}
   end;
  end;
 
+procedure Assoc( fpr :keys.tFingerprint );
+ unimplemented;
+
+procedure Save( really{?} :boolean );
+ unimplemented;
+
+function TimeSinceLast( pktype :GeneralPacket.tPkType ): System.tTime;
+ unimplemented;
 
 IMPLEMENTATION
 

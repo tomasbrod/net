@@ -5,43 +5,55 @@ uses GeneralPacket
     ,Keys
     ;
 
-const pktype=1;
+const cReq = 1;
+const cAns = 2;
+const cHelloCooldown = 5000{ms};
+const pktype :set of tPkType = [cReq, cAns];
+
+{
+ Send hello ...> get hello
+ 
+ This unit handle only incoming hello and does not initiate greeting 
+ automatically.
+ 
+}
 
 type
- tPacket =packed object(GeneralPacket.T)
+ T =packed object(GeneralPacket.T)
   procedure Handle;
   procedure Send;
-  procedure Create;
+  procedure Create ( isReply :boolean );
   private
-  Fingerprint :keys.tFingerprint;
+  Fpr :keys.tFingerprint;
  end;
 
 IMPLEMENTATION
 uses Peers
-    ,HiHello
     ;
 
-procedure tPacket.Handle;
-var repl:HiHello.tPacket;
+procedure T.Handle;
+var rep:Hello.T;
 begin
- if Peers.TimeSinceLast < cHelloCooldown
+ Peers.Assoc (Fpr); {Associate sender's sockaddr with fingerprint.}
+ Peers.Save (true); {Save the peer socaddr to permanent peer cache}
+ if pktype=cReq and (Peers.TimeSinceLast(cReq) > cHelloCooldown)
   then exit; //Anti-DoS
- Peers.Assoc (Fingerprint); {Associate sender's addres with fingerprint.}
- Peers.Save (true);
- repl.Create;
- repl.Send;
+ rep.Create(true);
+ rep.Send;
 end;
 
-procedure tPacket.Create;
+procedure T.Create(isReply:boolean);
 var a:byte;
 begin
- inherited Create(Hello.pktype);
- Fingerprint:=MyFingerPrint;
+ if isReply
+  then inherited Create(Hello.cAns)
+  else inherited Create(Hello.cReq);
+ Fpr:=MyFingerPrint;
 end;
 
-procedure tPacketSend;
+procedure T.Send;
 begin
- Send(sizeof(self));
+ inherited Send(sizeof(self));
 end;
 
 END.
