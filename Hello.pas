@@ -22,9 +22,12 @@ type
  T =packed object(GeneralPacket.T)
   procedure Handle;
   procedure Send;
-  procedure Create ( isReply :boolean );
+  procedure Create;
   private
   Fpr :keys.tFingerprint;
+ end;
+ tReply= packed object(T)
+  procedure Create;
  end;
 
 IMPLEMENTATION
@@ -32,22 +35,25 @@ uses Peers
     ;
 
 procedure T.Handle;
-var rep:Hello.T;
+var rep:Hello.tReply;
 begin
  Peers.Assoc (Fpr); {Associate sender's sockaddr with fingerprint.}
  Peers.Save (true); {Save the peer socaddr to permanent peer cache}
  if pktype=cReq and (Peers.TimeSinceLast(cReq) > cHelloCooldown)
   then exit; //Anti-DoS
- rep.Create(true);
+ rep.Create;
  rep.Send;
 end;
 
-procedure T.Create(isReply:boolean);
-var a:byte;
+procedure T.Create;
 begin
- if isReply
-  then inherited Create(Hello.cAns)
-  else inherited Create(Hello.cReq);
+ inherited Create(Hello.cReq);
+ Fpr:=MyFingerPrint;
+end;
+
+procedure tReply.Create;
+begin
+ inherited Create(Hello.cAns)
  Fpr:=MyFingerPrint;
 end;
 
