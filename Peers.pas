@@ -33,4 +33,18 @@ function TimeSinceLast( pktype :GeneralPacket.tPkType ): System.tTime;
 
 IMPLEMENTATION
 
+procedure Assoc( fpr :keys.tFingerprint );
+begin
+end;
+
+procedure Save( really{?} :boolean );
+begin
+end;
+
+function TimeSinceLast( pktype :GeneralPacket.tPkType ): System.tTime;
+begin
+end;
+
+
+
 END.
