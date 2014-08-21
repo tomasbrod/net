@@ -8,6 +8,12 @@ uses GeneralPacket
 const cReq = 4;
 const cAns = 5;
 const pktype :set of tPkType = [cReq, cAns];
+const cMaxTagsPerFile=284;
+
+type
+ tTagHash = object
+  data: array [1..4] of byte;
+ end unimplemented;
 
 type
  tAsk =packed object(GeneralPacket.T)
@@ -17,7 +23,7 @@ type
   procedure AddTag( itag :string );
   procedure Send;
   private
-  tags :tUltimateHashesOfTags; {*Warning: dynamic size!}
+  tags :array [1..cMaxTagsPerFile] of tTagHash;
  end;
 
 type
@@ -29,7 +35,7 @@ type
   procedure Send;
   private
   FileHash :tKeys.tHash;
-  tags :tUltimateHashesOfTags; {*Warning: dynamic size!}
+  tags :array [1..cMaxTagsPerFile] of tTagHash;
  end;
 
 IMPLEMENTATION
