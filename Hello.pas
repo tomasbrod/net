@@ -3,6 +3,7 @@ unit Hello;
 INTERFACE
 uses GeneralPacket
     ,Keys
+    ,Peers
     ;
 
 const cReq = 1;
@@ -25,6 +26,7 @@ type
   procedure Create;
   private
   Fpr :keys.tFingerprint;
+  YouSock :Peers.tNetAddrLargest;
  end;
  tReply= packed object(T)
   procedure Create;
