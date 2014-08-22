@@ -30,15 +30,13 @@ type
  end;
 
 IMPLEMENTATION
-uses Peers
-    ;
 
 procedure T.Handle;
 var rep:Hello.T;
 begin
  Peers.Assoc (Fpr); {Associate sender's sockaddr with fingerprint.}
  Peers.Save (true); {Save the peer socaddr to permanent peer cache}
- if pktype=cReq and (Peers.TimeSinceLast(cReq) > cHelloCooldown)
+ if (pktype=cReq ) and (Peers.TimeSinceLast(cReq) > cHelloCooldown)
   then exit; //Anti-DoS
  rep.Create(true);
  rep.Send;
@@ -55,10 +53,7 @@ end;
 
 procedure T.Send;
 begin
- inherited Send(sizeof(self));
+ inherited Repl(sizeof(self));
 end;
 
 END.
-
-
-IM
