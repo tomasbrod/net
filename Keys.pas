@@ -18,4 +18,12 @@ TYPE{s}
 
 IMPLEMENTATION
 
+procedure tHash.Clear;
+begin abstracterror; end;
+
+function tHash.isNil :boolean;
+begin
+ abstracterror;
+end;
+
 END.
