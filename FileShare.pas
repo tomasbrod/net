@@ -45,13 +45,48 @@ begin
  for i:=low(tags) to high(tags) do tags[i].Clear;
 end;
 
-procedure T.Create ( ifh :Keys );
+procedure T.Create ( ifh :Keys.tHash );
 var i:byte;
 begin
  inherited Create(cAns);
  fh:=ifh;
  for i:=low(tags) to high(tags) do tags[i].Clear;
 end;
+
+procedure T.AddTag( itag :tTagHash );
+var i :byte;
+begin
+ for i:=low(tags) to high(tags) do if tags[i].isNul then begin
+  tags[i]:=itag;
+  break;
+ end;
+end;
+
+procedure T.AddTag( itag :string );
+var th: tTagHash;
+begin
+ th.Create( itag );
+ AddTag( th );
+end;
+
+procedure T.Handle;
+var search :Files.tSearch;
+var fr :Files.tRef;
+var pk :T;
+BEGIN
+ if pktype=cReq then begin
+  search.ByMatch( tags, high(tags) );
+  while search.Found do begin
+   fr:=search.Get;
+   pk.Create(fr.Hash);
+   for taghash in fr.Tags do AddTag(taghash);
+  end;
+ end else {=cAns}
+  Files.Recieve(fh, tags, high(tags) );
+ end;
+END;
+   
+   
 
 END
 .
