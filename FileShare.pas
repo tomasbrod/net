@@ -15,13 +15,13 @@ type
  T =packed object(GeneralPacket.T)
   procedure Handle;
   procedure Create; (* ASK packet *)
-  procedure Create( ifh :FileTag.T ); (* PUT packet *)
-  procedure AddTag( itag :tTagHash );
+  procedure Create( ifh :Keys.tHash ); (* PUT packet *)
+  procedure AddTag( itag :FileTag.T );
   procedure AddTag( itag :string ); (* automatically converts to tTagHash *)
   procedure Send;
   private
-  fh :FileTag.T;
-  tags :array [1..cMaxTagsPerFile] of tTagHash;
+  fh :Keys.tHash;
+  tags :array [1..cMaxTagsPerFile] of FileTag.T;
  end;
 
 IMPLEMENTATION
@@ -29,32 +29,32 @@ uses Peers
     ;
 
 procedure T.Create;
-var i:byte;
+var i:integer;
 begin
  inherited Create(cReq);
  fh.Clear;
  for i:=low(tags) to high(tags) do tags[i].Clear;
 end;
 
-procedure T.Create ( ifh :FileTag.T );
-var i:byte;
+procedure T.Create ( ifh :Keys.tHash );
+var i:integer;
 begin
  inherited Create(cAns);
  fh:=ifh;
  for i:=low(tags) to high(tags) do tags[i].Clear;
 end;
 
-procedure T.AddTag( itag :tTagHash );
-var i :byte;
+procedure T.AddTag( itag :FileTag.T );
+var i :integer;
 begin
- for i:=low(tags) to high(tags) do if tags[i].isNul then begin
+ for i:=low(tags) to high(tags) do if tags[i].isNil then begin
   tags[i]:=itag;
   break;
  end;
 end;
 
 procedure T.AddTag( itag :string );
-var th: tTagHash;
+var th: FileTag.T;
 begin
  th.Create( itag );
  AddTag( th );
@@ -74,7 +74,7 @@ BEGIN
   end;
  end;
  if pktype=cAns then begin
-  Files.Recieve(fh, tags, high(tags) );
+  Files.AddIndex(fh, tags, high(tags) );
  end;
 END;
    

@@ -16,16 +16,16 @@ type
 
 IMPLEMENTATION
 
-procedure Create( plaintext :string);
+procedure T.Create( plaintext :string);
 begin
  AbstractError;
 end;
 
-procedure Clear;
+procedure T.Clear;
 var i:byte;
 begin for i:=low(data) to high(data) do data[i]:=0; end;
 
-function  isNil :boolean;
+function  T.isNil :boolean;
 var i:byte;
 begin
  isNil:=true;
