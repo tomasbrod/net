@@ -105,3 +105,41 @@ INet
 -----
 
 Xinetd is going to listen for all connections.
+
+Daemon Lifecycle
+================
+
+Daemon is started by netd with stdin/stdout connected to socket. A packet 
+is recieved (rcvmsg) from the socket and parsed. Depending on the type and 
+contents of the packet, approportiate action is taken. If reply should be 
+sent, new datagram socket is created and the socaddr is used as 
+destination. Then the daemon listens for another packet with configurable 
+timeout. If no packet was received in time, daemon exits. And netd listens 
+again.
+
+File Sharing
+============
+
+All files in the network have tags. Files are found only by their tags.
+
+Comm
+----
+
+Note: 'tags' is array of hash of tagstring.
+
+1. -> FileShare.T (hash = 0, tags)
+2. 
+   * <- FileShare.T (hash = 1, tags)
+   * <- FileShare.T (hash = 2, tags)
+   * <- FileShare.T (hash = 3, tags)
+3. -> FileTrans.tYes (hash = 2)
+4. 
+   * <- FileTrans.tPcs (hash = 2, order = 1, total = 2, pcs=(a,...) )
+   * <- FileTrans.tPcs (hash = 2, order = 2, total = 2, pcs=(...) )
+5. -> FileTransfer.tYes (hash = a)
+6. <- FileTransfer.tData (hash = a, data=(...) )
+
+Tags
+----
+
+Every file has max of 200 tags (to not fragment search packets).
