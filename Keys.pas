@@ -11,6 +11,8 @@ TYPE{s}
  tHash=object
   procedure Clear;
   function isNil :boolean;
+  procedure ToString( var s :tFileName );
+  procedure FromString( s :tFileName );
   private
   data :array [0..20] of byte;
  end;
