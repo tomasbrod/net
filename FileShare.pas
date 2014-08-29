@@ -66,7 +66,7 @@ var fr :Files.tRef;
 var pk :T;
 BEGIN
  if pktype=cReq then begin
-  search.ByMatch( tags, high(tags) );
+  search.ByMatch(tags, high(tags) );
   while search.Find do begin
    fr:=search.Get;
    pk.Create(fr.Hash);

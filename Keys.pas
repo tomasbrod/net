@@ -12,8 +12,11 @@ TYPE{s}
   procedure Clear;
   function isNil :boolean;
   private
-  data :array [0..32] of byte;
+  data :array [0..20] of byte;
  end;
+
+VAR
+ MyFilgerPrint: tFingerPrint unimplemented;
  
 
 IMPLEMENTATION
