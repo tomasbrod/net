@@ -26,6 +26,7 @@ type
   procedure Create ( isReply :boolean );
   private
   Fpr :keys.tFingerprint;
+  Load: real;
   YouSock :Peers.tNetAddrLargest;
  end;
 
@@ -36,7 +37,7 @@ var rep:Hello.T;
 begin
  Peers.Assoc (Fpr); {Associate sender's sockaddr with fingerprint.}
  Peers.Save (true); {Save the peer socaddr to permanent peer cache}
- if (pktype=cReq ) and (Peers.TimeSinceLast(cReq) > cHelloCooldown)
+ if (pktype=cReq ) and (Peers.TimeSinceLast(cReq) < cHelloCooldown)
   then exit; //Anti-DoS
  rep.Create(true);
  rep.Send;
