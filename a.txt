@@ -143,3 +143,12 @@ Tags
 ----
 
 Every file has max of 200 tags (to not fragment search packets).
+
+Searching
+---------
+
+Node recieves a fileshare search. First tag is selected. FileIDs from 
+/tag/%taghash%/ are all added to in-memory linked-list. Next tag is 
+selected. Files there are added to the list, but for files already in the 
+list count field is increased and bubble sort like swapping is performed. 
+
