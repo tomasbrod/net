@@ -4,31 +4,43 @@ INTERFACE
 uses Keys;
 
 type
- T = object( Keys.tHash )
+ T = object
   (* Tags are SHA255 hashes of tag plaintext *)
   procedure Create( plaintext :string);
    unimplemented;
   procedure Clear;
+   experimental;
   function  isNil :boolean;
+   experimental;
   procedure ToString( var s :tFileName );
    experimental;
   procedure FromString( s :tFileName );
    experimental;
   private
   data: array [1..4] of byte;
- end unimplemented;
+ end;
  tCollection = array [1..999] of T; {Dynamic length }
 
 type
  tSearch = object
-  public procedure Search;
-  function Find :boolean;
+  procedure Search;
+   unimplemented;
+   (* Run the serach on db with tags *)
+  function Result ( var match :Keys.tHash ) :boolean;
+   experimental;
+   (* Fetch one resuilt
+      First call gives best maching entry
+      Subsequent calls give less matching entries
+      Returns false if no more resuilts are available
+   *)
   tags :^array [1..999] of T;
   db   :tFileName;
+   (* Tags to search for and database to search in *)
   private
   list :^tLLNode;
   ptr  :^tLLNode;
  end;
+
  tLLNode = record
   next, prev : tLLNode_ptr;
   score : integer;
