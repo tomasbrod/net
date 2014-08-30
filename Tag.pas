@@ -11,9 +11,9 @@ type
   procedure Clear;
   function  isNil :boolean;
   procedure ToString( var s :tFileName );
-   experimenta;
+   experimental;
   procedure FromString( s :tFileName );
-   experimenta;
+   experimental;
   private
   data: array [1..4] of byte;
  end unimplemented;

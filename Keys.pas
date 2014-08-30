@@ -4,18 +4,15 @@ INTERFACE
 
 TYPE{s}
 
- tFingerprint=object
-  private
-  data :array [0..20] of byte;
- end;
  tHash=object
   procedure Clear;
   function isNil :boolean;
-  procedure ToString( var s :tFileName );
-  procedure FromString( s :tFileName );
+  procedure ToString( var s :string );
+  procedure FromString( s :string );
   private
   data :array [0..20] of byte;
  end;
+ tFingerprint =tHash Deprecated;
 
 VAR
  MyFilgerPrint: tFingerPrint unimplemented;
