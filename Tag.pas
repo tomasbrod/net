@@ -88,10 +88,36 @@ end;
 const datadir:string='data/';
 const tagdir:string='tags/';
 
+procedure AddToList( id: Keys.tHash );
+(*
+ Search the list and if id is found, increase score otherwise append.
+ Then sort the list.
+*)
+var cur,nw :^tLLNode;
+begin
+ cur:=list;
+ if cur=nil then begin
+  New(cur);
+  List:=cur;
+  cur^.next:=cur;
+  cur^.prev:=cur;
+  cur^.id:=id;
+  cur^.score:=1;
+ end else begin
+  while (cur<>list) and (cur^.id<>id) do cur:=cur^.next;
+  if cur^.id=id then begin
+   inc(cur^.score);
+   nw:=cur;
+   while (nw^.score > cur^.score) and (cur<>list) do cur:=cur^.prev;
+   if cur<>nw then begin
+    nw:= 
+   
+  
+end;
+
 procedure tSearch.Search;
 var tag :^T;
 var tagdir, olddir :tFileName;
-var ?
 var DirLs :TSearchRec;
 begin
  olddir:=GetCurrentDir;
