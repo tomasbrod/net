@@ -134,12 +134,40 @@ Note: 'tags' is array of hash of tagstring.
 Tags
 ----
 
-Every file has max of 200 tags (to not fragment search packets).
+Every file has tags.
+Even nodes have tags.
+Tags are used to find files. 
+
+But files hav max of 200 tags (to not fragment search packets).
+
+Tags of a given object are stored in file tags.dat in the object's 
+directory. To speed up searching tags are stored in <db>/tag/<taghash> 
+files which are file of Keys.tHash.
+
+	files/
+	├── tag/
+	│   ├── BACABABA
+	│   └── 1234FEDC
+	├── CA/
+	│   └── CAFEBABE12345678/
+	│       └── tags.dat
+	└── 01/
+	    └── 01234567ABCDEF00/
+	        └── tags.dat
+
+### Searching
+
+For all tags in the query: FileIDs from <db>/tag/%taghash% are all 
+added to in-memory linked-list, but for files already in the list, count 
+field is increased and the entry is moved closer to start of the list.
+
+Finally, the list contains best resuilts near the start.
 
 ### Searching
 
 Node recieves a fileshare search. First tag is selected. FileIDs from 
-/tag/%taghash%/ are all added to in-memory linked-list. Next tag is 
+/tag/%taghash% are all added to in-memory linked-list. Next tag is 
 selected. Files there are added to the list, but for files already in the 
-list count field is increased and bubble sort like swapping is performed. 
+list count field is increased and the entry is moved closer to start of the 
+list.
 
