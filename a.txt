@@ -13,20 +13,23 @@ And should serve the following
 3. Keyword Searches
 4. MeSsages
 
-Programs
---------
+Daemons and Services
+--------------------
 
-INetD (or WhatnotNetD) listens for incomming connections. When packet 
-arrives, brodnetd is started (STDIN is the socket) to handle it and all 
-subsequent packets. When the instance of brodnetd terminates or detaches 
-itsevf, the corresponding NetD can start another instance when a packet 
-arrives.
+Xinetd is going to listen for all connections. Including connections to web 
+interface. For protocols incompatible with xinetd, new network daemon is 
+going to be written.
 
-When the brodnetd wants to send a packet, it reuses the socket it possible. 
-Othervise a new socket is created.
+Daemon is started by netd with stdin/stdout connected to socket. A packet 
+is recieved (rcvmsg) from the socket and parsed. Depending on the type and 
+contents of the packet, approportiate action is taken. If reply should be 
+sent, new datagram socket is created and the socaddr is used as 
+destination. Then the daemon listens for another packet with configurable 
+timeout. If no packet was received in time, daemon exits. And netd listens 
+again.
 
-This means that there can be possibly multiple instances of brodnetd 
-running, so approportiate database locking should be implemented.
+There can be possibly multiple instances of brodnetd running, so 
+approportiate database locking should be implemented.
 
 Discovery
 ---------
@@ -107,29 +110,12 @@ there are too litle nodes in area, the area code is abadoned.
 The area codes could be possibly created and managed autmomatically, but 
 now they are managed by administrator.
 
-INet
------
-
-Xinetd is going to listen for all connections.
-
-Daemon Lifecycle
-================
-
-Daemon is started by netd with stdin/stdout connected to socket. A packet 
-is recieved (rcvmsg) from the socket and parsed. Depending on the type and 
-contents of the packet, approportiate action is taken. If reply should be 
-sent, new datagram socket is created and the socaddr is used as 
-destination. Then the daemon listens for another packet with configurable 
-timeout. If no packet was received in time, daemon exits. And netd listens 
-again.
-
 File Sharing
-============
+------------
 
 All files in the network have tags. Files are found only by their tags.
 
-Comm
-----
+### Comm
 
 Note: 'tags' is array of hash of tagstring.
 
@@ -150,8 +136,7 @@ Tags
 
 Every file has max of 200 tags (to not fragment search packets).
 
-Searching
----------
+### Searching
 
 Node recieves a fileshare search. First tag is selected. FileIDs from 
 /tag/%taghash%/ are all added to in-memory linked-list. Next tag is 
