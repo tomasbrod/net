@@ -44,6 +44,8 @@ table.
 
 ### Note on key sizes
 
+*deprecated*
+
 2048 RSA signing keys with SHA256 digest are ok (about 0.5kiB). DSA keys are preffered.
 The whole hello.dat.gpg has to fit in one UDP packet (max 1kiB).
 
@@ -56,29 +58,33 @@ Packet is 725B.
 Greetings (Hellos)
 ------------------
 
-Hello consist only of fingerprint. It has to be short for effective 
-broadcast. Hello is used to find new peers (LAND) as well as to check 
+Hello is used to find new peers (LAND) as well as to check 
 availability of peers.
+
+Hello consist of:
+
+ - Fingerprint of Sender (20B)
+ - Average load of the Sender (1B)
+ - Socket Address of the Reciever (IPv4 12B, IPv6 24B)
+
+The purpose of the reciever's sockaddr filed
+is to inform nodes behind NAT of their external Address.
+This could be possibly used for STUN.
+It can be null, if unknown (eg: broadcast).
 
 ### If node recieves an Hello
 
-- in cHelloCooldown since last Hello from the same peer,
+- it adds the sender to list of peers.
+
+- in cHelloCooldown{ms} since last Hello from the same peer,
   no further actions are performed
 
-- it sends Hi in reply.
-  Hi packet consist of fingerprint and network address of the sender of the 
-  Hello. This could be possibly used for STUN.
-
-- it adds the sender to list of peers.
+- it replies with another Hello
  
-Greetings (Hi)
---------------
-
-Hi packets are used as a reply for Hello. They inform the sender of the 
-Hello of his SockAddr.
-
 Key Retrival
 ------------
+
+*deprecated*
 
 Becouse the Hello packets are signed with pgp public key, this key has to 
 be retrived to verifi the authenticity of the packets.

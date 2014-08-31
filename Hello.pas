@@ -26,7 +26,7 @@ type
   procedure Create ( isReply :boolean );
   private
   Fpr :keys.tFingerprint;
-  Load: real;
+  Load: byte; //Let it be byte. No byte-orde as in Single
   YouSock :Peers.tNetAddrLargest;
  end;
 
