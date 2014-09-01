@@ -171,3 +171,18 @@ selected. Files there are added to the list, but for files already in the
 list count field is increased and the entry is moved closer to start of the 
 list.
 
+
+File Transfer
+-------------
+
+FileTransfer is used to copy files or parts of files ower the network. 
+Files are split to pieces. Multiple files can share the same pieces. Files 
+are basically pieces of data (with metadata). Thus One piece can contain 
+either data or referneces to other pieces. Pieces are identified by their 
+hash data. If piece contains references to othe pieces, it is identified by 
+hash of the concatenated subpieces.
+
+File transfer is initaited by sending a FileTransfer.tYes packet to peer, 
+who should have the piece. The peer sends back either FileTransfer.tData or 
+list of pieces in one ore multiple FileTransfer.tPcs packets.
+If no reply is recieved (packet lost) in time, the tYes packet is sent again.
