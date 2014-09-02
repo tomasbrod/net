@@ -37,11 +37,9 @@ begin
 end;
 
 procedure T.Create ( ifh :Keys.tHash );
-var i:integer;
 begin
- inherited Create(cAns);
+ Create;
  fh:=ifh;
- for i:=low(tags) to high(tags) do tags[i].Clear;
 end;
 
 procedure T.AddTag( itag :FileTag.T );
