@@ -1,9 +1,9 @@
-unit FileShare;
+unit Share;
 
 INTERFACE
 uses GeneralPacket
     ,Keys
-    ,FileTag
+    ,Tag
     ;
 
 const cReq = 4;
