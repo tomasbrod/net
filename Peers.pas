@@ -230,6 +230,7 @@ constructor tAkafuka.Create;
 begin
  inherited Create(cFundeluka);
  ID.GetMy;
+ YouSock.Selected;
 end;
 
 constructor tAkafuka.Create(rcpt: tID);
@@ -237,6 +238,7 @@ var a:byte;
 begin
  inherited Create(cAkafuka);
  ID:=rcpt;
+ YouSock.Selected;
 end;
 
 procedure tAkafuka.Send;
