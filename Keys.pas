@@ -10,7 +10,11 @@ TYPE{s}
   function isNil :boolean;
    experimental;
   procedure ToString( var s :string );
+   overload;
    experimental;
+  function ToString :string;
+   overload;
+   deprecated;
   procedure FromString( s :string );
    experimental;
   private
@@ -43,6 +47,14 @@ begin
  for i:=low(data) to high(data)
   do s:=s+IntToHex(data[i],2);
 end;
+
+function tHash.ToString :string;
+var s:string;
+begin
+ ToString(s);
+ ToString:=s;
+end;
+
 
 procedure tHash.FromString( s :string );
 var i :byte;
