@@ -20,12 +20,12 @@ TYPE
  tNetAddr=object
   function Length :word;
   procedure GetSender; {Creates from sender of the message}
-  private
+  public
   data :record
-  case family :word of 
+  case Family :word of 
    AF_INET :( inet :record 
      sin_port: cushort;
-     sin_addr: in_addr;
+     sin_addr: tInAddr;
    end; );
    0 :(
     pad_pV4IlkA4mKQL :array [0..128] of byte;
@@ -35,13 +35,14 @@ TYPE
  
  tID=object(Keys.tHash)
   procedure GetSelected; {Creates a peer id of currently selected peer}
+  procedure GetMy;
  end;
   
 
  tAkafuka =packed object(GeneralPacket.T)
   procedure Handle;
   procedure Send;
-  procedure Create(rcpt: tID);
+  procedure Create(rcpt: tID); overload;
   private
   ID :tID;
   Load: byte; //Let it be byte. No byte-orde as in Single
@@ -49,7 +50,7 @@ TYPE
  end;
 
  tFundeluka =packed object(tAkafuka)
-  procedure Create;
+  procedure Create; overload;
  end;
 
 function TimeSinceLast( pktype :GeneralPacket.tPkType ): System.tTime;
@@ -59,7 +60,10 @@ function TimeSinceLast( pktype :GeneralPacket.tPkType ): System.tTime;
 procedure Select( fpr :keys.tFingerprint );
 
 IMPLEMENTATION
-uses DataBase;
+uses 
+     DataBase
+     ,SysUtils
+     ;
 
 procedure OpenDB(var F: File; const id :tID; const Field :tField);
 const cTable :tTable = 'peers';
@@ -69,7 +73,7 @@ begin
  DataBase.Open(F, cTable, row, Field);
 end;
 
-Operator = (aa, ab :Sockets.sin_addr) b : boolean;
+Operator = (aa, ab :Sockets.tInAddr) b : boolean;
 begin
  b:=aa.s_addr=ab.s_addr;
 end;
@@ -77,9 +81,9 @@ end;
 Operator = (aa, ab :tNetAddr) b : boolean;
 begin
  b:=false;
- if aa.Family<>ab.Family then exit;
- case aa.Familly of
-  Sockets.AF_INET: if aa.sin_port<>ab.sin_port or aa.sin_addr<>ab.sin_addr then exit;
+ if aa.data.Family<>ab.data.Family then exit;
+ case aa.data.Family of
+  Sockets.AF_INET: if (aa.data.inet.sin_port<>ab.data.inet.sin_port) or (aa.data.inet.sin_addr<>ab.data.inet.sin_addr) then exit;
   else exit;
  end;
  b:=true;
@@ -106,14 +110,16 @@ procedure Assoc( id: tID );
  experimental;
 var AddrF : file of tNetAddr;
 var Ex, Nw : tNetAddr;
-label already;
 begin
  Nw.GetSender;
  OpenDB( AddrF, id, cAddrField);
  try
   while not eof(AddrF) do begin
    Read(AddrF, Ex);
-   if Ex=Nw then exit;
+   if Ex=Nw then begin
+    Seek(AddrF, FilePos(AddrF)-1 );
+    break;
+   end;
   end;
   write(AddrF, Nw);
  finally
@@ -126,11 +132,13 @@ procedure Remove( const nw :tNetAddr );
 var AddrF : file of tNetAddr;
 var Ex : tNetAddr;
 var nwpos: int64;
+var ID : tID;
 begin
+ id.GetSelected;
  OpenDB( AddrF, id, cAddrField);
  try
   while not EoF(AddrF) do begin
-   Read(F, Ex);
+   Read(AddrF, Ex);
 
    if Ex=Nw then begin
     nwpos:=FilePos(AddrF)-1; {Pos of the offending record}
@@ -174,32 +182,32 @@ begin
   Seek(F, pktype);
   Read(F, cur);
  finally
-  close(AddrF);
+  close(F);
  end;
  result := now - cur;
 end;
 
-procedure T.Handle;
-var rep:Hello.T;
+procedure tAkafuka.Handle;
+var rep:tFundeluka;
 begin
- Peers.Assoc (Fpr); {Associate sender's sockaddr with fingerprint.}
+ Peers.Assoc (ID); {Associate sender's sockaddr with fingerprint.}
  Peers.Save (true); {Save the peer socaddr to permanent peer cache}
- if (pktype=cReq ) and (Peers.TimeSinceLast(cReq) < cHelloCooldown)
+ if (pktype=cAkafuka ) and (Peers.TimeSinceLast(cAkafuka) < cHelloCooldown)
   then exit; //Anti-DoS
- rep.Create(true);
+ rep.Create;
  rep.Send;
 end;
 
 procedure tFundeluka.Create;
 begin
  inherited Create(cFundeluka);
- ID:=MyID;
+ ID.GetMy;
 end;
 
 procedure tAkafuka.Create(rcpt: tID);
 var a:byte;
 begin
- inherited Create(cAkafuka)
+ inherited Create(cAkafuka);
  ID:=rcpt;
 end;
 
