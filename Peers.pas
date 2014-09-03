@@ -5,7 +5,7 @@ uses GeneralPacket
     ,Keys
     ,Sockets
     ,UnixType
-    ,Classes
+    ,SysUtils
     ;
 
 const cAkafuka :tPkType = 1;
@@ -22,6 +22,7 @@ TYPE
  { Object to store Socket Address }
 
   function Length :word;
+   unimplemented;
   { Returns length of the structure based on address family }
 
   procedure Selected;
@@ -49,20 +50,17 @@ TYPE
   procedure Selected; {Creates a peer id of currently selected peer}
   { load id of currently selected peer }
   
-  procedure GetMy;
-  { Load our id }
-
  end;
   
 
  tAkafuka =packed object(GeneralPacket.T)
  {
   A Ping-Pong packet.
-  Name is reference to Zidan (Dávid)
+  Name is reference to Zidan (Dávid) Sufusky Sufurky
  }
 
   procedure Handle;
-  { OnRecieved }
+  { Executes approportiate actions to respond to this packet }
 
   procedure Send;
   { Computes length of the packet and calls send }
@@ -86,13 +84,11 @@ TYPE
   Exception signaling that peer has no associated sockaddr.
   Thus no packet can be sent.
  }
-
-  ID : tID;
-  { id of erroring peer }
-  
+  ID : tID; { id of erroring peer }
   constructor Create( iid :tID );
- 
  end;
+
+var ThisID :tID;
 
 function TimeSinceLast( pktype :GeneralPacket.tPkType ): System.tTime;
 { returns time since last packet from the peer of that type arrived }
@@ -104,7 +100,6 @@ procedure Select( ID :tID );
 IMPLEMENTATION
 uses 
      DataBase
-     ,SysUtils
      ;
 
 procedure OpenDB(var F: File; const id :tID; const Field :tField);
@@ -146,11 +141,10 @@ begin Result := Now - Last; end;
 procedure tAddr.SetNowLast;
 begin Last := Now; end;
 
-procedure Assoc( id: tID );
-{ Associate Selected with fpr }
+procedure Assoc( const nw: tNetAddr; const id: tID );
  experimental;
 var AddrF : file of tNetAddr;
-var Ex, Nw : tNetAddr;
+var Ex : tNetAddr;
 begin
  Nw.Selected;
  OpenDB( AddrF, id, cAddrField);
@@ -166,6 +160,13 @@ begin
  finally
   close(AddrF);
  end;
+end;
+
+procedure Assoc( const id: tID );
+var Nw : tNetAddr;
+begin
+ Nw.Selected;
+ Assoc( nw, id );
 end;
 
 procedure Remove( const nw :tNetAddr );
@@ -232,6 +233,7 @@ procedure tAkafuka.Handle;
 var rep:tFundeluka;
 begin
  Peers.Assoc (ID); {Associate sender's sockaddr with fingerprint.}
+ Assoc(YouSock, ThisID); {Associate reported }
  Peers.Save (true); {Save the peer socaddr to permanent peer cache}
  if (pktype=cAkafuka ) and (Peers.TimeSinceLast(cAkafuka) > cHelloCooldown) then begin
   rep.Create;
@@ -242,7 +244,7 @@ end;
 constructor tAkafuka.Create;
 begin
  inherited Create(cFundeluka);
- ID.GetMy;
+ ID:=ThisID;
  YouSock.Selected;
 end;
 
@@ -259,13 +261,28 @@ begin
  Repl(sizeof(self));
 end;
 
-var SelectedID : tID;
-var SelectedAddr :tNetAddr;
+var SelectedID : tID unimplemented;
+var SelectedAddr :tNetAddr unimplemented;
 
-procedure Select( ID :tID );
+procedure Select( ID :tID );  unimplemented;
 begin
  AbstractError;
  raise eNoAddress.Create( id );
+end;
+
+function tNetAddr.Length :Word;
+begin
+ result:=sizeof(self);
+end;
+
+procedure tNetAddr.Selected;
+begin
+ self:=SelectedAddr;
+end;
+
+procedure tID.Selected;
+begin
+ self:=SelectedID;
 end;
 
 constructor eNoAddress.Create( iid :tID );
