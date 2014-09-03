@@ -12,6 +12,7 @@ type
   pktype :tPktype;
   procedure Recv(MaxLen:LongInt);
   constructor Create (itp :tPktype);
+  procedure Handle; unimplemented;
   procedure Repl(MaxLen:LongInt);
  end;
 
@@ -32,5 +33,6 @@ begin
  pktype := itp;
 end;
 
+procedure T.Handle; begin AbstractError; end;
 
 END.

@@ -13,12 +13,12 @@ var Prefix :string ='./data';
 
 const FieldExtension :string='dat';
 
-procedure Open( var F :File; const Table :tTable; const Row :tRow; const Field :tField );
+procedure Open( out F :File; const Table :tTable; const Row :tRow; const Field :tField );
 
 IMPLEMENTATION
 uses SysUtils;
 
-procedure Open( var F :File; const Table :tTable; const Row :tRow; const Field :tField );
+procedure Open( out F :File; const Table :tTable; const Row :tRow; const Field :tField );
 var path,name :tFileName;
 begin
  path:=
