@@ -214,4 +214,12 @@ begin
  Repl(sizeof(self));
 end;
 
+var SelectedID : tID;
+var SelectedAddr :tNetAddr;
+
+procedure Select( ID :tID );
+begin
+ AbstractError;
+end;
+
 END.
