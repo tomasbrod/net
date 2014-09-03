@@ -18,14 +18,20 @@ const cHelloCooldown = 5000{ms};
 TYPE
 
  tNetAddr=object
+ { Object to store Socket Address }
+
   function Length :word;
+  { Returns length of the structure based on address family }
+
   procedure Selected;
+  { load currently selected address }
+
   private
   data :record
   case Family :word of 
    AF_INET :( inet :record 
-     sin_port: cushort;
-     sin_addr: tInAddr;
+    sin_port: cushort;
+    sin_addr: tInAddr;
    end; );
    0 :(
     pad_pV4IlkA4mKQL :array [0..128] of byte;
@@ -34,29 +40,53 @@ TYPE
  end;
  
  tID=object(Keys.tHash)
+ {
+  Unique identifier of the peer.
+  Technicaly a 160bit SHA1 hash of master public key of peer.
+ }
+
   procedure Selected; {Creates a peer id of currently selected peer}
+  { load id of currently selected peer }
+  
   procedure GetMy;
+  { Load our id }
+
  end;
   
 
  tAkafuka =packed object(GeneralPacket.T)
+ {
+  A Ping-Pong packet.
+  Name is reference to Zidan (Dávid)
+ }
+
   procedure Handle;
+  { OnRecieved }
+
   procedure Send;
+  { Computes length of the packet and calls send }
+
   constructor Create(rcpt: tID); {akafuka}
+  { Creates an akafuka packet }
+
   constructor Create; {fundeluka}
+  { Creates fundeluka packet }
+
   private
-  ID :tID;
-  Load: byte; //Let it be byte. No byte-orde as in Single
-  YouSock :Peers.tNetAddr;
+  ID :tID; { of sender }
+  Load: byte unimplemented; { load of the sender's system }
+  YouSock :Peers.tNetAddr; { address, the packet was sent to }
  end;
+
  tFundeluka=tAkafuka;
  
 
 function TimeSinceLast( pktype :GeneralPacket.tPkType ): System.tTime;
-(* returns time since last packet from the peer of that type arrived *)
+{ returns time since last packet from the peer of that type arrived }
  unimplemented;
 
 procedure Select( ID :tID );
+{ Selects peer with given ID and automatically picks an sockaddr }
 
 IMPLEMENTATION
 uses 
@@ -104,7 +134,7 @@ procedure tAddr.SetNowLast;
 begin Last := Now; end;
 
 procedure Assoc( id: tID );
-(* Associate Selected with fpr *)
+{ Associate Selected with fpr }
  experimental;
 var AddrF : file of tNetAddr;
 var Ex, Nw : tNetAddr;
@@ -161,7 +191,7 @@ begin
 end;
 
 procedure Save( really{?} :boolean );
-(* Save the currently selected peer's info *)
+{ Save the currently selected peer's info }
  deprecated;
 begin
  AbstractError;
