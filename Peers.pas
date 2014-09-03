@@ -5,6 +5,7 @@ uses GeneralPacket
     ,Keys
     ,Sockets
     ,UnixType
+    ,Classes
     ;
 
 const cAkafuka :tPkType = 1;
@@ -80,6 +81,18 @@ TYPE
 
  tFundeluka=tAkafuka;
  
+ eNoAddress = class(Exception)
+ {
+  Exception signaling that peer has no associated sockaddr.
+  Thus no packet can be sent.
+ }
+
+  ID : tID;
+  { id of erroring peer }
+  
+  constructor Create( iid :tID );
+ 
+ end;
 
 function TimeSinceLast( pktype :GeneralPacket.tPkType ): System.tTime;
 { returns time since last packet from the peer of that type arrived }
@@ -252,6 +265,15 @@ var SelectedAddr :tNetAddr;
 procedure Select( ID :tID );
 begin
  AbstractError;
+ raise eNoAddress.Create( id );
+end;
+
+constructor eNoAddress.Create( iid :tID );
+var idstr:string;
+begin
+ iid.ToString(idstr);
+ inherited Create( 'No Address associated to Peer '+idstr );
+ id:=iid;
 end;
 
 END.
