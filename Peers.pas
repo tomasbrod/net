@@ -8,6 +8,8 @@ uses GeneralPacket
     ,SysUtils
     ;
 
+{ TODO: OnAnyPacketReceive : Assoc }
+
 const cAkafuka :tPkType = 1;
 const cAkafukaN :string='Akafuka'  experimental;
 const cFundeluka :tPkType = 2;
@@ -141,6 +143,8 @@ begin Result := Now - Last; end;
 procedure tAddr.SetNowLast;
 begin Last := Now; end;
 
+procedure Assoc( const nw: tNetAddr ); forward;
+
 procedure Assoc( const nw: tNetAddr; const id: tID );
  experimental;
 var AddrF : file of tNetAddr;
@@ -161,6 +165,8 @@ begin
   close(AddrF);
  end;
 end;
+
+
 
 procedure Assoc( const id: tID );
 var Nw : tNetAddr;
