@@ -19,8 +19,8 @@ TYPE
 
  tNetAddr=object
   function Length :word;
-  procedure GetSender; {Creates from sender of the message}
-  public
+  procedure Selected;
+  private
   data :record
   case Family :word of 
    AF_INET :( inet :record 
@@ -34,7 +34,7 @@ TYPE
  end;
  
  tID=object(Keys.tHash)
-  procedure GetSelected; {Creates a peer id of currently selected peer}
+  procedure Selected; {Creates a peer id of currently selected peer}
   procedure GetMy;
  end;
   
@@ -42,22 +42,21 @@ TYPE
  tAkafuka =packed object(GeneralPacket.T)
   procedure Handle;
   procedure Send;
-  procedure Create(rcpt: tID); overload;
+  constructor Create(rcpt: tID); {akafuka}
+  constructor Create; {fundeluka}
   private
   ID :tID;
   Load: byte; //Let it be byte. No byte-orde as in Single
   YouSock :Peers.tNetAddr;
  end;
-
- tFundeluka =packed object(tAkafuka)
-  procedure Create; overload;
- end;
+ tFundeluka=tAkafuka;
+ 
 
 function TimeSinceLast( pktype :GeneralPacket.tPkType ): System.tTime;
 (* returns time since last packet from the peer of that type arrived *)
  unimplemented;
 
-procedure Select( fpr :keys.tFingerprint );
+procedure Select( ID :tID );
 
 IMPLEMENTATION
 uses 
@@ -104,14 +103,13 @@ begin Result := Now - Last; end;
 procedure tAddr.SetNowLast;
 begin Last := Now; end;
 
-
 procedure Assoc( id: tID );
-(* Associate sender with fpr *)
+(* Associate Selected with fpr *)
  experimental;
 var AddrF : file of tNetAddr;
 var Ex, Nw : tNetAddr;
 begin
- Nw.GetSender;
+ Nw.Selected;
  OpenDB( AddrF, id, cAddrField);
  try
   while not eof(AddrF) do begin
@@ -134,7 +132,7 @@ var Ex : tNetAddr;
 var nwpos: int64;
 var ID : tID;
 begin
- id.GetSelected;
+ id.Selected;
  OpenDB( AddrF, id, cAddrField);
  try
   while not EoF(AddrF) do begin
@@ -176,7 +174,7 @@ var F : file of System.tDateTime;
 var cur: System.tDateTime;
 var ID : tID;
 begin
- id.GetSelected;
+ id.Selected;
  OpenDB( F, id, cLastField);
  try
   Seek(F, pktype);
@@ -192,19 +190,19 @@ var rep:tFundeluka;
 begin
  Peers.Assoc (ID); {Associate sender's sockaddr with fingerprint.}
  Peers.Save (true); {Save the peer socaddr to permanent peer cache}
- if (pktype=cAkafuka ) and (Peers.TimeSinceLast(cAkafuka) < cHelloCooldown)
-  then exit; //Anti-DoS
- rep.Create;
- rep.Send;
+ if (pktype=cAkafuka ) and (Peers.TimeSinceLast(cAkafuka) > cHelloCooldown) then begin
+  rep.Create;
+  rep.Send;
+ end;
 end;
 
-procedure tFundeluka.Create;
+constructor tAkafuka.Create;
 begin
  inherited Create(cFundeluka);
  ID.GetMy;
 end;
 
-procedure tAkafuka.Create(rcpt: tID);
+constructor tAkafuka.Create(rcpt: tID);
 var a:byte;
 begin
  inherited Create(cAkafuka);

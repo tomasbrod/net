@@ -11,7 +11,7 @@ type
  T =object
   pktype :tPktype;
   procedure Recv(MaxLen:LongInt);
-  procedure Create (itp :tPktype);
+  constructor Create (itp :tPktype);
   procedure Repl(MaxLen:LongInt);
  end;
 
@@ -27,7 +27,7 @@ begin
  ReplProc(self,MaxLen);
 end;
 
-procedure T.Create (itp :tPktype);
+constructor T.Create (itp :tPktype);
 begin
  pktype := itp;
 end;

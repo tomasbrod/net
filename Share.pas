@@ -14,8 +14,8 @@ const cMaxTagsPerFile=284;
 type
  T =packed object(GeneralPacket.T)
   procedure Handle;
-  procedure Create; (* ASK packet *)
-  procedure Create( ifh :Keys.tHash ); (* PUT packet *)
+  constructor Create; (* ASK packet *)
+  constructor Create( ifh :Keys.tHash ); (* PUT packet *)
   procedure AddTag( itag :FileTag.T );
   procedure AddTag( itag :string ); (* automatically converts to tTagHash *)
   procedure Send;
@@ -28,7 +28,7 @@ IMPLEMENTATION
 uses Peers
     ;
 
-procedure T.Create;
+constructor T.Create;
 var i:integer;
 begin
  inherited Create(cReq);
@@ -36,7 +36,7 @@ begin
  for i:=low(tags) to high(tags) do tags[i].Clear;
 end;
 
-procedure T.Create ( ifh :Keys.tHash );
+constructor T.Create ( ifh :Keys.tHash );
 begin
  Create;
  fh:=ifh;
