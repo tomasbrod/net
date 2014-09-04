@@ -150,7 +150,7 @@ procedure Assoc( const nw: tNetAddr; const id: tID );
 var AddrF : file of tNetAddr;
 var Ex : tNetAddr;
 begin
- Nw.Selected;
+ if nw.data.Family = 0 then exit; {Do not associate with nil address}
  OpenDB( AddrF, id, cAddrField);
  try
   while not eof(AddrF) do begin
@@ -187,23 +187,18 @@ begin
  try
   while not EoF(AddrF) do begin
    Read(AddrF, Ex);
-
    if Ex=Nw then begin
     nwpos:=FilePos(AddrF)-1; {Pos of the offending record}
-    if EoF(AddrF) then begin {offending record is the last}
-     Seek(AddrF, nwpos);
-     Truncate(AddrF);
-    end else begin
+    if not EoF(AddrF) then begin
      Seek(AddrF, FileSize(AddrF)-1);
      Read(AddrF, Ex);
-     Seek(AddrF, FileSize(AddrF)-1);
-     Truncate(AddrF);
      Seek(AddrF, nwpos);
-     Write(AddrF, nw);
+     Write(AddrF, Ex);
     end;
-    {Do not break; even if there should be no more, but just in case} continue;
+    Seek(AddrF, FileSize(AddrF)-1);
+    Truncate(AddrF);
+    break;
    end;
-
   end {while};
  finally
   close(AddrF);
@@ -245,25 +240,26 @@ begin
   rep.Create;
   rep.Send;
  end;
+ ResetTimeSince(cAkafuka);
 end;
 
-constructor tAkafuka.Create;
+constructor tFundeluka.Create;
 begin
  inherited Create(cFundeluka);
  ID:=ThisID;
  YouSock.Selected;
 end;
 
-constructor tAkafuka.Create(rcpt: tID);
-var a:byte;
+constructor tAkafuka.Create;
 begin
  inherited Create(cAkafuka);
- ID:=rcpt;
+ ID:=ThisID;
  YouSock.Selected;
 end;
 
 procedure tAkafuka.Send;
 begin
+ {$NOTE Do Not send Padding over the network}
  Repl(sizeof(self));
 end;
 
@@ -283,11 +279,13 @@ end;
 
 procedure tNetAddr.Selected;
 begin
+ if (not IsSelectedAddr) then AbstractError;
  self:=SelectedAddr;
 end;
 
 procedure tID.Selected;
 begin
+ if (not IsSelectedID) then AbstractError;
  self:=SelectedID;
 end;
 

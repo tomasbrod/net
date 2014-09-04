@@ -18,10 +18,12 @@ TYPE{s}
   procedure FromString( s :string );
    experimental;
   private
-  data :array [0..20] of byte;
+  data :array [1..20] of byte;
  end;
 
  tFingerprint =tHash Deprecated;
+
+Operator = (aa, ab :tHash) b : boolean;
 
 VAR
  MyFilgerPrint: tFingerPrint unimplemented;
@@ -62,5 +64,14 @@ begin
  for i:=low(data) to high(data)
   do data[i]:=StrToInt( 'x'+Copy(s, (2*i)-1, 2) );
 end;
+
+Operator = (aa, ab :tHash) b : boolean;
+var i :byte;
+begin
+ b:=false;
+ for i:=low(aa.data) to high(aa.data) do if aa.data[i]<>ab.data[i] then exit;
+ b:=true;
+end;
+
 
 END.
