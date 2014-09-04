@@ -107,9 +107,10 @@ var IsSelectedAddr :boolean;
 
 function TimeSince( pktype :GeneralPacket.tPkType ): System.tTime;
 { returns time since last packet from the peer of that type arrived }
- unimplemented;
+ experimental;
 
 procedure ResetTimeSince( pktype :GeneralPacket.tPkType );
+ experimental;
 
 procedure Select( ID :tID );
  experimental;
@@ -148,7 +149,9 @@ begin
  if aa.data.Family<>ab.data.Family then exit;
  case aa.data.Family of
   Sockets.AF_INET: if (aa.data.inet.sin_port<>ab.data.inet.sin_port) or (aa.data.inet.sin_addr<>ab.data.inet.sin_addr) then exit;
-  else exit;
+  Sockets.AF_INET6: AbstractError;
+  0: {null addresses are always equal};
+  else AbstractError;
  end;
  b:=true;
 end;
@@ -167,6 +170,10 @@ function tAddr.TimeSinceLast :System.tTime;
 begin Result := Now - Last; end;
 procedure tAddr.SetNowLast;
 begin Last := Now; end;
+
+{*********************************
+ *********** Addresses *********** 
+ *********************************}
 
 procedure Assoc( const nw: tNetAddr; const id: tID );
  experimental;
@@ -241,6 +248,33 @@ begin
  AbstractError;
 end;
 
+procedure Select( ID :tID );
+{- All addresses in the db were available at last Akafuka}
+var F : file of tNetAddr;
+var cur : tNetAddr;
+begin
+ if (IsSelectedAddr and IsSelectedID) and (SelectedID = ID) then exit;
+ OpenDB( F, id, cAddrField);
+ try
+  if eof(F) then raise eNoAddress.Create(ID);
+  while not eof(F) do begin
+   Read(F, cur);
+   if true then break;
+   {$NOTE Selects only first address from the db.}
+  end;
+ finally
+  close(F);
+ end;
+ SelectedID:=ID;
+ SelectedAddr:=cur;
+ IsSelectedID:=true;
+ IsSelectedAddr:=true;
+end;
+
+{****************************************
+ *********** Last Packet time *********** 
+ ****************************************}
+
 const cLastField :DataBase.tField = 'last';
 
 function TimeSince( pktype :GeneralPacket.tPkType ): System.tTime;
@@ -275,30 +309,9 @@ begin
  end;
 end;
 
-procedure tAkafuka.Handle;
-var rep:tFundeluka;
-begin
- Assoc (ID); {Associate sender's sockaddr with fingerprint.}
- if (Peers.TimeSince(cAkafuka) > cHelloCooldown) then begin
-  rep.Create;
-  rep.Send;
- end;
- ResetTimeSince(cAkafuka);
-end;
-
-constructor tFundeluka.Create;
-begin
- inherited Create(cFundeluka);
- ID:=ThisID;
- YouSock.Selected;
-end;
-
-constructor tAkafuka.Create;
-begin
- inherited Create(cAkafuka);
- ID:=ThisID;
- YouSock.Selected;
-end;
+{*********************************
+ *********** Akafuka   ***********
+ *********************************}
 
 const cAkafukaProgressField :tField = 'akafuka';
 
@@ -324,6 +337,17 @@ begin
  finally
   close(F);
  end;
+end;
+
+procedure tAkafuka.Handle;
+var fundeluka:tFundeluka;
+begin
+ Assoc (ID); {Associate sender's sockaddr with fingerprint.}
+ if (Peers.TimeSince(cAkafuka) > cHelloCooldown) then begin
+  fundeluka.Create;
+  fundeluka.Send;
+ end;
+ ResetTimeSince(cAkafuka);
 end;
 
 procedure tFundeluka.Handle;
@@ -359,33 +383,37 @@ begin
  end;
 end;
 
+procedure DoAkafuka;
+{
+ Go through each peer and
+  - Remove timeouted in akafuka.dat
+  - Resend Akafuka in akafuka.dat
+  - Send Akafuka in addr.dat
+}
+begin
+ AbstractError;
+end;
+
+{ *** Simple Uninteresting Bullshit ***}
+
+constructor tFundeluka.Create;
+begin
+ inherited Create(cFundeluka);
+ ID:=ThisID;
+ YouSock.Selected;
+end;
+
+constructor tAkafuka.Create;
+begin
+ inherited Create(cAkafuka);
+ ID:=ThisID;
+ YouSock.Selected;
+end;
+
 procedure tFundeluka.Send;
 begin
  {$NOTE Do Not send Padding over the network}
  Repl(sizeof(self));
-end;
-
-procedure Select( ID :tID );
-{- All addresses in the db were available at last Akafuka}
-var F : file of tNetAddr;
-var cur : tNetAddr;
-begin
- if (IsSelectedAddr and IsSelectedID) and (SelectedID = ID) then exit;
- OpenDB( F, id, cAddrField);
- try
-  if eof(F) then raise eNoAddress.Create(ID);
-  while not eof(F) do begin
-   Read(F, cur);
-   if true then break;
-   {$NOTE Selects only first address from the db.}
-  end;
- finally
-  close(F);
- end;
- SelectedID:=ID;
- SelectedAddr:=cur;
- IsSelectedID:=true;
- IsSelectedAddr:=true;
 end;
 
 function tNetAddr.Length :Word;
@@ -411,11 +439,6 @@ begin
  iid.ToString(idstr);
  inherited Create( 'No Address associated to Peer '+idstr );
  id:=iid;
-end;
-
-procedure DoAkafuka;
-begin
- AbstractError;
 end;
 
 procedure Reset;
