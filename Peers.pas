@@ -65,13 +65,10 @@ TYPE
   { Executes approportiate actions to respond to this packet }
 
   procedure Send;
-  { Computes length of the packet and calls send }
+  { mark selected address as akafuka and actually sends the packet }
 
-  constructor Create(rcpt: tID); {akafuka}
-  { Creates an akafuka packet }
-
-  constructor Create; {fundeluka}
-  { Creates fundeluka packet }
+  constructor Create; overload;
+  { Creates akafuka packet }
 
   private
   ID :tID; { of sender }
@@ -79,7 +76,18 @@ TYPE
   YouSock :Peers.tNetAddr; { address, the packet was sent to }
  end;
 
- tFundeluka=tAkafuka;
+ tFundeluka=object(tAkafuka)
+
+  procedure Handle;
+  { unmarkd selected address as akafuka, computes AkafukaDelta }
+
+  procedure Send;
+  { Computes length of the packet and calls send }
+
+  constructor Create; overload;
+  { Creates fundeluka packet }
+
+ end;
  
  eNoAddress = class(Exception)
  {
@@ -89,15 +97,32 @@ TYPE
   ID : tID; { id of erroring peer }
   constructor Create( iid :tID );
  end;
-
+ 
 var ThisID :tID;
 
-function TimeSinceLast( pktype :GeneralPacket.tPkType ): System.tTime;
+var SelectedID : tID;
+var SelectedAddr :tNetAddr;
+var IsSelectedID : boolean;
+var IsSelectedAddr :boolean;
+
+function TimeSince( pktype :GeneralPacket.tPkType ): System.tTime;
 { returns time since last packet from the peer of that type arrived }
  unimplemented;
 
+procedure ResetTimeSince( pktype :GeneralPacket.tPkType );
+
 procedure Select( ID :tID );
+ experimental;
 { Selects peer with given ID and automatically picks an sockaddr }
+
+procedure DoAkafuka;
+ unimplemented;
+{
+ Send Akafuke to all peers.
+ Remove not responding peers.
+}
+
+procedure Reset;
 
 IMPLEMENTATION
 uses 
@@ -143,8 +168,6 @@ begin Result := Now - Last; end;
 procedure tAddr.SetNowLast;
 begin Last := Now; end;
 
-procedure Assoc( const nw: tNetAddr ); forward;
-
 procedure Assoc( const nw: tNetAddr; const id: tID );
  experimental;
 var AddrF : file of tNetAddr;
@@ -166,7 +189,13 @@ begin
  end;
 end;
 
-
+procedure Assoc( const nw: tNetAddr );
+ unimplemented;
+ {
+  Search for a peer with the address and associate .
+  Or send akafuka to get the id.
+ }
+begin AbstractError; end;
 
 procedure Assoc( const id: tID );
 var Nw : tNetAddr;
@@ -214,7 +243,7 @@ end;
 
 const cLastField :DataBase.tField = 'last';
 
-function TimeSinceLast( pktype :GeneralPacket.tPkType ): System.tTime;
+function TimeSince( pktype :GeneralPacket.tPkType ): System.tTime;
 var F : file of System.tDateTime;
 var cur: System.tDateTime;
 var ID : tID;
@@ -230,13 +259,27 @@ begin
  result := now - cur;
 end;
 
+procedure ResetTimeSince( pktype :GeneralPacket.tPkType );
+var F : file of System.tDateTime;
+var cur: System.tDateTime;
+var ID : tID;
+begin
+ id.Selected;
+ cur:=now;
+ OpenDB( F, id, cLastField);
+ try
+  Seek(F, pktype);
+  write(F, cur);
+ finally
+  close(F);
+ end;
+end;
+
 procedure tAkafuka.Handle;
 var rep:tFundeluka;
 begin
- Peers.Assoc (ID); {Associate sender's sockaddr with fingerprint.}
- Assoc(YouSock, ThisID); {Associate reported }
- Peers.Save (true); {Save the peer socaddr to permanent peer cache}
- if (pktype=cAkafuka ) and (Peers.TimeSinceLast(cAkafuka) > cHelloCooldown) then begin
+ Assoc (ID); {Associate sender's sockaddr with fingerprint.}
+ if (Peers.TimeSince(cAkafuka) > cHelloCooldown) then begin
   rep.Create;
   rep.Send;
  end;
@@ -257,19 +300,92 @@ begin
  YouSock.Selected;
 end;
 
+const cAkafukaProgressField :tField = 'akafuka';
+
+type tAkafukaProgress=record
+ Addr :tNetAddr;
+ Since :System.tDateTime;
+end;
+
 procedure tAkafuka.Send;
+var F :file of tAkafukaProgress;
+var C :tAkafukaProgress;
+begin
+ {$NOTE Do Not send Padding over the network}
+ Repl(sizeof(self));
+ {Remove selected addr from db and append it to akafuka db}
+ C.Addr:=SelectedAddr;
+ C.Since:=Now;
+ Remove(SelectedAddr);
+ OpenDB(F, SelectedID, cAkafukaProgressField);
+ try
+  Seek(F, FileSize(F));
+  Write(F, C);
+ finally
+  close(F);
+ end;
+end;
+
+procedure tFundeluka.Handle;
+var F :file of tAkafukaProgress;
+var C, Ex :tAkafukaProgress;
+var Delta :System.tTime;
+var nwpos :int64;
+begin
+ Assoc (ID);
+ Assoc (YouSock, ThisID); {associate reported address to us}
+ { The assoc re-adds peer to db. Now remove it from akafuka db}
+ OpenDB(F, SelectedID, cAkafukaProgressField);
+ {$NOTE Implement Generic file delete.}
+ try
+  while not EoF(F) do begin
+   Read(F, C);
+   if C.Addr = SelectedAddr then begin
+    Delta:= Now - C.Since;
+    nwpos:=FilePos(F)-1; {Pos of the offending record}
+    if not EoF(F) then begin
+     Seek(F, FileSize(F)-1);
+     Read(F, Ex);
+     Seek(F, nwpos);
+     Write(F, Ex);
+    end;
+    Seek(F, FileSize(F)-1);
+    Truncate(F);
+    break;
+   end;
+  end;
+ finally
+  close(F);
+ end;
+end;
+
+procedure tFundeluka.Send;
 begin
  {$NOTE Do Not send Padding over the network}
  Repl(sizeof(self));
 end;
 
-var SelectedID : tID unimplemented;
-var SelectedAddr :tNetAddr unimplemented;
-
-procedure Select( ID :tID );  unimplemented;
+procedure Select( ID :tID );
+{- All addresses in the db were available at last Akafuka}
+var F : file of tNetAddr;
+var cur : tNetAddr;
 begin
- AbstractError;
- raise eNoAddress.Create( id );
+ if (IsSelectedAddr and IsSelectedID) and (SelectedID = ID) then exit;
+ OpenDB( F, id, cAddrField);
+ try
+  if eof(F) then raise eNoAddress.Create(ID);
+  while not eof(F) do begin
+   Read(F, cur);
+   if true then break;
+   {$NOTE Selects only first address from the db.}
+  end;
+ finally
+  close(F);
+ end;
+ SelectedID:=ID;
+ SelectedAddr:=cur;
+ IsSelectedID:=true;
+ IsSelectedAddr:=true;
 end;
 
 function tNetAddr.Length :Word;
@@ -295,6 +411,17 @@ begin
  iid.ToString(idstr);
  inherited Create( 'No Address associated to Peer '+idstr );
  id:=iid;
+end;
+
+procedure DoAkafuka;
+begin
+ AbstractError;
+end;
+
+procedure Reset;
+begin
+ IsSelectedID:=false;
+ IsSelectedAddr:=false;
 end;
 
 END.
