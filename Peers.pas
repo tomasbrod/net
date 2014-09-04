@@ -16,7 +16,7 @@ const cFundeluka :tPkType = 2;
 const cFundelukaN :string = 'Fundeluka'  experimental;
 //const PkAccept :set of tPkType = [cAkafuka, cFundeluka];
 
-const cHelloCooldown = 5000{ms};
+const cAkafukaCooldown = 5000{ms};
 const cAkafukaRetry = 8{times};
 const cAkafukaMaxDelta = 600000{ms}; {10 minutes to ping? Heh!}
 
@@ -347,7 +347,7 @@ procedure tAkafuka.Handle;
 var fundeluka:tFundeluka;
 begin
  Assoc (ID); {Associate sender's sockaddr with fingerprint.}
- if (Peers.TimeSince(cAkafuka) > cHelloCooldown) then begin
+ if (Peers.TimeSince(cAkafuka) > cAkafukaCooldown) then begin
   fundeluka.Create;
   fundeluka.Send;
  end;
