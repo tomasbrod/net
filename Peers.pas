@@ -31,6 +31,9 @@ TYPE
 
   procedure Selected;
   { load currently selected address }
+  
+  procedure ToSocket( var sockaddr :tSockAddr; const socklen :tSockLen);
+   unimplemented;
 
   private
   data :record
@@ -437,6 +440,11 @@ procedure tID.Selected;
 begin
  if (not IsSelectedID) then AbstractError;
  self:=SelectedID;
+end;
+
+procedure tNetAddr.ToSocket( var sockaddr :tSockAddr; const socklen :tSockLen);
+begin
+ AbstractError;
 end;
 
 constructor eNoAddress.Create( iid :tID );
