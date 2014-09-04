@@ -17,6 +17,8 @@ const cFundelukaN :string = 'Fundeluka'  experimental;
 //const PkAccept :set of tPkType = [cAkafuka, cFundeluka];
 
 const cHelloCooldown = 5000{ms};
+const cAkafukaRetry = 8{times};
+const cAkafukaMaxDelta = 600000{ms}; {10 minutes to ping? Heh!}
 
 TYPE
 
@@ -318,6 +320,7 @@ const cAkafukaProgressField :tField = 'akafuka';
 type tAkafukaProgress=record
  Addr :tNetAddr;
  Since :System.tDateTime;
+ Retry :Word;
 end;
 
 procedure tAkafuka.Send;
@@ -329,6 +332,7 @@ begin
  {Remove selected addr from db and append it to akafuka db}
  C.Addr:=SelectedAddr;
  C.Since:=Now;
+ C.Retry:=1;
  Remove(SelectedAddr);
  OpenDB(F, SelectedID, cAkafukaProgressField);
  try
@@ -381,6 +385,8 @@ begin
  finally
   close(F);
  end;
+ if Delta>cAkafukaMaxDelta then Remove(SelectedAddr);
+ { Drop the peer if delta excedes limit }
 end;
 
 procedure DoAkafuka;
