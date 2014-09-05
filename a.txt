@@ -13,6 +13,31 @@ And should serve the following
 3. Keyword Searches
 4. MeSsages
 
+Units
+-----
+
+The source code is divided into following units.
+
+ File       | Description 
+-----------:|-------------
+[Peers.pas]		| Client evidence. Akafukas.
+[Share.pas]		| Searching. Delivery of results.
+[Tag.pas]		| Tags hashing. Tags of files and peers. Matching tags.
+[DataBase.pas]	| Generic 4-dimensional file database.
+[GeneralPacket.pas] | Common fields in all packets.
+[Keys.pas]		| Cryptographic operations and data structures.
+[Test.pas]		| Unit Tests.
+[brodnetd.pp]	| Connection handler.
+
+[Peers.pas]: Peers.pas
+[Share.pas]: Share.pas
+[Tag.pas]: Tag.pas
+[DataBase.pas]: DataBase.pas
+[GeneralPacket.pas]: GeneralPacket.pas
+[Keys.pas]: Keys.pas
+
+
+
 Daemons and Services
 --------------------
 

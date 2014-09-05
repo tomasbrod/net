@@ -14,6 +14,7 @@ type
   constructor Create (itp :tPktype);
   procedure Handle; unimplemented;
   procedure Repl(MaxLen:LongInt);
+   deprecated; { bad design }
  end;
 
 IMPLEMENTATION
