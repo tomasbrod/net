@@ -4,7 +4,7 @@ INTERFACE
 
 TYPE{s}
 
- tHash=object
+ tHash= packed object
   procedure Clear;
    experimental;
   function isNil :boolean;

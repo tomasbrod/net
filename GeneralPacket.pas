@@ -8,7 +8,7 @@ var
 
 type
  tPktype =byte;
- T =object
+ T = packed object
   pktype :tPktype;
   procedure Recv(MaxLen:LongInt);
   constructor Create (itp :tPktype);

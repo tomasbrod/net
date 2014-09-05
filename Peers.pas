@@ -22,11 +22,11 @@ const cAkafukaMaxDelta = 600000{ms}; {10 minutes to ping? Heh!}
 
 TYPE
 
- tNetAddr=object
+ tNetAddr= packed object
  { Object to store Socket Address }
 
   function Length :word;
-   unimplemented;
+   experimental;
   { Returns length of the structure based on address family }
 
   procedure Selected;
@@ -37,7 +37,8 @@ TYPE
 
   private
   data :record
-  case Family :word of 
+  case Family : byte of 
+   { note: maximum family is 32 so byte is enough }
    AF_INET :( inet :record 
     sin_port: cushort;
     sin_addr: tInAddr;
@@ -48,7 +49,7 @@ TYPE
   end;
  end;
  
- tID=object(Keys.tHash)
+ tID= packed object(Keys.tHash)
  {
   Unique identifier of the peer.
   Technicaly a 160bit SHA1 hash of master public key of peer.
@@ -81,7 +82,7 @@ TYPE
   YouSock :Peers.tNetAddr; { address, the packet was sent to }
  end;
 
- tFundeluka=object(tAkafuka)
+ tFundeluka= packed object(tAkafuka)
 
   procedure Handle;
   { unmarkd selected address as akafuka, computes AkafukaDelta }
@@ -409,7 +410,11 @@ end;
 
 function tNetAddr.Length :Word;
 begin
- result:=sizeof(self);
+ case data.Family of
+  0: result:=sizeof(self)-sizeof(data);
+  Sockets.AF_INET: result:=sizeof( data.inet );
+  else result:=sizeof(self);
+ end;
 end;
 
 procedure tNetAddr.Selected;
