@@ -182,6 +182,7 @@ begin Last := Now; end;
 
 procedure Assoc( const nw: tNetAddr; const id: tID );
  experimental;
+ { Associate network address *to* id }
 var AddrF : file of tNetAddr;
 var Ex : tNetAddr;
 begin
@@ -220,7 +221,6 @@ procedure Remove( const nw :tNetAddr );
  experimental;
 var AddrF : file of tNetAddr;
 var Ex : tNetAddr;
-var nwpos: int64;
 var ID : tID;
 begin
  id.Selected;
@@ -229,15 +229,7 @@ begin
   while not EoF(AddrF) do begin
    Read(AddrF, Ex);
    if Ex=Nw then begin
-    nwpos:=FilePos(AddrF)-1; {Pos of the offending record}
-    if not EoF(AddrF) then begin
-     Seek(AddrF, FileSize(AddrF)-1);
-     Read(AddrF, Ex);
-     Seek(AddrF, nwpos);
-     Write(AddrF, Ex);
-    end;
-    Seek(AddrF, FileSize(AddrF)-1);
-    Truncate(AddrF);
+    Database.UnInsert(AddrF);
     break;
    end;
   end {while};
@@ -257,16 +249,18 @@ procedure Select( ID :tID );
 {- All addresses in the db were available at last Akafuka}
 var F : file of tNetAddr;
 var cur : tNetAddr;
+label Found;
 begin
  if (IsSelectedAddr and IsSelectedID) and (SelectedID = ID) then exit;
  OpenDB( F, id, cAddrField);
  try
-  if eof(F) then raise eNoAddress.Create(ID);
   while not eof(F) do begin
    Read(F, cur);
-   if true then break;
+   if true then goto Found;
    {$NOTE Selects only first address from the db.}
   end;
+  raise eNoAddress.Create(ID);
+  Found:
  finally
   close(F);
  end;
@@ -359,29 +353,19 @@ end;
 
 procedure tFundeluka.Handle;
 var F :file of tAkafukaProgress;
-var C, Ex :tAkafukaProgress;
+var C :tAkafukaProgress;
 var Delta :System.tTime;
-var nwpos :int64;
 begin
  Assoc (ID);
  Assoc (YouSock, ThisID); {associate reported address to us}
  { The assoc re-adds peer to db. Now remove it from akafuka db}
  OpenDB(F, SelectedID, cAkafukaProgressField);
- {$NOTE Implement Generic file delete.}
  try
   while not EoF(F) do begin
    Read(F, C);
    if C.Addr = SelectedAddr then begin
     Delta:= Now - C.Since;
-    nwpos:=FilePos(F)-1; {Pos of the offending record}
-    if not EoF(F) then begin
-     Seek(F, FileSize(F)-1);
-     Read(F, Ex);
-     Seek(F, nwpos);
-     Write(F, Ex);
-    end;
-    Seek(F, FileSize(F)-1);
-    Truncate(F);
+    Database.UnInsert(F);
     break;
    end;
   end;
