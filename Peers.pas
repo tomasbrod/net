@@ -324,8 +324,7 @@ procedure tAkafuka.Send;
 var F :file of tAkafukaProgress;
 var C :tAkafukaProgress;
 begin
- {$NOTE Do Not send Padding over the network}
- Repl(sizeof(self));
+ Repl(sizeof(SELF) - (Sizeof(YouSock)-YouSock.Length) );
  {Remove selected addr from db and append it to akafuka db}
  C.Addr:=SelectedAddr;
  C.Since:=Now;
@@ -405,8 +404,7 @@ end;
 
 procedure tFundeluka.Send;
 begin
- {$NOTE Do Not send Padding over the network}
- Repl(sizeof(self));
+ Repl(sizeof(SELF) - (Sizeof(YouSock)-YouSock.Length) );
 end;
 
 function tNetAddr.Length :Word;
