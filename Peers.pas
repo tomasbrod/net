@@ -138,14 +138,6 @@ uses
 
 const cTable :tTable = 'peers';
 
-procedure OpenDB(var F: File; const id :tID; const Field :tField);
- deprecated; {$NOTE TODO: Use DataBase accessor instead. Maybe override constructors.}
-var row: tRow;
-begin
- id.ToString(row);
- DataBase.Open(F, cTable, row, Field);
-end;
-
 Operator = (aa, ab :Sockets.tInAddr) b : boolean;
 begin
  b:=aa.s_addr=ab.s_addr;
@@ -221,41 +213,6 @@ procedure tAddrAccess.Remove( const Addr :tNetAddr );
   OverWrite( i, Addr );
  except
   on eRangeError do;
- end;
-end;
-
-procedure Assoc( const nw: tNetAddr; const id: tID );
- deprecated;
- { Associate network address *to* id }
-var db : tAddrAccess;
-begin
- db.Init( id );
- try
-  db.Add( nw );
- finally
-  db.Done;
- end;
-end;
-
-procedure Assoc( const id: tID );
- deprecated;
-var Nw : tNetAddr;
-begin
- Nw.Selected;
- Assoc( nw, id );
-end;
-
-procedure Remove( const nw :tNetAddr );
- deprecated;
-var db : tAddrAccess;
-var ID : tID;
-begin
- id.Selected;
- db.Init( id );
- try
-  db.Remove( nw );
- finally
-  db.Done;
  end;
 end;
 
@@ -411,8 +368,11 @@ end;
 
 procedure tAkafuka.Handle;
 var fundeluka:tFundeluka;
+var addr: tAddrAccess;
 begin
- Assoc (ID); {Associate sender's sockaddr with fingerprint.}
+ addr.Init( ID );
+ try addr.Add( SelectedAddr );
+ finally addr.Done; end;
  if (Peers.TimeSince(cAkafuka) > cAkafukaCooldown) then begin
   fundeluka.Create;
   fundeluka.Send;
@@ -424,9 +384,8 @@ procedure tFundeluka.Handle;
 var C :tAkafukaProgress;
 var Delta :System.tTime;
 var db :tAkafukaAccess;
+var addr: tAddrAccess;
 begin
- Assoc (ID);
- Assoc (YouSock, ThisID); {associate reported address to us}
  { The assoc re-adds peer to db. Now remove it from akafuka db}
  db.init( SelectedID );
  try
@@ -435,7 +394,14 @@ begin
  finally
   db.done;
  end;
- if Delta>cAkafukaMaxDelta then Remove(SelectedAddr);
+ if Delta<cAkafukaMaxDelta then begin
+ addr.Init( ID );
+ try addr.Add( SelectedAddr );
+ finally addr.Done; end;
+ addr.Init( ThisID );
+ try addr.Add( YouSock );
+ finally addr.Done; end;
+ end;
  { Drop the peer if delta excedes limit }
 end;
 

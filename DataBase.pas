@@ -127,7 +127,6 @@ procedure tFieldAccessor.Append( const D );
  var pos :tRecord;
  begin
  pos:=FileSize( dat ) div RecLen;
- Expand( pos );
  OverWrite( pos, D );
 end;
 
