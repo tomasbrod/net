@@ -164,56 +164,81 @@ begin
  b:=true;
 end;
 
-
-const cAddrField :tField = 'addr';
-
-type tAddr= object (tNetAddr)
- function TimeSinceLast :System.tTime;
- procedure SetNowLast;
- private
- Last :System.tDateTime;
-end deprecated;
-
-function tAddr.TimeSinceLast :System.tTime;
-begin Result := Now - Last; end;
-procedure tAddr.SetNowLast;
-begin Last := Now; end;
-
 {*********************************
  *********** Addresses *********** 
  *********************************}
 
-procedure Assoc( const nw: tNetAddr; const id: tID );
- experimental;
- { Associate network address *to* id }
-var AddrF : file of tNetAddr;
-var Ex : tNetAddr;
-begin
- if nw.data.Family = 0 then exit; {Do not associate with nil address}
- OpenDB( AddrF, id, cAddrField);
+const cAddrField :tField = 'addr';
+
+type tAddrAccess=object(DataBase.tAccess)
+ constructor Init( id: tID );
+ constructor Init;
+ procedure Add( const Addr :tNetAddr );
+  experimental;
+ procedure Remove( const Addr :tNetAddr );
+  experimental;
+end;
+
+constructor tAddrAccess.Init( id: tID );
+ var row: tRow;
+ begin
+ id.ToString(row);
+ inherited Init( sizeof(tNetAddr), cTable, row, cAddrField );
+end;
+
+constructor tAddrAccess.Init;
+ begin Init( SelectedID ); end;
+
+procedure tAddrAccess.Add( const Addr :tNetAddr );
+ var i:tRecord;
+ var Ex : tNetAddr;
+ begin
+ if Addr.data.Family = 0 then exit; {Do not associate with nil address}
  try
-  while not eof(AddrF) do begin
-   Read(AddrF, Ex);
-   if Ex=Nw then begin
-    Seek(AddrF, FilePos(AddrF)-1 );
-    break;
-   end;
+  i:=0;
+  while true do begin
+   Read( Ex, i );
+   if Ex=Addr then break;
+   inc(i);
   end;
-  write(AddrF, Nw);
- finally
-  close(AddrF);
+  OverWrite( i, Addr );
+ except
+  on eRangeError do Append( Addr );
  end;
 end;
 
-procedure Assoc( const nw: tNetAddr );
- unimplemented;
- {
-  Search for a peer with the address and associate .
-  Or send akafuka to get the id.
- }
-begin AbstractError; end;
+procedure tAddrAccess.Remove( const Addr :tNetAddr );
+ var i:tRecord;
+ var Ex : tNetAddr;
+ begin
+ try
+  i:=0;
+  while true do begin
+   Read( Ex, i );
+   if Ex=Addr then Delete( i );
+   inc(i);
+  end;
+  OverWrite( i, Addr );
+ except
+  on eRangeError do;
+ end;
+end;
+
+procedure Assoc( const nw: tNetAddr; const id: tID );
+ deprecated;
+ { Associate network address *to* id }
+var db : tAddrAccess;
+begin
+ db.Init( id );
+ try
+  db.Add( nw );
+ finally
+  db.Done;
+ end;
+end;
 
 procedure Assoc( const id: tID );
+ deprecated;
 var Nw : tNetAddr;
 begin
  Nw.Selected;
@@ -221,51 +246,35 @@ begin
 end;
 
 procedure Remove( const nw :tNetAddr );
- experimental;
-var AddrF : file of tNetAddr;
-var Ex : tNetAddr;
+ deprecated;
+var db : tAddrAccess;
 var ID : tID;
 begin
  id.Selected;
- OpenDB( AddrF, id, cAddrField);
+ db.Init( id );
  try
-  while not EoF(AddrF) do begin
-   Read(AddrF, Ex);
-   if Ex=Nw then begin
-    Database.UnInsert(AddrF);
-    break;
-   end;
-  end {while};
+  db.Remove( nw );
  finally
-  close(AddrF);
+  db.Done;
  end;
 end;
 
-procedure Save( really{?} :boolean );
-{ Save the currently selected peer's info }
- deprecated;
-begin
- AbstractError;
-end;
-
 procedure Select( ID :tID );
-{- All addresses in the db were available at last Akafuka}
-var F : file of tNetAddr;
-var cur : tNetAddr;
-label Found;
-begin
+ {- All addresses in the db were available at last Akafuka}
+ var db : tAddrAccess;
+ var cur : tNetAddr;
+ begin
  if (IsSelectedAddr and IsSelectedID) and (SelectedID = ID) then exit;
- OpenDB( F, id, cAddrField);
+ db.Init( id );
  try
-  while not eof(F) do begin
-   Read(F, cur);
-   if true then goto Found;
+  try
+   db.Read( cur, 0 );
    {$NOTE Selects only first address from the db.}
+  except
+   on eRangeError do raise eNoAddress.Create(ID);
   end;
-  raise eNoAddress.Create(ID);
-  Found:
  finally
-  close(F);
+  db.Done;
  end;
  SelectedID:=ID;
  SelectedAddr:=cur;
@@ -348,8 +357,40 @@ type tAkafukaProgress=record
  Retry :Word;
 end;
 
+type tAkafukaAccess=object(DataBase.tFieldAccessor)
+ constructor Init( id: tID );
+ procedure Add( d :tAkafukaProgress );
+  experimental;
+ procedure Pop( out d :tAkafukaProgress );
+  experimental;
+end;
+
+constructor tAkafukaAccess.Init( id: tID );
+ var row: tRow;
+ begin
+ id.ToString(row);
+ inherited Init( sizeof(tAkafukaProgress), cTable, row, cAkafukaProgressField );
+end;
+
+procedure tAkafukaAccess.Add( d :tAkafukaProgress );
+ begin Append( d ); end;
+ 
+procedure tAkafukaAccess.Pop( out d :tAkafukaProgress );
+ var i :tRecord;
+ begin
+  i:=0;
+  while true do begin
+   Read( d, i );
+   if d.Addr = SelectedAddr then begin
+    Delete( i );
+    break;
+   end;
+  end;
+ end;
+
 procedure tAkafuka.Send;
-var F :file of tAkafukaProgress;
+var db :tAkafukaAccess;
+var addr :tAddrAccess;
 var C :tAkafukaProgress;
 begin
  Repl(sizeof(SELF) - (Sizeof(YouSock)-YouSock.Length) );
@@ -357,13 +398,14 @@ begin
  C.Addr:=SelectedAddr;
  C.Since:=Now;
  C.Retry:=1;
- Remove(SelectedAddr);
- OpenDB(F, SelectedID, cAkafukaProgressField);
+ db.Init( SelectedID );
+ addr.Init ( SelectedID );
  try
-  Seek(F, FileSize(F));
-  Write(F, C);
+  addr.remove( SelectedAddr );
+  db.Add( C );
  finally
-  close(F);
+  addr.done;
+  db.done;
  end;
 end;
 
@@ -379,25 +421,19 @@ begin
 end;
 
 procedure tFundeluka.Handle;
-var F :file of tAkafukaProgress;
 var C :tAkafukaProgress;
 var Delta :System.tTime;
+var db :tAkafukaAccess;
 begin
  Assoc (ID);
  Assoc (YouSock, ThisID); {associate reported address to us}
  { The assoc re-adds peer to db. Now remove it from akafuka db}
- OpenDB(F, SelectedID, cAkafukaProgressField);
+ db.init( SelectedID );
  try
-  while not EoF(F) do begin
-   Read(F, C);
-   if C.Addr = SelectedAddr then begin
-    Delta:= Now - C.Since;
-    Database.UnInsert(F);
-    break;
-   end;
-  end;
+  db.Pop( C );
+  Delta:= Now - C.Since;
  finally
-  close(F);
+  db.done;
  end;
  if Delta>cAkafukaMaxDelta then Remove(SelectedAddr);
  { Drop the peer if delta excedes limit }
