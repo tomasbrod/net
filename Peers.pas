@@ -136,8 +136,10 @@ uses
      DataBase
      ;
 
-procedure OpenDB(var F: File; const id :tID; const Field :tField);
 const cTable :tTable = 'peers';
+
+procedure OpenDB(var F: File; const id :tID; const Field :tField);
+ deprecated; {$NOTE TODO: Use DataBase accessor instead. Maybe override constructors.}
 var row: tRow;
 begin
  id.ToString(row);
@@ -277,35 +279,60 @@ end;
 
 const cLastField :DataBase.tField = 'last';
 
+type tLastAccessor=object(DataBase.tFieldAccessor)
+ constructor Init( id: tID );
+ procedure Store( const pktype :GeneralPacket.tPkType; const Time: System.tTime );
+ procedure Load( pktype :GeneralPacket.tPkType; out Time: System.tTime );
+end;
+
+constructor tLastAccessor.Init( id: tID );
+ var row: tRow;
+ begin
+ id.ToString(row);
+ inherited Init( sizeof(System.tDateTime), cTable, row, cLastField );
+end;
+
+procedure tLastAccessor.Store( const pktype :GeneralPacket.tPkType; const Time: System.tTime );
+ begin
+ ForceWrite( pktype, Time );
+end;
+ 
+procedure tLastAccessor.Load( pktype :GeneralPacket.tPkType; out Time: System.tTime );
+ begin
+ try
+  Read( Time, pktype );
+ except
+  on eRangeError do Time:=0;
+ end;
+end;
+
 function TimeSince( pktype :GeneralPacket.tPkType ): System.tTime;
-var F : file of System.tDateTime;
 var cur: System.tDateTime;
+var db :tLastAccessor;
 var ID : tID;
 begin
  id.Selected;
- OpenDB( F, id, cLastField);
+ db.Init( id );
  try
-  Seek(F, pktype);
-  Read(F, cur);
+  db.Load( pktype, cur );
+  result := now - cur;
  finally
-  close(F);
+  db.Done;
  end;
- result := now - cur;
 end;
 
 procedure ResetTimeSince( pktype :GeneralPacket.tPkType );
-var F : file of System.tDateTime;
 var cur: System.tDateTime;
+var db :tLastAccessor;
 var ID : tID;
 begin
  id.Selected;
- cur:=now;
- OpenDB( F, id, cLastField);
+ db.Init( id );
  try
-  Seek(F, pktype);
-  write(F, cur);
+  cur:=now;
+  db.Store(pktype, cur);
  finally
-  close(F);
+  db.Done;
  end;
 end;
 
