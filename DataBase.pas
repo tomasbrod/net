@@ -32,6 +32,18 @@ tFieldAccessor=object
  RecLen :word;
  dat :file;
 end;
+tAccess=tFieldAccessor;
+
+tRowList=object
+ EoF :boolean;
+ constructor Init( const Table :tTable );
+  experimental;
+ destructor Done;
+ procedure Read( out row :tRow );
+  experimental;
+ private
+ Search: SysUtils.tSearchRec;
+end;
 
 var Prefix :string ='./data';
 {TODO: extract from parameters }
@@ -151,5 +163,37 @@ procedure tFieldAccessor.Purge;
  Close( dat );
  Erase( dat );
 end;
+
+constructor tRowList.Init( const Table :tTable );
+ var path :tFileName;
+ begin
+ path:=
+  Prefix + DirectorySeparator
+  + Table + DirectorySeparator
+ ;
+ if not DirectoryExists(path) then ForceDirectories(path);
+ EoF:=false;
+ if FindFirst( Path, faDirectory, Search )<>0 then Done;
+end;
+
+destructor tRowList.Done;
+ begin
+ if EoF then exit;
+ EoF:=true;
+ FindClose(Search);
+end;
+
+procedure tRowList.Read( out row :tRow );
+ begin
+ try
+  if EoF then raise eRangeError.Create('Reading Past End');
+  while (Search.Attr<>faDirectory) do if FindNext(Search)<>0 then raise eAbort.Create('');
+  row:=Search.Name;
+  if FindNext(Search)<>0 then raise eAbort.Create('');
+ except
+  on eAbort do Done;
+ end;
+end;
+
 
 END.
