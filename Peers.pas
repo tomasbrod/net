@@ -294,7 +294,7 @@ end;
 
 procedure tLastAccessor.Store( const pktype :GeneralPacket.tPkType; const Time: System.tTime );
  begin
- ForceWrite( pktype, Time );
+ OverWrite( pktype, Time );
 end;
  
 procedure tLastAccessor.Load( pktype :GeneralPacket.tPkType; out Time: System.tTime );

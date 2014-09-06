@@ -28,7 +28,7 @@ tFieldAccessor=object
   { Delete the field completly }
   experimental;
  procedure OverWrite( const pos :tRecord; const D ); 
-  { Overwrite the record with new value. The record must be in the field } 
+  { Overwrite the record with new value. Automatic expand. } 
   experimental;
  procedure Expand( const pos :tRecord );
   { Expand the field to pos, filling the non-existend record with zeros } 
@@ -156,7 +156,6 @@ end;
 
 procedure tFieldAccessor.OverWrite( const pos :tRecord; const D );
  begin
- if ((pos+1)*RecLen) > FileSize( dat ) then raise eRangeError.Create('Record is Not In File');
  Seek( dat, (pos*RecLen) );
  BlockWrite( dat, D, RecLen );
 end;
