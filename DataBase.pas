@@ -5,8 +5,30 @@ INTERFACE
 TYPE
 
 tTable = string[15];
-tRow = string[31];
+tRow = string[63];
 tField = string[15];
+tRecord = Word;
+
+tFieldAccessor=object
+ constructor Init( const iRecLen :word; const Table :tTable; const Row :tRow; const Field :tField );
+  experimental;
+ destructor  Done;
+ procedure Append( const D );
+  experimental;
+ procedure Read( var D; const pos :tRecord );
+  experimental;
+ procedure Delete( const pos :tRecord );
+  experimental;
+ procedure OverWrite( const pos :tRecord; const D );
+  experimental;
+ procedure ForceWrite( const pos :tRecord; const D );
+  experimental;
+ procedure LastPos( out pos :tRecord );
+  experimental;
+ private
+ RecLen :word;
+ dat :file;
+end;
 
 var Prefix :string ='./data';
 {TODO: extract from parameters }
@@ -61,5 +83,62 @@ procedure UnInsert ( var F :file );
     Seek(F, nwpos);
  end;
 
+constructor tFieldAccessor.Init( const iRecLen :word; const Table :tTable; const Row :tRow; const Field :tField );
+ begin
+ Open( dat, Table, Row, Field );
+ Reset( dat, 1 );
+ RecLen:=iRecLen;
+end;
+
+destructor  tFieldAccessor.Done;
+ begin
+ Close( dat );
+end;
+procedure tFieldAccessor.Append( const D );
+ begin
+ self.ForceWrite( FileSize( dat ), D );
+end;
+
+procedure tFieldAccessor.Read( var D; const pos :tRecord );
+ begin
+ if ((pos+1)*RecLen) > FileSize( dat ) then raise eRangeError.Create('Record is Not In File');
+ Seek( dat, pos);
+ BlockRead( dat, D, RecLen);
+end;
+
+procedure tFieldAccessor.Delete( const pos :tRecord );
+ var tmp :pointer;
+ begin
+ if ((pos+1)*RecLen) > FileSize( dat ) then raise eRangeError.Create('Record is Not In File');
+ if ((pos+1)*RecLen) < FileSize(dat) then begin
+  GetMem( tmp, RecLen );
+  try
+   Seek( dat, FileSize(dat) -1 );
+   BlockRead(dat, tmp, RecLen );
+   self.OverWrite( pos, tmp );
+  finally FreeMem( tmp, RecLen ); end;
+ end;
+ Seek(dat, FileSize(dat)-1);
+ Truncate(dat);
+end;
+
+procedure tFieldAccessor.ForceWrite( const pos :tRecord; const D );
+ begin
+ Seek( dat, (pos*RecLen) );
+ BlockWrite( dat, D, RecLen );
+end;
+
+procedure tFieldAccessor.OverWrite( const pos :tRecord; const D );
+ begin
+ if ((pos+1)*RecLen) > FileSize( dat ) then raise eRangeError.Create('Record is Not In File');
+ self.ForceWrite( pos, D );
+end;
+
+procedure tFieldAccessor.LastPos( out pos :tRecord );
+ begin
+ Assert( FilePos( dat ) > 0 );
+ Assert( (FilePos( dat ) mod RecLen)=0 );
+ pos:=(FilePos( dat ) div RecLen)-1;
+end;
 
 END.
