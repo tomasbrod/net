@@ -1,6 +1,7 @@
 unit DataBase;
 
 INTERFACE
+uses SysUtils;
 
 TYPE
 
@@ -19,9 +20,11 @@ tFieldAccessor=object
   experimental;
  procedure Delete( const pos :tRecord );
   experimental;
+ procedure Purge;
+  experimental;
  procedure OverWrite( const pos :tRecord; const D );
   experimental;
- procedure ForceWrite( const pos :tRecord; const D );
+ procedure Expand( const pos :tRecord );
   experimental;
  procedure LastPos( out pos :tRecord );
   experimental;
@@ -42,7 +45,6 @@ procedure UnInsert ( var F :file );
 { deletes the record at current position -1 }
 
 IMPLEMENTATION
-uses SysUtils;
 
 procedure Open( out F :File; const Table :tTable; const Row :tRow; const Field :tField );
 var path,name :tFileName;
@@ -95,8 +97,11 @@ destructor  tFieldAccessor.Done;
  Close( dat );
 end;
 procedure tFieldAccessor.Append( const D );
+ var pos :tRecord;
  begin
- self.ForceWrite( FileSize( dat ), D );
+ pos:=FileSize( dat ) div RecLen;
+ Expand( pos );
+ OverWrite( pos, D );
 end;
 
 procedure tFieldAccessor.Read( var D; const pos :tRecord );
@@ -122,16 +127,16 @@ procedure tFieldAccessor.Delete( const pos :tRecord );
  Truncate(dat);
 end;
 
-procedure tFieldAccessor.ForceWrite( const pos :tRecord; const D );
+procedure tFieldAccessor.OverWrite( const pos :tRecord; const D );
  begin
+ if ((pos+1)*RecLen) > FileSize( dat ) then raise eRangeError.Create('Record is Not In File');
  Seek( dat, (pos*RecLen) );
  BlockWrite( dat, D, RecLen );
 end;
 
-procedure tFieldAccessor.OverWrite( const pos :tRecord; const D );
+procedure tFieldAccessor.Expand( const pos :tRecord );
  begin
- if ((pos+1)*RecLen) > FileSize( dat ) then raise eRangeError.Create('Record is Not In File');
- self.ForceWrite( pos, D );
+ Seek( dat, ((pos+1)*RecLen) );
 end;
 
 procedure tFieldAccessor.LastPos( out pos :tRecord );
@@ -139,6 +144,12 @@ procedure tFieldAccessor.LastPos( out pos :tRecord );
  Assert( FilePos( dat ) > 0 );
  Assert( (FilePos( dat ) mod RecLen)=0 );
  pos:=(FilePos( dat ) div RecLen)-1;
+end;
+
+procedure tFieldAccessor.Purge;
+ begin
+ Close( dat );
+ Erase( dat );
 end;
 
 END.
