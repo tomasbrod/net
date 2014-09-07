@@ -1,14 +1,30 @@
 {$mode objfpc}
-uses sysutils;
+program Test;
 
-type tBigRecord=record b:array [0..65535] of byte; end;
-type tBigRecFile=file of tBigRecord;
+uses GeneralPacket
+    ,Keys
+    ,SysUtils
+    ,DataBase
+    ,Peers
+    ;
 
-var iv,nv: tBigRecFile;
-var br: tBigRecord;
-
-procedure llza(var F:file);
-begin
+procedure KeysTest;
+ var hash :tHash;
+ var s :String;
+ begin
+ s:='';
+ with hash do begin
+  clear;
+  assert( isNil );
+  ToString( s );
+  Assert( s = '0000000000000000000000000000000000000000' );
+  FromString( s );
+  Assert( isNil );
+  FromString( '00100000000A00000FF000000000000000000040' );
+  Assert( not isNil );
+  ToString( s );
+  assert( s = '00100000000A00000FF000000000000000000040' );
+ end;
 end;
 
 procedure MyOpen(var F:file);
@@ -20,14 +36,7 @@ begin
  }
 end;
 
-begin
- assign(iv,'unex.$$$');
- rewrite(iv);
- write(iv,br);
- writeln('Rec ',FileSize(iv));
- close(iv);
- MyOpen(nv);
- reset(nv);
- writeln('Rec ',FileSize(nv));
- close(nv);
-end.
+BEGIN
+ DataBaseTest;
+ KeysTest;
+END.
