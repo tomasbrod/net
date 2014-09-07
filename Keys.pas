@@ -17,13 +17,8 @@ TYPE{s}
   data :array [1..20] of byte;
  end;
 
- tFingerprint =tHash Deprecated;
-
 Operator = (aa, ab :tHash) b : boolean;
 
-VAR
- MyFilgerPrint: tFingerPrint unimplemented;
- 
 IMPLEMENTATION
 uses SysUtils;
 
