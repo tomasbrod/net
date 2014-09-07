@@ -162,12 +162,27 @@ end;
 
 const cAddrField :tField = 'addr';
 
+type tAkafukaInfo=record
+ Delta :System.tTime;
+ Since :System.tDateTime;
+ Retry :Word;
+end;
+
+type tAddrInfo=object
+ sock :tNetAddr;
+ akafuka :tAkafukaInfo;
+end;
+
 type tAddrAccess=object(DataBase.tAccess)
  constructor Init( id: tID );
  constructor Init;
+ procedure Find( out pos :tRecord; const Addr :tNetAddr);
+  experimental;
  procedure Add( const Addr :tNetAddr );
   experimental;
- procedure Remove( const Addr :tNetAddr );
+ procedure Add( const info :tAddrInfo );
+  experimental;
+ procedure Remove( const Addr :tAddrInfo );
   experimental;
 end;
 
@@ -175,42 +190,61 @@ constructor tAddrAccess.Init( id: tID );
  var row: tRow;
  begin
  id.ToString(row);
- inherited Init( sizeof(tNetAddr), cTable, row, cAddrField );
+ inherited Init( sizeof(tAddrInfo), cTable, row, cAddrField );
 end;
 
 constructor tAddrAccess.Init;
  begin Init( SelectedID ); end;
 
-procedure tAddrAccess.Add( const Addr :tNetAddr );
- var i:tRecord;
- var Ex : tNetAddr;
+procedure tAddrAccess.Find( out pos :tRecord; const Addr :tNetAddr);
+ var Ex : tAddrInfo;
  begin
- if Addr.data.Family = 0 then exit; {Do not associate with nil address}
- try
-  i:=0;
-  while true do begin
-   Read( Ex, i );
-   if Ex=Addr then break;
-   inc(i);
-  end;
-  OverWrite( i, Addr );
- except
-  on eRangeError do Append( Addr );
+ pos:=0;
+ while true do begin
+  Read( Ex, pos );
+  if Ex.sock=Addr then break;
+  inc(pos);
  end;
 end;
 
-procedure tAddrAccess.Remove( const Addr :tNetAddr );
+
+procedure tAddrAccess.Add( const Addr :tNetAddr );
  var i:tRecord;
- var Ex : tNetAddr;
+ var Ex : tAddrInfo;
+ begin
+ if Addr.data.Family = 0 then exit; {Do not associate with nil address}
+ try
+  Find( i, Addr );
+  exit;
+ except
+  on eRangeError do begin
+   Ex.Sock:=Addr;
+   Ex.Akafuka.Since:=0;
+   Ex.Akafuka.Delta:=0;
+   Ex.Akafuka.Retry:=0;
+   Append( Ex );
+ end;
+end;
+
+procedure tAddrAccess.Add( const info :tAddrInfo );
+ var i:tRecord;
+ var Ex : tAddrInfo;
+ begin
+ if Addr.data.Family = 0 then exit; {Do not associate with nil address}
+ try
+  Find( i, info.soc );
+  OverWrite( i, Info );
+ except
+  on eRangeError do Append( Info );
+end;
+
+procedure tAddrAccess.Remove( const Addr :tAddrInfo );
+ var i:tRecord;
+ var Ex : tAddrInfo;
  begin
  try
-  i:=0;
-  while true do begin
-   Read( Ex, i );
-   if Ex=Addr then Delete( i );
-   inc(i);
-  end;
-  OverWrite( i, Addr );
+  Find( i, Addr.sock );
+  Delete( i );
  except
   on eRangeError do;
  end;
@@ -219,9 +253,9 @@ end;
 procedure Select( ID :tID );
  {- All addresses in the db were available at last Akafuka}
  var db : tAddrAccess;
- var cur : tNetAddr;
+ var cur : tAddrInfo;
  begin
- if (IsSelectedAddr and IsSelectedID) and (SelectedID = ID) then exit;
+ if IsSelectedAddr and IsSelectedID and (SelectedID = ID) then exit;
  db.Init( id );
  try
   try
@@ -234,7 +268,7 @@ procedure Select( ID :tID );
   db.Done;
  end;
  SelectedID:=ID;
- SelectedAddr:=cur;
+ SelectedAddr:=cur.sock;
  IsSelectedID:=true;
  IsSelectedAddr:=true;
 end;
@@ -306,73 +340,33 @@ end;
  *********** Akafuka   ***********
  *********************************}
 
-const cAkafukaProgressField :tField = 'akafuka';
-
-type tAkafukaProgress=record
- Addr :tNetAddr;
- Since :System.tDateTime;
- Retry :Word;
-end;
-
-type tAkafukaAccess=object(DataBase.tFieldAccessor)
- constructor Init( id: tID );
- procedure Add( d :tAkafukaProgress );
-  experimental;
- procedure Pop( out d :tAkafukaProgress );
-  experimental;
-end;
-
-constructor tAkafukaAccess.Init( id: tID );
- var row: tRow;
- begin
- id.ToString(row);
- inherited Init( sizeof(tAkafukaProgress), cTable, row, cAkafukaProgressField );
-end;
-
-procedure tAkafukaAccess.Add( d :tAkafukaProgress );
- begin Append( d ); end;
- 
-procedure tAkafukaAccess.Pop( out d :tAkafukaProgress );
- var i :tRecord;
- begin
-  i:=0;
-  while true do begin
-   Read( d, i );
-   if d.Addr = SelectedAddr then begin
-    Delete( i );
-    break;
-   end;
-  end;
- end;
-
 procedure tAkafuka.Send;
-var db :tAkafukaAccess;
-var addr :tAddrAccess;
-var C :tAkafukaProgress;
+var db :tAddrAccess;
+var C :tAddrInfo;
 begin
  Repl(sizeof(SELF) - (Sizeof(YouSock)-YouSock.Length) );
  {Remove selected addr from db and append it to akafuka db}
- C.Addr:=SelectedAddr;
- C.Since:=Now;
- C.Retry:=1;
+ C.sock.Selected;
+ C.akafuka.Since:=Now;
+ C.akafuka.Retry:=1;
+ C.akafuka.Delta:=0;
  db.Init( SelectedID );
- addr.Init ( SelectedID );
  try
-  addr.remove( SelectedAddr );
   db.Add( C );
  finally
-  addr.done;
   db.done;
  end;
 end;
 
 procedure tAkafuka.Handle;
 var fundeluka:tFundeluka;
-var addr: tAddrAccess;
+var db: tAddrAccess;
+var C :tNetAddr;
 begin
- addr.Init( ID );
- try addr.Add( SelectedAddr );
- finally addr.Done; end;
+ db.Init( ID );
+ c.Selected;
+ try db.Add( C );
+ finally db.Done; end;
  if (Peers.TimeSince(cAkafuka) > cAkafukaCooldown) then begin
   fundeluka.Create;
   fundeluka.Send;
@@ -381,28 +375,29 @@ begin
 end;
 
 procedure tFundeluka.Handle;
-var C :tAkafukaProgress;
-var Delta :System.tTime;
-var db :tAkafukaAccess;
-var addr: tAddrAccess;
+var C :tAddrInfo;
+var db: tAddrAccess;
+var i:tRecord;
 begin
  { The assoc re-adds peer to db. Now remove it from akafuka db}
  db.init( SelectedID );
  try
-  db.Pop( C );
-  Delta:= Now - C.Since;
+  db.Find( I, SelectedAddr );
+  db.Read( C, I );
+  if C.akafuka.Retry=0 then exit;
+  { Fundeluka arrived, but we havn't send Akafuka? Igonre for now.}
+  C.akafuka.retry:=0;
+  C.akafuka.Delta:=Now - C.akafuka.Since;
+  db.OverWrite( I, C );
+  if C.akafuka.Delta>cAkafukaMaxDelta then db.Remove( I );
+  { Drop the peer if delta excedes limit }
  finally
   db.done;
  end;
- if Delta<cAkafukaMaxDelta then begin
- addr.Init( ID );
- try addr.Add( SelectedAddr );
- finally addr.Done; end;
- addr.Init( ThisID );
- try addr.Add( YouSock );
- finally addr.Done; end;
- end;
- { Drop the peer if delta excedes limit }
+ db.Init( ThisID );
+ try db.Add( YouSock );
+ { Add reported external address }
+ finally db.Done; end;
 end;
 
 procedure DoAkafuka;
