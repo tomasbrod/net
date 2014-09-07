@@ -44,19 +44,17 @@ tAccess=tFieldAccessor;
 
 tRowList=object
  { To get listing of fields }
- EoF :boolean;
-  { Becones true if no more fields are available. }
  constructor Init( const Table :tTable );
   experimental;
  destructor Done;
-  { Release resources and set EoF to true. Is called automatically when 
-  last field was read. But has to be called manualy otherwise. Igonred when 
-  EoF is true.
+  { Release resources if any. Is called automatically when 
+  last field was read. But has to be called manualy otherwise.
   }
  procedure Read( out row :tRow );
   { eRangeError: no more fields are available }
   experimental;
  private
+ EoF :boolean;
  Search: SysUtils.tSearchRec;
 end;
 
@@ -144,12 +142,12 @@ procedure tFieldAccessor.Delete( const pos :tRecord );
  if ((pos+1)*RecLen) < FileSize(dat) then begin
   GetMem( tmp, RecLen );
   try
-   Seek( dat, FileSize(dat) -1 );
-   BlockRead(dat, tmp, RecLen );
-   self.OverWrite( pos, tmp );
+   Seek( dat, FileSize(dat) - (1*RecLen) );
+   BlockRead(dat, tmp^, RecLen );
+   self.OverWrite( pos, tmp^ );
   finally FreeMem( tmp, RecLen ); end;
  end;
- Seek(dat, FileSize(dat)-1);
+ Seek(dat, FileSize(dat) - (1*RecLen) );
  Truncate(dat);
 end;
 
@@ -186,7 +184,7 @@ constructor tRowList.Init( const Table :tTable );
  ;
  if not DirectoryExists(path) then ForceDirectories(path);
  EoF:=false;
- if FindFirst( Path, faDirectory, Search )<>0 then Done;
+ if FindFirst( Path + '*', faDirectory, Search )<>0 then Done;
 end;
 
 destructor tRowList.Done;
@@ -198,15 +196,14 @@ end;
 
 procedure tRowList.Read( out row :tRow );
  begin
- try
-  if EoF then raise eRangeError.Create('Reading Past End');
-  while (Search.Attr<>faDirectory) do if FindNext(Search)<>0 then raise eAbort.Create('');
+  if EoF then raise eRangeError.Create('No More');
+  while ((Search.Attr and faDirectory) = 0)or(Search.Name[1]='.')
+   do if FindNext(Search)<>0 then begin
+    Done;
+    raise eRangeError.Create('No More');
+   end;
   row:=Search.Name;
-  if FindNext(Search)<>0 then raise eAbort.Create('');
- except
-  on eAbort do Done;
- end;
+  if FindNext(Search)<>0 then Done;
 end;
-
 
 END.
