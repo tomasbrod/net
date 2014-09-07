@@ -223,6 +223,7 @@ procedure tAddrAccess.Add( const Addr :tNetAddr );
    Ex.Akafuka.Delta:=0;
    Ex.Akafuka.Retry:=0;
    Append( Ex );
+  end;
  end;
 end;
 
@@ -230,12 +231,13 @@ procedure tAddrAccess.Add( const info :tAddrInfo );
  var i:tRecord;
  var Ex : tAddrInfo;
  begin
- if Addr.data.Family = 0 then exit; {Do not associate with nil address}
+ if info.sock.data.Family = 0 then exit; {Do not associate with nil address}
  try
-  Find( i, info.soc );
+  Find( i, info.sock );
   OverWrite( i, Info );
  except
-  on eRangeError do Append( Info );
+  on eRangeError do Append( info );
+ end;
 end;
 
 procedure tAddrAccess.Remove( const Addr :tAddrInfo );
@@ -389,7 +391,7 @@ begin
   C.akafuka.retry:=0;
   C.akafuka.Delta:=Now - C.akafuka.Since;
   db.OverWrite( I, C );
-  if C.akafuka.Delta>cAkafukaMaxDelta then db.Remove( I );
+  if C.akafuka.Delta>cAkafukaMaxDelta then db.Delete( I );
   { Drop the peer if delta excedes limit }
  finally
   db.done;
