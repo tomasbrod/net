@@ -14,28 +14,21 @@ tFieldAccessor=object
  { To read and write fields in database }
  { eRangeError is raised when the record does not exist}
  constructor Init( const iRecLen :word; const Table :tTable; const Row :tRow; const Field :tField );
-  experimental;
  destructor  Done;
  procedure Append( const D );
-  experimental;
  procedure Read( var D; const pos :tRecord );
-  experimental;
  procedure Delete( const pos :tRecord );
   { OverWrite the record with the last record in DB
   and truncate the field by 1 record }
-  experimental;
  procedure Purge;
   { Delete the field completly }
-  experimental;
  procedure OverWrite( const pos :tRecord; const D ); 
   { Overwrite the record with new value. Automatic expand. } 
-  experimental;
  procedure Expand( const pos :tRecord );
   { Expand the field to pos, filling the non-existend record with zeros } 
   experimental;
  procedure LastPos( out pos :tRecord );
   { Get position of last append, read or write operation }
-  experimental;
  private
  RecLen :word;
  dat :file;
@@ -45,14 +38,12 @@ tAccess=tFieldAccessor;
 tRowList=object
  { To get listing of fields }
  constructor Init( const Table :tTable );
-  experimental;
  destructor Done;
   { Release resources if any. Is called automatically when 
   last field was read. But has to be called manualy otherwise.
   }
  procedure Read( out row :tRow );
   { eRangeError: no more fields are available }
-  experimental;
  private
  EoF :boolean;
  Search: SysUtils.tSearchRec;

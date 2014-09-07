@@ -6,17 +6,13 @@ TYPE{s}
 
  tHash= packed object
   procedure Clear;
-   experimental;
   function isNil :boolean;
-   experimental;
   procedure ToString( var s :string );
    overload;
-   experimental;
   function ToString :string;
    overload;
    deprecated;
   procedure FromString( s :string );
-   experimental;
   private
   data :array [1..20] of byte;
  end;
