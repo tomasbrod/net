@@ -65,7 +65,24 @@ procedure DataBaseTest;
  end;
 end;
 
+procedure DataBaseListTest;
+ var list :tRowList;
+ var row :tRow;
+ begin
+ with list do begin
+  ForceDirectories( DataBase.Prefix+'/test/001/' );
+  init('test');
+  try
+   try repeat
+    Read(row);
+    WriteLn('dir '+row);
+   until false; except on eRangeError do ; end;
+  finally done; end;
+ end;
+end;
+
 BEGIN
- DataBaseTest;
  KeysTest;
+ DataBaseTest;
+ DataBaseListTest;
 END.
