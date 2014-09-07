@@ -29,7 +29,7 @@ end;
 
 procedure DataBaseTest;
  var db: DataBase.tAccess;
- var c,d :word;
+ var c :word;
  var p :tRecord;
  begin
  with db do begin
@@ -70,12 +70,12 @@ procedure DataBaseListTest;
  var row :tRow;
  begin
  with list do begin
-  ForceDirectories( DataBase.Prefix+'/test/001/' );
-  init('test');
+  ForceDirectories( DataBase.Prefix+'/testr/001/' );
+  init('testr');
   try
    try repeat
     Read(row);
-    WriteLn('dir '+row);
+    assert(row='001');
    until false; except on eRangeError do ; end;
   finally done; end;
  end;
