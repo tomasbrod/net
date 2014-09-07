@@ -27,13 +27,42 @@ procedure KeysTest;
  end;
 end;
 
-procedure MyOpen(var F:file);
-begin
- assign(F,'unex.$$$');
- {
- reset(nv);
- This would reset the file with record size of 128 not the orig rec size
- }
+procedure DataBaseTest;
+ var db: DataBase.tAccess;
+ var c,d :word;
+ var p :tRecord;
+ begin
+ with db do begin
+  try
+  Init( sizeof(word), 'test', '001', 'word' );
+  Assert ( FileExists( DataBase.Prefix+'/test/001/word.dat' ) );
+  c:=76;
+  Append(c);
+  c:=0;
+  LastPos(p);
+  assert( p=0 );
+  c:=78;
+  Append(c);
+  c:=0;
+  LastPos(p);
+  assert( p=1 );
+  Read(c, 0);
+  assert( c=76 );
+  c:=0;
+  Delete( 0 );
+  Read(c, 0);
+  assert( c=78 );
+  c:=55;
+  OverWrite(0,c);
+  c:=0;
+  Read(c,0);
+  Write(c,^M);
+  Assert( c=55 );
+  finally 
+   db.purge;
+   Assert ( not FileExists( DataBase.Prefix+'/test/001/word.dat' ) );
+  end;
+ end;
 end;
 
 BEGIN
