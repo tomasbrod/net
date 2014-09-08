@@ -1,0 +1,1 @@
+fpc Test.pas && ./Test

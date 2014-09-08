@@ -130,7 +130,7 @@ end;
 procedure tFieldAccessor.Read( var D; const pos :tRecord );
  begin
  if ((pos+1)*RecLen) > FileSize( dat ) then raise eRangeError.Create('Record is Not In File');
- Seek( dat, pos);
+ Seek( dat, pos*RecLen);
  BlockRead( dat, D, RecLen);
 end;
 
