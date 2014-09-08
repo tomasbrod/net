@@ -16,6 +16,7 @@ tFieldAccessor=object
  constructor Init( const iRecLen :word; const Table :tTable; const Row :tRow; const Field :tField );
  destructor  Done;
  procedure Append( const D );
+ procedure Append( out pos :tRecord; const D );
  procedure Read( var D; const pos :tRecord );
  procedure Delete( const pos :tRecord );
   { OverWrite the record with the last record in DB
@@ -113,9 +114,16 @@ destructor  tFieldAccessor.Done;
  Close( dat );
 end;
 procedure tFieldAccessor.Append( const D );
- var pos :tRecord;
+ var p : tRecord;
  begin
- pos:=FileSize( dat ) div RecLen;
+ Append( p, D );
+end;
+
+procedure tFieldAccessor.Append( out pos :tRecord; const D );
+ var p : LongWord;
+ begin
+ p:=FileSize( dat ) div RecLen;
+ pos:=p;
  OverWrite( pos, D );
 end;
 
