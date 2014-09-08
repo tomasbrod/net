@@ -345,16 +345,19 @@ end;
 procedure tAkafuka.Send;
 var db :tAddrAccess;
 var C :tAddrInfo;
+ var r:tRecord;
 begin
  Repl(sizeof(SELF) - (Sizeof(YouSock)-YouSock.Length) );
  {Remove selected addr from db and append it to akafuka db}
  C.sock.Selected;
- C.akafuka.Since:=Now;
- C.akafuka.Retry:=1;
- C.akafuka.Delta:=0;
  db.Init( SelectedID );
  try
-  db.Add( C );
+  db.Find( r, C.Sock );
+  db.Read( C, r );
+  C.akafuka.Since:=Now;
+  C.akafuka.Delta:=0;
+  Inc(C.akafuka.Retry);
+  db.Write( r, C );
  finally
   db.done;
  end;
