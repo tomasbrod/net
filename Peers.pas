@@ -347,7 +347,7 @@ var db :tAddrAccess;
 var C :tAddrInfo;
  var r:tRecord;
 begin
- Repl(sizeof(SELF) - (Sizeof(YouSock)-YouSock.Length) );
+ inherited Send(sizeof(SELF) - (Sizeof(YouSock)-YouSock.Length) );
  {Remove selected addr from db and append it to akafuka db}
  C.sock.Selected;
  db.Init( SelectedID );
@@ -472,7 +472,7 @@ end;
 
 procedure tFundeluka.Send;
 begin
- Repl(sizeof(SELF) - (Sizeof(YouSock)-YouSock.Length) );
+ inherited Send(sizeof(SELF) - (Sizeof(YouSock)-YouSock.Length) );
 end;
 
 function tNetAddr.Length :Word;

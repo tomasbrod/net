@@ -4,7 +4,7 @@ INTERFACE
 
 var 
   RecvProc: procedure(var Data; MaxLen:LongInt);
-  ReplProc: procedure(var Data; MaxLen:LongInt);
+  SendProc: procedure(var Data; MaxLen:LongInt);
 
 type
  tPktype =byte;
@@ -13,7 +13,7 @@ type
   procedure Recv(MaxLen:LongInt);
   constructor Create (itp :tPktype);
   procedure Handle; unimplemented;
-  procedure Repl(MaxLen:LongInt);
+  procedure Send(MaxLen:LongInt);
    deprecated; { bad design }
  end;
 
@@ -24,9 +24,9 @@ begin
  RecvProc(self,MaxLen);
 end;
 
-procedure T.Repl(MaxLen:LongInt);
+procedure T.Send(MaxLen:LongInt);
 begin
- ReplProc(self,MaxLen);
+ SendProc(self,MaxLen);
 end;
 
 constructor T.Create (itp :tPktype);
