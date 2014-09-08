@@ -1,8 +1,7 @@
 {$mode objfpc}
 program Test;
 
-uses GeneralPacket
-    ,Keys
+uses Keys
     ,SysUtils
     ,DataBase
     ,Peers
@@ -26,6 +25,22 @@ procedure KeysTest;
   assert( s = '00100000000A00000FF000000000000000000040' );
  end;
 end;
+
+procedure ExTest;
+ var i:integer;
+ begin
+  i:=3;
+  repeat
+   try
+    write(I, '[');
+    dec(i);
+    if i>1 then continue;
+    break;
+   finally
+    writeln(']');
+   end;
+  until false;
+ end;
 
 procedure DataBaseTest;
  var db: DataBase.tAccess;
@@ -86,4 +101,5 @@ BEGIN
  DataBaseTest;
  DataBaseListTest;
  Peers.SelfTest;
+ //ExTest;
 END.

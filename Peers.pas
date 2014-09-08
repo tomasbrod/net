@@ -66,6 +66,8 @@ TYPE
   pktype :tPktype;
   sender :tID;
   constructor Create ( const itp :tPktype );
+  procedure Handle;
+  experimental;
   procedure Send( Len:LongInt ); overload;
  end;
 
@@ -162,7 +164,7 @@ begin
  b:=false;
  if aa.data.Family<>ab.data.Family then exit;
  case aa.data.Family of
-  Sockets.AF_INET: if (aa.data.inet.sin_port<>ab.data.inet.sin_port) or (aa.data.inet.sin_addr<>ab.data.inet.sin_addr) then exit;
+  Sockets.AF_INET: if (aa.data.inet.port<>ab.data.inet.port) or (aa.data.inet.addr<>ab.data.inet.addr) then exit;
   Sockets.AF_INET6: AbstractError;
   0: {null addresses are always equal};
   else AbstractError;
@@ -233,7 +235,7 @@ procedure tAddrAccess.Add( const Addr :tNetAddr );
    Ex.Akafuka.Since:=0;
    Ex.Akafuka.Delta:=0;
    Ex.Akafuka.Retry:=0;
-   Append( Ex );
+   OverWrite( i, Ex );
   end;
  end;
 end;
@@ -353,6 +355,18 @@ end;
  *********** Akafuka   ***********
  *********************************}
 
+procedure tPacket.Handle;
+ var db :tAddrAccess;
+ begin
+ SelectedID:=Sender;
+ isSelectedID:=true;
+ { addr shouldbe selected by Daemon }
+ assert( IsSelectedAddr );
+ db.Init;
+ try db.Add( SelectedAddr );
+ finally db.done; end;
+end;
+
 procedure tAkafuka.Send;
 var db :tAddrAccess;
 var C :tAddrInfo;
@@ -361,18 +375,18 @@ begin
  inherited Send(sizeof(SELF) - (Sizeof(YouSock)-YouSock.Length) );
  {Remove selected addr from db and append it to akafuka db}
  C.sock.Selected;
- db.Init( SelectedID );
+ db.Init;
  try
   try
    db.Find( r, C.Sock );
    db.Read( C, r );
+   Inc(C.akafuka.Retry);
   except on eRangeError do begin
-    C.akafuka.Retry:=0;
-    db.Append( r, C );
+    C.akafuka.Retry:=1;
+    { db.Append( r, C ); r is already set to eof by find }
   end; end;
   C.akafuka.Since:=Now;
   C.akafuka.Delta:=0;
-  Inc(C.akafuka.Retry);
   db.OverWrite( r, C );
  finally
   db.done;
@@ -382,12 +396,8 @@ end;
 procedure tAkafuka.Handle;
 var fundeluka:tFundeluka;
 var db: tAddrAccess;
-var C :tNetAddr;
 begin
- db.Init( Sender );
- c.Selected;
- try db.Add( C );
- finally db.Done; end;
+ inherited Handle;
  if (Peers.TimeSince(cAkafuka) > cAkafukaCooldown) then begin
   fundeluka.Create;
   fundeluka.Send;
@@ -400,14 +410,17 @@ var C :tAddrInfo;
 var db: tAddrAccess;
 var i:tRecord;
 begin
+ inherited Handle;
  { The assoc re-adds peer to db. Now remove it from akafuka db}
  db.init( SelectedID );
  try
   db.Find( I, SelectedAddr );
   db.Read( C, I );
-  if C.akafuka.Retry=0 then exit;
-  { Fundeluka arrived, but we havn't send Akafuka? Igonre for now.}
-  C.akafuka.retry:=0;
+  {
+   What if we had sent akafuka to unknown netaddr to get it's ID?
+   -> tPacket.Handle had already added the addr to db.
+  }
+  C.akafuka.Retry:=0;
   C.akafuka.Delta:=Now - C.akafuka.Since;
   db.OverWrite( I, C );
   if C.akafuka.Delta>cAkafukaMaxDelta then db.Delete( I );
@@ -493,9 +506,10 @@ end;
 
 function tNetAddr.Length :Word;
 begin
+ result:=(sizeof(self)-sizeof(data))+sizeof(data.Family);
  case data.Family of
-  0: result:=sizeof(self)-sizeof(data);
-  Sockets.AF_INET: result:=sizeof( data.inet );
+  0:;
+  Sockets.AF_INET: result+=sizeof( data.inet );
   else result:=sizeof(self);
  end;
 end;
@@ -566,35 +580,45 @@ procedure TestID;
  SelectedID:=rid;
  isSelectedID:=True;
  id.Clear;
- assert( not id.isNil );
+ assert( id.isNil );
  id.Selected;
  assert( id = rid );
 end;
+
  
 procedure TestAddrInfo;
  var db :tAddrAccess;
  var C :tAddrInfo;
- var na :tNetaddr;
+ var na :tNetAddr;
+ var na2 :tNetAddr;
  var id:tID;
  var r :tRecord;
  begin
  na.data.Family:=AF_INET;
- na.data.inet.port:=2;
- na.data.inet.S_Addr:=5;
+ na.data.inet.port:=3;
+ na.data.inet.addr.s_Addr:=5;
+ na2:=na;
+ assert( na = na2 );
  id.FromString('00100000000A00000FF000000000000000000040');
  db.init( id );
  db.Add( na );
  db.Find( r, na);
  assert( r=0 );
- na.data.inet.port:=3;
+ na.data.inet.port:=2;
+ na2:=na;
  db.Add( na );
+ db.Add( na );
+ db.Add( na );
+ db.Add( na );
+ db.LastPos(r);
+ assert( r=1 );
+ assert( na = na2 );
  db.Find( r, na);
- assert( r=0 );
+ assert( r=1 );
  db.Read( C, R );
- assert( c.akafuka.since = 5 );
  assert( c.akafuka.retry = 0 );
  na.data.inet.port:=4;
- try db.Find( na ) assert(false); except on eRangeError do; end;
+ try db.Find( r, na ); assert(false); except on eRangeError do; end;
  db.purge;
  Reset;
  id.FromString('00100000000A00000FF000000000000000000041');
@@ -613,6 +637,16 @@ procedure TestAddrInfo;
  assert( c.akafuka.retry = 0 );
  db.purge;
 end;
+
+{
+procedure TestLast;
+ var id:tID;
+ begin
+ id.FromString('00100000000B00000FF000000000000000000040');
+ SelectedID:=id;
+ isSelectedID:=True;
+ id.
+}
 
 procedure SelfTest;
  begin
