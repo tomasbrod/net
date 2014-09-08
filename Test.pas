@@ -85,4 +85,5 @@ BEGIN
  KeysTest;
  DataBaseTest;
  DataBaseListTest;
+ Peers.SelfTest;
 END.

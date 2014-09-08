@@ -20,6 +20,7 @@ const cFundelukaN :string = 'Fundeluka'  experimental;
 const cAkafukaCooldown = 5000{ms};
 const cAkafukaRetry = 8{times};
 const cAkafukaMaxDelta = 600000{ms}; {10 minutes to ping? Heh!}
+const cAkafukaPeriod = 600000{ms}; {10 minutes to ping? Heh!}
 
 TYPE
 
@@ -36,16 +37,16 @@ TYPE
   procedure ToSocket( var sockaddr :tSockAddr; const socklen :tSockLen);
    unimplemented;
 
-  private
-  data :record
+  public
+  data :packed record
   case Family : byte of 
    { note: maximum family is 32 so byte is enough }
-   AF_INET :( inet :record 
-    sin_port: cushort;
-    sin_addr: tInAddr;
+   AF_INET :( inet :packed record 
+    port: cushort;
+    addr: tInAddr;
    end; );
    0 :(
-    pad_pV4IlkA4mKQL :array [0..128] of byte;
+    pad_pV4IlkA4mKQL :packed array [0..128] of byte;
    ); 
   end;
  end;
@@ -75,9 +76,11 @@ TYPE
  }
 
   procedure Handle;
+  experimental;
   { Executes approportiate actions to respond to this packet }
 
   procedure Send; overload;
+  experimental;
   { mark selected address as akafuka and actually sends the packet }
 
   constructor Create; overload;
@@ -91,9 +94,11 @@ TYPE
  tFundeluka= packed object(tAkafuka)
 
   procedure Handle;
+  experimental;
   { unmarkd selected address as akafuka, computes AkafukaDelta }
 
   procedure Send; overload;
+  experimental;
   { Computes length of the packet and calls send }
 
   constructor Create; overload;
@@ -137,6 +142,8 @@ procedure DoAkafuka;
 }
 
 procedure Reset;
+
+procedure SelfTest;
 
 IMPLEMENTATION
 uses 
@@ -495,13 +502,13 @@ end;
 
 procedure tNetAddr.Selected;
 begin
- if (not IsSelectedAddr) then AbstractError;
+ if (not IsSelectedAddr) then raise eInvalidInsert.Create('Not selected');
  self:=SelectedAddr;
 end;
 
 procedure tID.Selected;
 begin
- if (not IsSelectedID) then AbstractError;
+ if (not IsSelectedID) then raise eInvalidInsert.Create('Not selected');
  self:=SelectedID;
 end;
 
@@ -536,5 +543,84 @@ begin
  IsSelectedID:=false;
  IsSelectedAddr:=false;
 end;
+
+procedure TestNetAddr;
+ var na :tNetaddr;
+ var db :tAddrAccess;
+ var C :tAddrInfo;
+ begin
+ with na do begin
+  data.Family:=0;
+  assert( Length=1 );
+  data.Family:=AF_INET;
+  assert( Length=7 );
+  data.Family:=255;
+  assert( Length=sizeof(na) );
+ end;
+end;
+
+procedure TestID;
+ var id,rid:tID;
+ begin
+ rid.FromString('00100000000A00000FF000000000000000000040');
+ SelectedID:=rid;
+ isSelectedID:=True;
+ id.Clear;
+ assert( not id.isNil );
+ id.Selected;
+ assert( id = rid );
+end;
+ 
+procedure TestAddrInfo;
+ var db :tAddrAccess;
+ var C :tAddrInfo;
+ var na :tNetaddr;
+ var id:tID;
+ var r :tRecord;
+ begin
+ na.data.Family:=AF_INET;
+ na.data.inet.port:=2;
+ na.data.inet.S_Addr:=5;
+ id.FromString('00100000000A00000FF000000000000000000040');
+ db.init( id );
+ db.Add( na );
+ db.Find( r, na);
+ assert( r=0 );
+ na.data.inet.port:=3;
+ db.Add( na );
+ db.Find( r, na);
+ assert( r=0 );
+ db.Read( C, R );
+ assert( c.akafuka.since = 5 );
+ assert( c.akafuka.retry = 0 );
+ na.data.inet.port:=4;
+ try db.Find( na ) assert(false); except on eRangeError do; end;
+ db.purge;
+ Reset;
+ id.FromString('00100000000A00000FF000000000000000000041');
+ db.init( id );
+ db.Add( na );
+ Select( id );
+ Assert(SelectedID=id);
+ Assert(SelectedAddr=na);
+ C.sock.Selected;
+ C.akafuka.Since:=5;
+ db.Add( C );
+ db.Find( r, c.sock );
+ db.Read( C, R );
+ assert( r=0 );
+ assert( c.akafuka.since = 5 );
+ assert( c.akafuka.retry = 0 );
+ db.purge;
+end;
+
+procedure SelfTest;
+ begin
+ Reset;
+ TestNetAddr;
+ TestID;
+ TestAddrInfo;
+ end;
+
 
 END.
