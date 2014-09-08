@@ -28,7 +28,6 @@ TYPE
  { Object to store Socket Address }
 
   function Length :word;
-   experimental;
   { Returns length of the structure based on address family }
 
   procedure Selected;
@@ -133,7 +132,6 @@ procedure ResetTimeSince( pktype :tPkType );
  experimental;
 
 procedure Select( ID :tID );
- experimental;
 { Selects peer with given ID and automatically picks an sockaddr }
 
 procedure DoAkafuka;
@@ -193,7 +191,6 @@ type tAddrAccess=object(DataBase.tAccess)
  constructor Init( id: tID );
  constructor Init;
  procedure Find( out pos :tRecord; const Addr :tNetAddr);
-  experimental;
  procedure Add( const Addr :tNetAddr );
  procedure Add( const info :tAddrInfo );
  procedure Remove( const Addr :tAddrInfo );
@@ -624,6 +621,7 @@ procedure TestAddrInfo;
  id.FromString('00100000000A00000FF000000000000000000041');
  db.init( id );
  db.Add( na );
+ Assert(SelectedAddr<>na);
  Select( id );
  Assert(SelectedID=id);
  Assert(SelectedAddr=na);
