@@ -1,9 +1,0 @@
-UNIT brpacket;
-
-INTERFACE
-
-TYPE 
-
-IMPLEMENATION
-END.
-  
