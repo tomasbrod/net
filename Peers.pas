@@ -1,14 +1,15 @@
 unit Peers;
 
 INTERFACE
-uses GeneralPacket
-    ,Keys
+uses Keys
     ,Sockets
     ,UnixType
     ,SysUtils
     ;
 
 { TODO: OnAnyPacketReceive : Assoc }
+
+type  tPktype =byte;
 
 const cAkafuka :tPkType = 1;
 const cAkafukaN :string='Akafuka'  experimental;
@@ -60,8 +61,14 @@ TYPE
   
  end;
   
+ tPacket = packed object
+  pktype :tPktype;
+  sender :tID;
+  constructor Create ( const itp :tPktype );
+  procedure Send( Len:LongInt ); overload;
+ end;
 
- tAkafuka =packed object(GeneralPacket.T)
+ tAkafuka =packed object(tPacket)
  {
   A Ping-Pong packet.
   Name is reference to Zidan (Dávid) Sufusky Sufurky
@@ -70,14 +77,13 @@ TYPE
   procedure Handle;
   { Executes approportiate actions to respond to this packet }
 
-  procedure Send;
+  procedure Send; overload;
   { mark selected address as akafuka and actually sends the packet }
 
   constructor Create; overload;
   { Creates akafuka packet }
 
   private
-  ID :tID; { of sender }
   Load: byte unimplemented; { load of the sender's system }
   YouSock :Peers.tNetAddr; { address, the packet was sent to }
  end;
@@ -87,7 +93,7 @@ TYPE
   procedure Handle;
   { unmarkd selected address as akafuka, computes AkafukaDelta }
 
-  procedure Send;
+  procedure Send; overload;
   { Computes length of the packet and calls send }
 
   constructor Create; overload;
@@ -104,18 +110,19 @@ TYPE
   constructor Create( iid :tID );
  end;
  
-var ThisID :tID;
+var
+ ThisID :tID;
+ SelectedID : tID;
+ SelectedAddr :tNetAddr;
+ IsSelectedID : boolean;
+ IsSelectedAddr :boolean;
+ SendProc: procedure(var Data; Len:LongInt);
 
-var SelectedID : tID;
-var SelectedAddr :tNetAddr;
-var IsSelectedID : boolean;
-var IsSelectedAddr :boolean;
-
-function TimeSince( pktype :GeneralPacket.tPkType ): System.tTime;
+function TimeSince( pktype :tPkType ): System.tTime;
 { returns time since last packet from the peer of that type arrived }
  experimental;
 
-procedure ResetTimeSince( pktype :GeneralPacket.tPkType );
+procedure ResetTimeSince( pktype :tPkType );
  experimental;
 
 procedure Select( ID :tID );
@@ -283,8 +290,8 @@ const cLastField :DataBase.tField = 'last';
 
 type tLastAccessor=object(DataBase.tFieldAccessor)
  constructor Init( id: tID );
- procedure Store( const pktype :GeneralPacket.tPkType; const Time: System.tTime );
- procedure Load( pktype :GeneralPacket.tPkType; out Time: System.tTime );
+ procedure Store( const pktype :tPkType; const Time: System.tTime );
+ procedure Load( pktype :tPkType; out Time: System.tTime );
 end;
 
 constructor tLastAccessor.Init( id: tID );
@@ -294,12 +301,12 @@ constructor tLastAccessor.Init( id: tID );
  inherited Init( sizeof(System.tDateTime), cTable, row, cLastField );
 end;
 
-procedure tLastAccessor.Store( const pktype :GeneralPacket.tPkType; const Time: System.tTime );
+procedure tLastAccessor.Store( const pktype :tPkType; const Time: System.tTime );
  begin
  OverWrite( pktype, Time );
 end;
  
-procedure tLastAccessor.Load( pktype :GeneralPacket.tPkType; out Time: System.tTime );
+procedure tLastAccessor.Load( pktype :tPkType; out Time: System.tTime );
  begin
  try
   Read( Time, pktype );
@@ -308,7 +315,7 @@ procedure tLastAccessor.Load( pktype :GeneralPacket.tPkType; out Time: System.tT
  end;
 end;
 
-function TimeSince( pktype :GeneralPacket.tPkType ): System.tTime;
+function TimeSince( pktype :tPkType ): System.tTime;
 var cur: System.tDateTime;
 var db :tLastAccessor;
 var ID : tID;
@@ -323,7 +330,7 @@ begin
  end;
 end;
 
-procedure ResetTimeSince( pktype :GeneralPacket.tPkType );
+procedure ResetTimeSince( pktype :tPkType );
 var cur: System.tDateTime;
 var db :tLastAccessor;
 var ID : tID;
@@ -352,8 +359,13 @@ begin
  C.sock.Selected;
  db.Init( SelectedID );
  try
-  db.Find( r, C.Sock );
-  db.Read( C, r );
+  try
+   db.Find( r, C.Sock );
+   db.Read( C, r );
+  except on eRangeError do begin
+    C.akafuka.Retry:=0;
+    db.Append( r, C );
+  end; end;
   C.akafuka.Since:=Now;
   C.akafuka.Delta:=0;
   Inc(C.akafuka.Retry);
@@ -368,7 +380,7 @@ var fundeluka:tFundeluka;
 var db: tAddrAccess;
 var C :tNetAddr;
 begin
- db.Init( ID );
+ db.Init( Sender );
  c.Selected;
  try db.Add( C );
  finally db.Done; end;
@@ -459,14 +471,14 @@ end;
 constructor tFundeluka.Create;
 begin
  inherited Create(cFundeluka);
- ID:=ThisID;
+ Sender:=ThisID;
  YouSock.Selected;
 end;
 
 constructor tAkafuka.Create;
 begin
  inherited Create(cAkafuka);
- ID:=ThisID;
+ Sender:=ThisID;
  YouSock.Selected;
 end;
 
@@ -494,6 +506,19 @@ procedure tID.Selected;
 begin
  if (not IsSelectedID) then AbstractError;
  self:=SelectedID;
+end;
+
+constructor tPacket.Create ( const itp :tPktype );
+ begin
+ pktype := itp;
+ Sender:= ThisID;
+end;
+
+procedure tPacket.Send(Len:LongInt);
+ begin
+ //sender := ThisID;
+ Assert( SendProc <> nil );
+ SendProc( self, Len );
 end;
 
 procedure tNetAddr.ToSocket( var sockaddr :tSockAddr; const socklen :tSockLen);
