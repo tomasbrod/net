@@ -130,7 +130,7 @@ procedure Select( ID :tID );
 { Selects peer with given ID and automatically picks an sockaddr }
 
 procedure DoAkafuka;
- unimplemented;
+ experimental;
 {
  Send Akafuke to all peers.
  Remove not responding peers.
@@ -186,11 +186,8 @@ type tAddrAccess=object(DataBase.tAccess)
  procedure Find( out pos :tRecord; const Addr :tNetAddr);
   experimental;
  procedure Add( const Addr :tNetAddr );
-  experimental;
  procedure Add( const info :tAddrInfo );
-  experimental;
  procedure Remove( const Addr :tAddrInfo );
-  experimental;
 end;
 
 constructor tAddrAccess.Init( id: tID );
