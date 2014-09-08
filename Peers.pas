@@ -357,7 +357,7 @@ begin
   C.akafuka.Since:=Now;
   C.akafuka.Delta:=0;
   Inc(C.akafuka.Retry);
-  db.Write( r, C );
+  db.OverWrite( r, C );
  finally
   db.done;
  end;
@@ -406,13 +406,51 @@ begin
 end;
 
 procedure DoAkafuka;
-{
+ {
  Go through each peer and
   - Remove timeouted in akafuka.dat
   - Resend Akafuka in akafuka.dat
   - Send Akafuka in addr.dat
-}
-begin
+ }
+ var list:DataBase.tRowList;
+ var row:DataBase.tRow;
+ var id:tID;
+ var db :tAddrAccess;
+ var C:tAddrInfo;
+ var r:tRecord;
+ var akafuka:tAkafuka;
+ begin
+ list.init(cTable);
+ try repeat
+  list.Read(row);
+  if row='tags' then continue;
+  id.FromString(row);
+  SelectedID:=id;
+  isSelectedId:=true;
+  db.init(id);
+  r:=0;
+  try repeat
+   try
+    db.Read(C, R );
+    if C.Akafuka.Retry>cAkafukaRetry then begin
+     db.Delete(r);
+     system.write('[');
+     continue;
+     { no increment, becouse delete shifted records to r }
+    end;
+   finally
+    db.done;
+   system.write(']');
+   end;
+   SelectedAddr:=C.sock;
+   isSelectedAddr:=true;
+   Akafuka.Create;
+   Akafuka.Send;
+   inc(R);
+  until false; except on eRangeError do ; end;
+  db.done;
+ until false; except on eRangeError do ; end;
+ list.done;
  AbstractError;
 end;
 
