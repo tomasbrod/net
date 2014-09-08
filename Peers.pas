@@ -9,6 +9,11 @@ uses Keys
 
 { TODO: OnAnyPacketReceive : Assoc }
 
+{ TODO: Split:
+ * tNetAddr
+ * LastPacket
+}
+
 type  tPktype =byte;
 
 const cAkafuka :tPkType = 1;
