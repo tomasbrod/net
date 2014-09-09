@@ -73,6 +73,8 @@ TYPE
   procedure Handle;
   experimental;
   procedure Send( Len:LongInt ); overload;
+  function TimeSince: System.tTime;
+  { returns time since last packet from the peer of that type arrived }
  end;
 
  tAkafuka =packed object(tPacket)
@@ -128,10 +130,6 @@ var
  IsSelectedID : boolean;
  IsSelectedAddr :boolean;
  SendProc: procedure(var Data; Len:LongInt);
-
-function TimeSince( pktype :tPkType ): System.tTime;
-{ returns time since last packet from the peer of that type arrived }
- experimental;
 
 procedure Select( ID :tID );
 { Selects peer with given ID and automatically picks an sockaddr }
@@ -320,13 +318,11 @@ procedure tLastAccessor.Load( pktype :tPkType; out Time: System.tTime );
  end;
 end;
 
-function TimeSince( pktype :tPkType ): System.tTime;
+function tPacket.TimeSince: System.tTime;
 var cur: System.tDateTime;
 var db :tLastAccessor;
-var ID : tID;
 begin
- id.Selected;
- db.Init( id );
+ db.Init( Sender );
  try
   db.Load( pktype, cur );
   result := now - cur;
@@ -391,7 +387,7 @@ var fundeluka:tFundeluka;
 var db: tAddrAccess;
 begin
  inherited Handle;
- if (Peers.TimeSince(cAkafuka) > cAkafukaCooldown) then begin
+ if (TimeSince > cAkafukaCooldown) then begin
   fundeluka.Create;
   fundeluka.Send;
  end;
