@@ -7,11 +7,10 @@ uses Keys
     ,SysUtils
     ;
 
-{ TODO: OnAnyPacketReceive : Assoc }
+{ TODO: New Peer hook }
 
 { TODO: Split:
  * tNetAddr
- * LastPacket
 }
 
 type  tPktype =byte;
@@ -413,7 +412,7 @@ begin
    -> tPacket.Handle had already added the addr to db.
   }
   C.akafuka.Retry:=0;
-  if C.Akafuka.Since=0 then {NewPeerHook} else begin
+  if C.Akafuka.Since=0 then {nothing} else begin
    C.akafuka.Delta:=Now - C.akafuka.Since;
    if C.akafuka.Delta>cAkafukaMaxDelta then db.Delete( I ) else db.OverWrite( I, C );
    { Drop the peer if delta excedes limit }
@@ -462,7 +461,7 @@ procedure DoAkafuka;
     end;
    finally
     db.done;
-   system.write(']');
+    system.write(']');
    end;
    SelectedAddr:=C.sock;
    isSelectedAddr:=true;
@@ -493,14 +492,12 @@ end;
 constructor tFundeluka.Create;
 begin
  inherited Create(cFundeluka);
- Sender:=ThisID;
  YouSock.Selected;
 end;
 
 constructor tAkafuka.Create;
 begin
  inherited Create(cAkafuka);
- Sender:=ThisID;
  YouSock.Selected;
 end;
 
