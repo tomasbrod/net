@@ -141,6 +141,10 @@ procedure DoAkafuka;
  Remove not responding peers.
 }
 
+procedure Add( addr :tNetAddr );
+{ Add peer only known by its address. }
+experimental;
+
 procedure Reset;
 
 procedure SelfTest;
@@ -409,10 +413,11 @@ begin
    -> tPacket.Handle had already added the addr to db.
   }
   C.akafuka.Retry:=0;
-  C.akafuka.Delta:=Now - C.akafuka.Since;
-  db.OverWrite( I, C );
-  if C.akafuka.Delta>cAkafukaMaxDelta then db.Delete( I );
-  { Drop the peer if delta excedes limit }
+  if C.Akafuka.Since=0 then {NewPeerHook} else begin
+   C.akafuka.Delta:=Now - C.akafuka.Since;
+   if C.akafuka.Delta>cAkafukaMaxDelta then db.Delete( I ) else db.OverWrite( I, C );
+   { Drop the peer if delta excedes limit }
+  end;
  finally
   db.done;
  end;
@@ -455,7 +460,6 @@ procedure DoAkafuka;
      continue;
      { no increment, becouse delete shifted records to r }
     end;
-    {if C.Akafuka.Since=0 then NewPeerHook;}
    finally
     db.done;
    system.write(']');
@@ -470,6 +474,18 @@ procedure DoAkafuka;
  until false; except on eRangeError do ; end;
  list.done;
  AbstractError;
+end;
+
+procedure Add( addr :tNetAddr );
+ { Send akafuka, the peer should reply fundeluka and packet handler 
+ saves the peer to db, and fundeluka packet }
+ var Akafuka :tAkafuka;
+ begin
+ isSelectedID:=false;
+ SelectedAddr:=addr;
+ isSelectedAddr:=true;
+ Akafuka.Create;
+ Akafuka.Send;
 end;
 
 { *** Simple Uninteresting Bullshit ***}
