@@ -469,6 +469,7 @@ procedure DoAkafuka;
      continue;
      { no increment, becouse delete shifted records to r }
     end;
+    {if C.Akafuka.Since=0 then NewPeerHook;}
    finally
     db.done;
    system.write(']');
