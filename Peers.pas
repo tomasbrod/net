@@ -133,9 +133,6 @@ function TimeSince( pktype :tPkType ): System.tTime;
 { returns time since last packet from the peer of that type arrived }
  experimental;
 
-procedure ResetTimeSince( pktype :tPkType );
- experimental;
-
 procedure Select( ID :tID );
 { Selects peer with given ID and automatically picks an sockaddr }
 
@@ -338,35 +335,29 @@ begin
  end;
 end;
 
-procedure ResetTimeSince( pktype :tPkType );
-var cur: System.tDateTime;
-var db :tLastAccessor;
-var ID : tID;
-begin
- id.Selected;
- db.Init( id );
- try
-  cur:=now;
-  db.Store(pktype, cur);
- finally
-  db.Done;
- end;
-end;
-
 {*********************************
  *********** Akafuka   ***********
  *********************************}
 
 procedure tPacket.Handle;
  var db :tAddrAccess;
+ var time :System.tDateTime;
+ var last :tLastAccessor;
  begin
  SelectedID:=Sender;
  isSelectedID:=true;
  { addr shouldbe selected by Daemon }
  assert( IsSelectedAddr );
  db.Init;
- try db.Add( SelectedAddr );
- finally db.done; end;
+ last.Init( Sender );
+ time:=Now;
+ try
+  db.Add( SelectedAddr );
+  last.Store(pktype, time);
+ finally
+  db.done;
+  last.Done;
+ end;
 end;
 
 procedure tAkafuka.Send;
@@ -404,7 +395,6 @@ begin
   fundeluka.Create;
   fundeluka.Send;
  end;
- ResetTimeSince(cAkafuka);
 end;
 
 procedure tFundeluka.Handle;
