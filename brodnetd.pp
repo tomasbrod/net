@@ -21,6 +21,7 @@ USES SysUtils
 var
  InPkMem :array [1..1152] of byte; //MTU is 1280
  InPk :^Peers.tPacket;
+ Err : TextFile;
 
 PROCEDURE ProcessPacket;
 var p:pointer;
@@ -53,7 +54,7 @@ PROCEDURE LoopOnSocket;
  const sock :tSocket =0;
  var SockAddr :tSockAddr;
  var SockAddrLen :LongWord;
- var InPkLen :LongWord;
+ var InPkLen :LongInt;
  begin
  repeat
   Peers.Reset;
@@ -67,7 +68,8 @@ PROCEDURE LoopOnSocket;
      {flags} 0,
      {addr^} @SockAddr,
      {addrl^} @SockAddrLen
-  ); CheckSocket;
+  );
+  CheckSocket;
   Peers.isSelectedAddr:=true;
   Peers.SelectedAddr.FromSocket( SockAddr );
   ProcessPacket;
@@ -75,6 +77,7 @@ PROCEDURE LoopOnSocket;
 end;
 
 const cMainCfg:string='g.cfg';
+const cMainLog:string='g.log';
 
 procedure SocketSendImpl(var Data; Len:LongInt);
  const sock :tSocket =0;
@@ -102,7 +105,11 @@ PROCEDURE Init;
  var cfg :TINIFile;
  begin
  DataBase.Prefix:=GetEnvironmentVariable('BRODNETD_DATA');
- if Length(DataBase.Prefix)=0 then Abort;
+ if FindCmdLineSwitch('stderr') then Err:=StdErr else begin
+  Assign(Err, DataBase.Prefix+DirectorySeparator+cMainLog );
+  try Append(Err); except on eInOutError do Rewrite(Err); end;
+ end;
+ //if Length(DataBase.Prefix)=0 then Abort;
  Peers.SendProc:=@SocketSendImpl;
  Peers.NewProc:=@NewPeerHook;
  cfg := TINIFile.Create(DataBase.Prefix+DirectorySeparator+cMainCfg);
@@ -116,7 +123,15 @@ end;
 BEGIN
  if FindCmdLineSwitch('s') then begin
   Init;
-  LoopOnSocket;
+  try
+   LoopOnSocket;
+  except
+   on e : eSocket do begin
+    writeln(Err,'Socket error '+IntToStr(e.code));
+    DumpExceptionBackTrace(Err);
+   end;
+  end;
+  Close(Err);
  end else begin
   writeln('help');
  end;
