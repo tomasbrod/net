@@ -37,7 +37,9 @@ TYPE
   procedure Selected;
   { load currently selected address }
   
-  procedure ToSocket( var sockaddr :tSockAddr; const socklen :tSockLen);
+  procedure ToSocket( var sockaddr :tSockAddr );
+   unimplemented;
+  procedure FromSocket( var sockaddr :tSockAddr );
    unimplemented;
 
   public
@@ -548,7 +550,12 @@ procedure tPacket.Send(Len:LongInt);
  SendProc( self, Len );
 end;
 
-procedure tNetAddr.ToSocket( var sockaddr :tSockAddr; const socklen :tSockLen);
+procedure tNetAddr.ToSocket( var sockaddr :tSockAddr );
+begin
+ AbstractError;
+end;
+
+procedure tNetAddr.FromSocket( var sockaddr :tSockAddr );
 begin
  AbstractError;
 end;
