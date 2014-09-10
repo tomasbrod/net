@@ -12,79 +12,112 @@ PROGRAM brodnetd;
 USES SysUtils
 	,Sockets
 	,UnixType
-	,GeneralPacket
-	,Hello
+	,DataBase
+	,Peers
+	,IniFiles
 	;
 
 
 var
  InPkMem :array [1..1152] of byte; //MTU is 1280
- InPk :^GeneralPacket.T;
+ InPk :^Peers.tPacket;
 
 PROCEDURE ProcessPacket;
+var p:pointer;
 begin
- GeneralPacket.SomewhatPassTheSenderSockAddr;
- case InPk^.pktype of
-  Hello.pktype: Hello.T(InPk^).Handle;
-  else abort;
- end;
+ p:=InPk;
+ if InPk^.pktype=Peers.cAkafuka then Peers.tAkafuka(p^).Handle else
+ if InPk^.pktype=Peers.cFundeluka then Peers.tFundeluka(p^).Handle else
+ Abort;
 end;
 
-{ Bullshit follows }
+type eSocket=class(Exception)
+ code :cint;
+ constructor Create( icode: cint; msg: string );
+end;
+
+constructor eSocket.Create( icode: cint; msg: string );
+ begin
+ inherited Create(msg);
+ code:=icode;
+end;
 
 procedure CheckSocket;
+var e:cint;
 begin
- if SocketError<>0 then raise Exception.Create('Socket error '+IntToStr(SocketError));
-end;
-
-var SockAddr :array [0..512] of byte;
-    SockAddrLen :LongWord;
-    (* Usefull to send reply *)
-
-procedure SocketRecvImpl(var Data; MaxLen:LongInt);
-const sock :tSocket =0;
-var DataLen :LongWord;
-begin
-  //Recieve the incoming packet
-  DataLen:= 
-     fpRecvFrom(
-     sock,
-     @Data,
-     MaxLen,
-     0,
-     @SockAddr,
-     @SockAddrLen
-  );CheckSocket;
-end;
-
-procedure SocketReplImpl(var Data; MaxLen:LongInt);
- unimplemented;
-begin
- AbstractError;
+ e:=SocketError;
+ if e<>0 then raise eSocket.Create(e, '...');
 end;
 
 PROCEDURE LoopOnSocket;
-begin
- RecvProc:=@SocketRecvImpl;
- ReplProc:=@SocketReplImpl;
+ const sock :tSocket =0;
+ var SockAddr :array [0..512] of byte;
+ var SockAddrLen :LongWord;
+ var InPkLen :LongWord;
+ begin
  repeat
-  InPk^.Recv(sizeof(InPkMem));
+  Peers.Reset;
+  //Recieve the incoming packet
+  InPk:=@InPkMem;
+  InPkLen:= 
+     fpRecvFrom(
+     {Socket} sock,
+     {packet^} InPk,
+     {maxlin} sizeof(InPkMem),
+     {flags} 0,
+     {addr^} @SockAddr,
+     {addrl^} @SockAddrLen
+  ); CheckSocket;
+  Peers.isSelectedAddr:=true;
+  Peers.SelectedAddr.FromSocket( SockAddr );
   ProcessPacket;
- until false;
+ until true; {TODO: timeout ... }
 end;
 
-PROCEDURE LoopOnCharDev;
-begin
- AbstractError;
+const cMainCfg:string='g.cfg';
+
+procedure SocketSendImpl(var Data; Len:LongInt);
+ const sock :tSocket =0;
+ var SockAddr :array [0..512] of byte;
+ begin
+ Peers.SelectedAddr.ToSocket(SockAddr);
+ fpsendto(
+     {s} sock,
+     {msg} @Data,
+     {len} Len,
+     {flags} 0,
+     {tox} @SockAddr,
+     {tolen} SizeOf(SockAddr)
+   ); CheckSocket;
 end;
 
+procedure NewPeerHook( id :Peers.tID );
+ var ids:string;
+ begin
+ id.ToString(ids);
+ Writeln('New Peer ',ids);
+end;
+
+PROCEDURE Init;
+ var cfg :TINIFile;
+ begin
+ DataBase.Prefix:=GetEnvironmentVariable('BRODNETD_DATA');
+ if Length(DataBase.Prefix)=0 then Abort;
+ Peers.SendProc:=@SocketSendImpl;
+ Peers.NewProc:=@NewPeerHook;
+ cfg := TINIFile.Create(DataBase.Prefix+DirectorySeparator+cMainCfg);
+ try
+  Peers.ThisID.FromString( cfg.ReadString('PEER','id','') );
+ finally
+  cfg.Free;
+ end;
+end;
+ 
 BEGIN
- assert(sizeof(InPkMem)<2048);
- InPk:=@InPkMem;
- If paramcount<2 then abort;
- case paramstr(1) of
-  'S' : LoopOnSocket;
-  'C' : LoopOnCharDev;
-  else abort;
+ if FindCmdLineSwitch('s') then begin
+  Init;
+  LoopOnSocket;
+ end else begin
+  writeln('help');
  end;
 END.
