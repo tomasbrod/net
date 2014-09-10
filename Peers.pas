@@ -70,7 +70,7 @@ TYPE
 
   private
   Load: byte unimplemented; { load of the sender's system }
-  YouSock :Peers.NetAddr.T; { address, the packet was sent to }
+  YouSock :NetAddr.T; { address, the packet was sent to }
  end;
 
  tFundeluka= packed object(tAkafuka)
@@ -183,7 +183,7 @@ procedure tAddrAccess.Add( const Addr :NetAddr.T );
  var i:tRecord;
  var Ex : tAddrInfo;
  begin
- if Addr.data.Family = 0 then exit; {Do not associate with nil address}
+ if Addr.data.Family = afNil then exit; {Do not associate with nil address}
  try
   Find( i, Addr );
   exit;
@@ -202,7 +202,7 @@ procedure tAddrAccess.Add( const info :tAddrInfo );
  var i:tRecord;
  var Ex : tAddrInfo;
  begin
- if info.sock.data.Family = 0 then exit; {Do not associate with nil address}
+ if info.sock.data.Family = afNil then exit; {Do not associate with nil address}
  try
   Find( i, info.sock );
   OverWrite( i, Info );
@@ -324,7 +324,7 @@ var C :tAddrInfo;
 begin
  inherited Send(sizeof(SELF) - (Sizeof(YouSock)-YouSock.Length) );
  {Remove selected addr from db and append it to akafuka db}
- C.sock.Selected;
+ C.sock:=SelectedAddr;
  db.Init;
  try
   try
@@ -456,13 +456,13 @@ end;
 constructor tFundeluka.Create;
 begin
  inherited Create(cFundeluka);
- YouSock.Selected;
+ YouSock:=SelectedAddr;
 end;
 
 constructor tAkafuka.Create;
 begin
  inherited Create(cAkafuka);
- YouSock.Selected;
+ YouSock:=SelectedAddr;
 end;
 
 procedure tFundeluka.Send;
@@ -511,21 +511,6 @@ begin
  IsSelectedAddr:=false;
 end;
 
-procedure TestNetAddr;
- var na :NetAddr.T;
- var db :tAddrAccess;
- var C :tAddrInfo;
- begin
- with na do begin
-  data.Family:=0;
-  assert( Length=1 );
-  data.Family:=AF_INET;
-  assert( Length=7 );
-  data.Family:=255;
-  assert( Length=sizeof(na) );
- end;
-end;
-
 procedure TestID;
  var id,rid:tID;
  begin
@@ -547,7 +532,7 @@ procedure TestAddrInfo;
  var id:tID;
  var r :tRecord;
  begin
- na.data.Family:=AF_INET;
+ na.data.Family:=afInet;
  na.data.inet.port:=3;
  na.data.inet.addr.s_Addr:=5;
  na2:=na;
@@ -581,7 +566,7 @@ procedure TestAddrInfo;
  Select( id );
  Assert(SelectedID=id);
  Assert(SelectedAddr=na);
- C.sock.Selected;
+ C.sock:=SelectedAddr;
  C.akafuka.Since:=5;
  db.Add( C );
  db.Find( r, c.sock );
@@ -605,7 +590,6 @@ procedure TestLast;
 procedure SelfTest;
  begin
  Reset;
- TestNetAddr;
  TestID;
  TestAddrInfo;
  end;
