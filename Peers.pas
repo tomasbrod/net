@@ -129,6 +129,7 @@ var
  IsSelectedID : boolean;
  IsSelectedAddr :boolean;
  SendProc: procedure(var Data; Len:LongInt);
+ NewProc :procedure( id :tID );
 
 procedure Select( ID :tID );
 { Selects peer with given ID and automatically picks an sockaddr }
@@ -375,10 +376,10 @@ begin
    Inc(C.akafuka.Retry);
   except on eRangeError do begin
     C.akafuka.Retry:=1;
+    C.akafuka.Delta:=0;
     { db.Append( r, C ); r is already set to eof by find }
   end; end;
   C.akafuka.Since:=Now;
-  C.akafuka.Delta:=0;
   db.OverWrite( r, C );
  finally
   db.done;
@@ -400,6 +401,7 @@ procedure tFundeluka.Handle;
 var C :tAddrInfo;
 var db: tAddrAccess;
 var i:tRecord;
+ var isNew :boolean;
 begin
  inherited Handle;
  { The assoc re-adds peer to db. Now remove it from akafuka db}
@@ -412,10 +414,15 @@ begin
    -> tPacket.Handle had already added the addr to db.
   }
   C.akafuka.Retry:=0;
-  if C.Akafuka.Since=0 then {nothing} else begin
+  if C.Akafuka.Since>0 then begin
+   if (C.akafuka.Delta=0) then isNew:=true;
    C.akafuka.Delta:=Now - C.akafuka.Since;
-   if C.akafuka.Delta>cAkafukaMaxDelta then db.Delete( I ) else db.OverWrite( I, C );
+   if C.akafuka.Delta>cAkafukaMaxDelta then db.Delete( I )
    { Drop the peer if delta excedes limit }
+    else begin
+    db.OverWrite( I, C );
+    if isNew and assigned(NewProc) then NewProc( SelectedID );
+   end;
   end;
  finally
   db.done;
