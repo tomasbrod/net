@@ -2,6 +2,7 @@ unit Peers;
 
 INTERFACE
 uses Keys
+    ,NetAddr
     ,Sockets
     ,UnixType
     ,SysUtils
@@ -28,34 +29,6 @@ const cAkafukaPeriod = 600000{ms}; {10 minutes to ping? Heh!}
 
 TYPE
 
- tNetAddr= packed object
- { Object to store Socket Address }
-
-  function Length :word;
-  { Returns length of the structure based on address family }
-
-  procedure Selected;
-  { load currently selected address }
-  
-  procedure ToSocket( var sockaddr :tSockAddr );
-   unimplemented;
-  procedure FromSocket( var sockaddr :tSockAddr );
-   unimplemented;
-
-  public
-  data :packed record
-  case Family : byte of 
-   { note: maximum family is 32 so byte is enough }
-   AF_INET :( inet :packed record 
-    port: cushort;
-    addr: tInAddr;
-   end; );
-   0 :(
-    pad_pV4IlkA4mKQL :packed array [0..128] of byte;
-   ); 
-  end;
- end;
- 
  tID= packed object(Keys.tHash)
  {
   Unique identifier of the peer.
@@ -97,7 +70,7 @@ TYPE
 
   private
   Load: byte unimplemented; { load of the sender's system }
-  YouSock :Peers.tNetAddr; { address, the packet was sent to }
+  YouSock :Peers.NetAddr.T; { address, the packet was sent to }
  end;
 
  tFundeluka= packed object(tAkafuka)
@@ -127,7 +100,7 @@ TYPE
 var
  ThisID :tID;
  SelectedID : tID;
- SelectedAddr :tNetAddr;
+ SelectedAddr :NetAddr.T;
  IsSelectedID : boolean;
  IsSelectedAddr :boolean;
  SendProc: procedure(var Data; Len:LongInt);
@@ -143,7 +116,7 @@ procedure DoAkafuka;
  Remove not responding peers.
 }
 
-procedure Add( addr :tNetAddr );
+procedure Add( addr :NetAddr.T );
 { Add peer only known by its address. }
 experimental;
 
@@ -158,24 +131,6 @@ uses
 
 const cTable :tTable = 'peers';
 
-Operator = (aa, ab :Sockets.tInAddr) b : boolean;
-begin
- b:=aa.s_addr=ab.s_addr;
-end;
-
-Operator = (aa, ab :tNetAddr) b : boolean;
-begin
- b:=false;
- if aa.data.Family<>ab.data.Family then exit;
- case aa.data.Family of
-  Sockets.AF_INET: if (aa.data.inet.port<>ab.data.inet.port) or (aa.data.inet.addr<>ab.data.inet.addr) then exit;
-  Sockets.AF_INET6: AbstractError;
-  0: {null addresses are always equal};
-  else AbstractError;
- end;
- b:=true;
-end;
-
 {*********************************
  *********** Addresses *********** 
  *********************************}
@@ -189,15 +144,15 @@ type tAkafukaInfo=record
 end;
 
 type tAddrInfo=object
- sock :tNetAddr;
+ sock :NetAddr.T;
  akafuka :tAkafukaInfo;
 end;
 
 type tAddrAccess=object(DataBase.tAccess)
  constructor Init( id: tID );
  constructor Init;
- procedure Find( out pos :tRecord; const Addr :tNetAddr);
- procedure Add( const Addr :tNetAddr );
+ procedure Find( out pos :tRecord; const Addr :NetAddr.T);
+ procedure Add( const Addr :NetAddr.T );
  procedure Add( const info :tAddrInfo );
  procedure Remove( const Addr :tAddrInfo );
 end;
@@ -212,7 +167,7 @@ end;
 constructor tAddrAccess.Init;
  begin Init( SelectedID ); end;
 
-procedure tAddrAccess.Find( out pos :tRecord; const Addr :tNetAddr);
+procedure tAddrAccess.Find( out pos :tRecord; const Addr :NetAddr.T);
  var Ex : tAddrInfo;
  begin
  pos:=0;
@@ -224,7 +179,7 @@ procedure tAddrAccess.Find( out pos :tRecord; const Addr :tNetAddr);
 end;
 
 
-procedure tAddrAccess.Add( const Addr :tNetAddr );
+procedure tAddrAccess.Add( const Addr :NetAddr.T );
  var i:tRecord;
  var Ex : tAddrInfo;
  begin
@@ -484,7 +439,7 @@ procedure DoAkafuka;
  AbstractError;
 end;
 
-procedure Add( addr :tNetAddr );
+procedure Add( addr :NetAddr.T );
  { Send akafuka, the peer should reply fundeluka and packet handler 
  saves the peer to db, and fundeluka packet }
  var Akafuka :tAkafuka;
@@ -515,21 +470,13 @@ begin
  inherited Send(sizeof(SELF) - (Sizeof(YouSock)-YouSock.Length) );
 end;
 
-function tNetAddr.Length :Word;
-begin
- result:=(sizeof(self)-sizeof(data))+sizeof(data.Family);
- case data.Family of
-  0:;
-  Sockets.AF_INET: result+=sizeof( data.inet );
-  else result:=sizeof(self);
- end;
-end;
-
-procedure tNetAddr.Selected;
+{
+procedure NetAddr.T.Selected;
 begin
  if (not IsSelectedAddr) then raise eInvalidInsert.Create('Not selected');
  self:=SelectedAddr;
 end;
+}
 
 procedure tID.Selected;
 begin
@@ -550,16 +497,6 @@ procedure tPacket.Send(Len:LongInt);
  SendProc( self, Len );
 end;
 
-procedure tNetAddr.ToSocket( var sockaddr :tSockAddr );
-begin
- AbstractError;
-end;
-
-procedure tNetAddr.FromSocket( var sockaddr :tSockAddr );
-begin
- AbstractError;
-end;
-
 constructor eNoAddress.Create( iid :tID );
 var idstr:string;
 begin
@@ -575,7 +512,7 @@ begin
 end;
 
 procedure TestNetAddr;
- var na :tNetaddr;
+ var na :NetAddr.T;
  var db :tAddrAccess;
  var C :tAddrInfo;
  begin
@@ -605,8 +542,8 @@ end;
 procedure TestAddrInfo;
  var db :tAddrAccess;
  var C :tAddrInfo;
- var na :tNetAddr;
- var na2 :tNetAddr;
+ var na :NetAddr.T;
+ var na2 :NetAddr.T;
  var id:tID;
  var r :tRecord;
  begin
