@@ -51,7 +51,7 @@ end;
 
 PROCEDURE LoopOnSocket;
  const sock :tSocket =0;
- var SockAddr :array [0..512] of byte;
+ var SockAddr :tSockAddr;
  var SockAddrLen :LongWord;
  var InPkLen :LongWord;
  begin
@@ -78,7 +78,7 @@ const cMainCfg:string='g.cfg';
 
 procedure SocketSendImpl(var Data; Len:LongInt);
  const sock :tSocket =0;
- var SockAddr :array [0..512] of byte;
+ var SockAddr :tSockAddr;
  begin
  Peers.SelectedAddr.ToSocket(SockAddr);
  fpsendto(
