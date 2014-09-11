@@ -61,6 +61,11 @@ procedure UnInsert ( var F :file );
  experimental;
 { deletes the record at current position -1 }
 
+{ todo
+procedure Init( iprefix: string );
+ with file locking
+}
+
 IMPLEMENTATION
 
 procedure Open( out F :File; const Table :tTable; const Row :tRow; const Field :tField );
