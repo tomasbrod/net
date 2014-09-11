@@ -25,8 +25,11 @@ var
 
 PROCEDURE ProcessPacket;
 var p:pointer;
+ var addrstr:string;
 begin
  p:=InPk;
+ //Peers.SelectedAddr.ToString( addrstr );
+ log.msg('Recieved #'+IntToStr(InPk^.pktype)+' From '+addrstr);
  if InPk^.pktype=Peers.cAkafuka then Peers.tAkafuka(p^).Handle else
  if InPk^.pktype=Peers.cFundeluka then Peers.tFundeluka(p^).Handle else
  Abort;
@@ -83,8 +86,11 @@ const cMainLog:string='g.log';
 procedure SocketSendImpl(var Data; Len:LongInt);
  const sock :tSocket =0;
  var SockAddr :tSockAddr;
+ var addrstr :string;
  begin
  Peers.SelectedAddr.ToSocket(SockAddr);
+ //Peers.SelectedAddr.ToString(addrstr);
+ log.msg('Sending packet To '+addrstr);
  fpsendto(
      {s} sock,
      {msg} @Data,
@@ -99,7 +105,7 @@ procedure NewPeerHook( id :Peers.tID );
  var ids:string;
  begin
  id.ToString(ids);
- Writeln('New Peer ',ids);
+ log.msg('Detected new Peer ',ids);
 end;
 
 PROCEDURE Init;
