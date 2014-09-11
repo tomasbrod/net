@@ -52,6 +52,7 @@ end;
 procedure tHash.FromString( s :string );
 var i :byte;
 begin
+ if length(s)<>(High(data)*2) then raise eConvertError.Create('Invalid hexadecimal number');
  for i:=low(data) to high(data)
   do data[i]:=StrToInt( 'x'+Copy(s, (2*i)-1, 2) );
 end;

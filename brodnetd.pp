@@ -15,13 +15,13 @@ USES SysUtils
 	,DataBase
 	,Peers
 	,IniFiles
+	,Log
 	;
 
 
 var
  InPkMem :array [1..1152] of byte; //MTU is 1280
  InPk :^Peers.tPacket;
- Err : TextFile;
 
 PROCEDURE ProcessPacket;
 var p:pointer;
@@ -44,6 +44,7 @@ constructor eSocket.Create( icode: cint; msg: string );
 end;
 
 procedure CheckSocket;
+ inline;
 var e:cint;
 begin
  e:=SocketError;
@@ -103,36 +104,42 @@ end;
 
 PROCEDURE Init;
  var cfg :TINIFile;
+ var str :string;
  begin
  DataBase.Prefix:=GetEnvironmentVariable('BRODNETD_DATA');
- if FindCmdLineSwitch('stderr') then Err:=StdErr else begin
-  Assign(Err, DataBase.Prefix+DirectorySeparator+cMainLog );
-  try Append(Err); except on eInOutError do Rewrite(Err); end;
- end;
+ if not FindCmdLineSwitch('stderr') then Log.Init( DataBase.Prefix+DirectorySeparator+cMainLog );
+ log.msg('BrodnetDaemon, in '+Database.Prefix);
  //if Length(DataBase.Prefix)=0 then Abort;
  Peers.SendProc:=@SocketSendImpl;
  Peers.NewProc:=@NewPeerHook;
  cfg := TINIFile.Create(DataBase.Prefix+DirectorySeparator+cMainCfg);
  try
-  Peers.ThisID.FromString( cfg.ReadString('PEER','id','') );
+  try Peers.ThisID.FromString( cfg.ReadString('PEER','id','') );
+  except log.msg('read peer id from config'); raise; end;
  finally
   cfg.Free;
  end;
 end;
  
 BEGIN
- if FindCmdLineSwitch('s') then begin
+ Log.Init(''); //log to stdout
+ try
   Init;
-  try
+  if FindCmdLineSwitch('s') then begin
+   Log.msg('Reading from socket');
    LoopOnSocket;
-  except
-   on e : eSocket do begin
-    writeln(Err,'Socket error '+IntToStr(e.code));
-    DumpExceptionBackTrace(Err);
-   end;
+  end else begin
+   Log.msg('Use -s to recieve from socket STDIN.');
   end;
-  Close(Err);
- end else begin
-  writeln('help');
+ except
+  on e : eSocket do begin
+   Log.msg('Socket error '+IntToStr(e.code));
+   DumpExceptionBackTrace(Log.F);
+  end;
+  on e : Exception do begin
+   Log.msg(e.ClassName+': '+e.message);
+   DumpExceptionBackTrace(Log.F);
+  end;
  end;
+ Log.msg('Bye');
 END.
