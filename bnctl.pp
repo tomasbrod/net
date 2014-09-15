@@ -8,6 +8,7 @@ USES SysUtils
 	,Peers
 	,IniFiles
 	,Log
+	,NetAddr
 	;
 
 
@@ -39,7 +40,7 @@ procedure SocketSendImpl(var Data; Len:LongInt);
  var addrstr :string;
  begin
  Peers.SelectedAddr.ToSocket(SockAddr);
- //Peers.SelectedAddr.ToString(addrstr);
+ Peers.SelectedAddr.ToString(addrstr);
  log.msg('Sending packet To '+addrstr);
  fpsendto(
      {s} sock,

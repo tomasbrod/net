@@ -17,6 +17,11 @@ TYPE
   procedure FromSocket( var sockaddr :tSockAddr );
    unimplemented;
 
+  procedure ToString( var str :String );
+   unimplemented;
+  procedure FromString( str :String );
+   unimplemented;
+
   public
   data :packed record
   case Family : (afNil=0, afInet=1 ) of 
@@ -42,6 +47,7 @@ IMPLEMENTATION
 uses 
      DataBase
     ,UnixType
+    ,SysUtils
      ;
 
 Operator = (aa, ab :Sockets.tInAddr) b : boolean;
@@ -56,7 +62,7 @@ begin
  case aa.data.Family of
   afInet: if (aa.data.inet.port<>ab.data.inet.port) or (aa.data.inet.addr<>ab.data.inet.addr) then exit;
   afNil: {null addresses are always equal};
-  else AbstractError;
+  else AbstractError; 
  end;
  b:=true;
 end;
@@ -73,12 +79,58 @@ end;
 
 procedure t.ToSocket( var sockaddr :tSockAddr );
 begin
- AbstractError;
+ case data.family of
+  afInet: begin
+   sockaddr.sa_family:=Sockets.AF_INET;
+   Move(data.inet, sockaddr.sa_data, sizeof(data.inet) );
+  end;
+  else AbstractError; 
+ end;
 end;
 
 procedure t.FromSocket( var sockaddr :tSockAddr );
 begin
  AbstractError;
+end;
+
+procedure t.ToString( var str :String );
+ var i:integer;
+ begin
+ case data.Family of
+  afInet: begin
+   str:='//ip4/'+Sockets.NetAddrToStr(data.inet.addr)+
+    '/'+IntToStr(ShortNetToHost(data.inet.port));
+  end;
+  afNil: str:='nil';
+  else AbstractError;
+ end;
+end;
+
+procedure t.FromString( str :String );
+ var i,e:integer;
+ var fam:string;
+ begin
+ if Copy(str,1,2)<>'//' then raise eConvertError.Create('');
+ Delete(str,1,2);
+ i:=pos('/',str); if i=0 then i:=System.Length(str)+1;
+ fam:=copy(str,1,i-1);
+ delete(str,1,i);
+ if fam='ip4' then begin
+  data.family:=afInet;
+
+  i:=pos('/',str); if i=0 then i:=System.Length(str)+1;
+  fam:=copy(str,1,i-1);
+  delete(str,1,i);
+  data.inet.addr:=StrToNetAddr(fam);
+  
+  i:=pos('/',str); if i=0 then i:=System.Length(str)+1;
+  fam:=copy(str,1,i-1);
+  delete(str,1,i);
+  data.inet.port:=ShortHostToNet(StrToInt(fam));
+  
+ end else if fam='nil' then begin
+  data.family:=afNil;
+ end else AbstractError;
 end;
 
 END.
