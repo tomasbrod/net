@@ -57,6 +57,28 @@ again.
 There can be possibly multiple instances of brodnetd running, so 
 approportiate database locking should be implemented.
 
+### BnCtl
+
+Local node can be controlled by bnctl program.
+
+Usage: bnctl [%1] [%2] [%3] [-stderr] [<switches>]
+
+switch| meaning   | %1 | %2 | %3
+------|-----------|----|----|----
+-p	| Peer controll
+-pa	| add	| netaddr
+-pi	| info	| id
+-pl	| list
+-pakafuka	| do Akafuka now
+
+impl| netaddr syntax	| meaning
+----|-----------------|--------
+yes	| //ip4/127.0.0.1/udp/32					| IP4, port 32 UDP
+no	| //ip6/2001:0db8:85a3:0000:0000:8a2e:0370:7334/udp/32	| IP6, port 32 UDP
+no	| //bluetooth/00:10:C6:F7:5B:AC/l2cap/4567	| bluetooth
+no	| //char/dev/ttyS0							| character device
+no	| //local/tmp/foobar						| unix domain socket
+
 Discovery
 ---------
 
