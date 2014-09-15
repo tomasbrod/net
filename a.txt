@@ -88,12 +88,12 @@ Discovery
 ---------
 
 The node finds its peers by sending a local area broadcasts (LAND). It is 
-performed by sending Hello packet to all devices in range of all network 
+performed by sending Akafuka packet to all devices in range of all network 
 interfaces.
 
 The second mode of discovery is wide area node discovery (WAND). It is 
-performed by sending an AskNodes packet to all peers in node list, which 
-should reply with list of nodes. The node then tryies to send Hello packet 
+performed by sending request to all peers in node list, which 
+should reply with list of nodes. The node then tryies to send Akafuka packet 
 to discovered nodes directly. If successfull (eg: in Internet), it uses 
 them as peers. If unsuccessfull (eg: in Meshnet), it updates its routing 
 table.
@@ -111,15 +111,15 @@ The signature is MAX 512B.
 
 Packet is 725B.
 
-Greetings (Hellos)
+Greetings (Akafuka Fundeluka)
 ------------------
 
-Hello is used to find new peers (LAND) as well as to check 
+Akafuka is used to find new peers (LAND) as well as to check 
 availability of peers.
 
-Hello consist of:
+Akafuka (and Fundeluka, they are same) consist of:
 
- - Fingerprint of Sender (20B)
+ - ID of Sender (20B)
  - Average load of the Sender (1B)
  - Socket Address of the Reciever (IPv4 12B, IPv6 24B)
 
@@ -128,25 +128,15 @@ is to inform nodes behind NAT of their external Address.
 This could be possibly used for STUN.
 It can be null, if unknown (eg: broadcast).
 
-### If node recieves an Hello
+### If node recieves an Akafuka
 
 - it adds the sender to list of peers.
 
 - in cHelloCooldown{ms} since last Hello from the same peer,
   no further actions are performed
 
-- it replies with another Hello
+- it replies with Fundeluka
  
-Key Retrival
-------------
-
-*deprecated*
-
-Becouse the Hello packets are signed with pgp public key, this key has to 
-be retrived to verifi the authenticity of the packets.
-
-Keys are retrived as normal VFs identified as /vf/gpg/<fingerprint>.
-
 Areas
 -----
 
@@ -165,6 +155,8 @@ now they are managed by administrator.
 
 File Sharing
 ------------
+
+*unimplemented*
 
 All files in the network have tags. Files are found only by their tags.
 
