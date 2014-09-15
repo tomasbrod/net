@@ -2,6 +2,7 @@ unit NetAddr;
 
 INTERFACE
 uses Sockets
+    ,SysUtils
     ;
 
 TYPE
@@ -43,11 +44,17 @@ Operator := (aa :t ) r : pSockAddr;
 Operator := ( aa :pSockAddr ) r : t;
 }
 
+type eSocket=class(Exception)
+ code :integer;
+ constructor Create( icode: integer; msg: string );
+end;
+
+procedure CheckSocket; inline;
+
 IMPLEMENTATION
 uses 
      DataBase
     ,UnixType
-    ,SysUtils
      ;
 
 Operator = (aa, ab :Sockets.tInAddr) b : boolean;
@@ -137,6 +144,20 @@ procedure t.FromString( str :String );
  end else if fam='nil' then begin
   data.family:=afNil;
  end else AbstractError;
+end;
+
+constructor eSocket.Create( icode: integer; msg: string );
+ begin
+ inherited Create(msg);
+ code:=icode;
+end;
+
+procedure CheckSocket;
+ inline;
+var e:cint;
+begin
+ e:=SocketError;
+ if e<>0 then raise eSocket.Create(e, '...');
 end;
 
 END.

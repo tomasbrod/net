@@ -1,25 +1,5 @@
 {include file}
 
-
-type eSocket=class(Exception)
- code :cint;
- constructor Create( icode: cint; msg: string );
-end;
-
-constructor eSocket.Create( icode: cint; msg: string );
- begin
- inherited Create(msg);
- code:=icode;
-end;
-
-procedure CheckSocket;
- inline;
-var e:cint;
-begin
- e:=SocketError;
- if e<>0 then raise eSocket.Create(e, '...');
-end;
-
 const cMainCfg:string='g.cfg';
 const cMainLog:string='g.log';
 
