@@ -15,12 +15,13 @@ IMPLEMENTATION
 procedure msg( s :string );
  var prefix : string;
  begin
- prefix:=DateTimeToStr(Now)+' ';
+ prefix:=DateTimeToStr(Now)+' '+IntToStr(GetProcessID)+' ';
  WriteLn( F, prefix, S );
 end;
 
 procedure Init ( fn :tFileName );
  begin
+ {$WARNING We really have to implement log file locking!}
  Assign( F, fn );
  try
   Append( F );

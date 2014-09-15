@@ -11,6 +11,7 @@ procedure SocketSendImpl(var Data; Len:LongInt);
  Peers.SelectedAddr.ToSocket(SockAddr);
  Peers.SelectedAddr.ToString(addrstr);
  log.msg('Sending packet To '+addrstr);
+ {$NOTE do not create inet sockets if stdin is inet socket. It binds us to random port and reply cannot be sent!}
  case SockAddr.sa_family of
   AF_INET: sock:=fpSocket (AF_INET,SOCK_DGRAM,0);
   else AbstractError;

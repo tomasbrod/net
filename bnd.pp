@@ -62,7 +62,6 @@ end;
 procedure NewPeerHook( id :Peers.tID );
  var ids:string;
  begin
- {$WARNING This hook is newer called!}
  id.ToString(ids);
  log.msg('Detected new Peer '+ids);
 end;
