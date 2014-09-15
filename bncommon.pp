@@ -15,7 +15,7 @@ procedure SocketSendImpl(var Data; Len:LongInt);
   AF_INET: sock:=fpSocket (AF_INET,SOCK_DGRAM,0);
   else AbstractError;
  end;
- CheckSocket;
+ if sock<0 then CheckSocket;
  if fpsendto(
      {s} sock,
      {msg} @Data,

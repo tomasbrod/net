@@ -22,10 +22,10 @@ const cFundeluka :tPkType = 2;
 const cFundelukaN :string = 'Fundeluka'  experimental;
 //const PkAccept :set of tPkType = [cAkafuka, cFundeluka];
 
-const cAkafukaCooldown = 5000{ms};
+const cAkafukaCooldown = 5000{ms} /MSecsPerDay;
 const cAkafukaRetry = 8{times};
-const cAkafukaMaxDelta = 600000{ms}; {10 minutes to ping? Heh!}
-const cAkafukaPeriod = 600000{ms}; {10 minutes to ping? Heh!}
+const cAkafukaMaxDelta = 600000{ms} /MSecsPerDay; {10 minutes to ping? Heh!}
+const cAkafukaPeriod = 600000{ms} /MSecsPerDay; {10 minutes to ping? Heh!}
 
 TYPE
 
@@ -48,6 +48,7 @@ TYPE
   experimental;
   procedure Send( Len:LongInt ); overload;
   function TimeSince: System.tTime;
+  procedure ResetTimeSince;
   { returns time since last packet from the peer of that type arrived }
  end;
 
@@ -162,6 +163,7 @@ constructor tAddrAccess.Init( id: tID );
  var row: tRow;
  begin
  id.ToString(row);
+ //log.msg('AddrAccess $'+IntToHex(LongWord(@self),8)+' Init '+row);
  inherited Init( sizeof(tAddrInfo), cTable, row, cAddrField );
 end;
 
@@ -183,13 +185,16 @@ end;
 procedure tAddrAccess.Add( const Addr :NetAddr.T );
  var i:tRecord;
  var Ex : tAddrInfo;
+ var str:string;
  begin
+ Addr.ToString(str);
  if Addr.data.Family = afNil then exit; {Do not associate with nil address}
  try
   Find( i, Addr );
   exit;
  except
   on eRangeError do begin
+   log.msg('Addr Add '+str+' new @'+IntToStr(i));
    Ex.Sock:=Addr;
    Ex.Akafuka.Since:=0;
    Ex.Akafuka.Delta:=0;
@@ -202,11 +207,15 @@ end;
 procedure tAddrAccess.Add( const info :tAddrInfo );
  var i:tRecord;
  var Ex : tAddrInfo;
+ var str:string;
  begin
+ info.sock.ToString(str);
  if info.sock.data.Family = afNil then exit; {Do not associate with nil address}
+ log.msg('Addr Add info '+str);
  try
   Find( i, info.sock );
   OverWrite( i, Info );
+  log.msg('ow @'+inttostr(i));
  except
   on eRangeError do Append( info );
  end;
@@ -215,10 +224,13 @@ end;
 procedure tAddrAccess.Remove( const Addr :tAddrInfo );
  var i:tRecord;
  var Ex : tAddrInfo;
+ var str:string;
  begin
+ Addr.sock.ToString(str);
  try
   Find( i, Addr.sock );
   Delete( i );
+  log.msg('Addr Del '+str+' @'+IntToStr(i));
  except
   on eRangeError do;
  end;
@@ -228,8 +240,11 @@ procedure Select( ID :tID );
  {- All addresses in the db were available at last Akafuka}
  var db : tAddrAccess;
  var cur : tAddrInfo;
+ var saddr,sid :string;
  begin
  if IsSelectedAddr and IsSelectedID and (SelectedID = ID) then exit;
+ ID.ToString(sid);
+ log.msg('Select '+sid);
  db.Init( id );
  try
   try
@@ -245,6 +260,8 @@ procedure Select( ID :tID );
  SelectedAddr:=cur.sock;
  IsSelectedID:=true;
  IsSelectedAddr:=true;
+ SelectedAddr.ToString(saddr);
+ log.msg('Selected '+sid+' ('+saddr+')');
 end;
 
 {****************************************
@@ -293,33 +310,36 @@ begin
  end;
 end;
 
+procedure tPacket.ResetTimeSince;
+ var last :tLastAccessor;
+ begin
+ last.Init( Sender );
+ try last.Store(pktype, Now);
+ finally last.Done; end;
+end;
+
 {*********************************
  *********** Akafuka   ***********
  *********************************}
 
 procedure tPacket.Handle;
  var db :tAddrAccess;
- var time :System.tDateTime;
- var last :tLastAccessor;
  var saddr,sid :string;
  begin
  SelectedID:=Sender;
  isSelectedID:=true;
  { addr shouldbe selected by Daemon }
  assert( IsSelectedAddr );
+ //var saddr,sid :string;
  SelectedAddr.ToString(saddr);
  SelectedID.ToString(sid);
  log.msg('Recieved #'+IntToStr(pktype)+' From '+sid+' ('+saddr+')');
- log.msg('Last was '+TimeToStr(TimeSince)+' ago');
+ log.msg('Last was '+TimeToStr(TimeSince)+'('+FloatToStr(TimeSince*SecsPerDay)+'s) ago');
  db.Init;
- last.Init( Sender );
- time:=Now;
  try
   db.Add( SelectedAddr );
-  last.Store(pktype, time);
  finally
   db.done;
-  last.Done;
  end;
 end;
 
@@ -328,6 +348,7 @@ var db :tAddrAccess;
 var C :tAddrInfo;
  var r:tRecord;
 begin
+ log.msg('Sneding Akafuka');
  inherited Send(sizeof(SELF) - (Sizeof(YouSock)-YouSock.Length) );
  {Remove selected addr from db and append it to akafuka db}
  C.sock:=SelectedAddr;
@@ -356,9 +377,11 @@ begin
  inherited Handle;
  log.msg('Recieved '+cAkafukaN);
  if (TimeSince > cAkafukaCooldown) then begin
+  log.msg('Sending '+cFundelukaN);
   fundeluka.Create;
   fundeluka.Send;
- end;
+ end else log.msg('Anti-DDoS');
+ ResetTimeSince;
 end;
 
 procedure tFundeluka.Handle;
@@ -500,8 +523,12 @@ constructor tPacket.Create ( const itp :tPktype );
 end;
 
 procedure tPacket.Send(Len:LongInt);
+ var saddr,sid :string;
  begin
  //sender := ThisID;
+ SelectedAddr.ToString(saddr);
+ SelectedID.ToString(sid);
+ log.msg('Sneding #'+IntToStr(pktype)+' to '+sid+' ('+saddr+')');
  Assert( SendProc <> nil );
  SendProc( self, Len );
 end;
