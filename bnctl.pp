@@ -9,15 +9,23 @@ USES SysUtils
 	,IniFiles
 	,Log
 	,NetAddr
+	,Remote
 	;
 
 {$I bncommon.pp}
 
 procedure PeerAdd;
  var addr:NetAddr.t;
+ var ctrl:Remote.tCtrl;
  begin
  addr.fromstring(paramstr(1));
- Peers.Add(addr);
+ ctrl.PeerAdd( Addr );
+end;
+
+procedure PeerDoAkafuka;
+ var ctrl:Remote.tCtrl;
+ begin
+ ctrl.DoAkafuka;
 end;
 
 procedure PeerInfo;
@@ -38,10 +46,11 @@ BEGIN
  Log.F:=stderr; //log to stderr
  try
   Init;
+  SelectedAddr.FromString('//ip4/127.0.0.1/1030');
   if FindCmdLineSwitch('pa') then PeerAdd;
   //if FindCmdLineSwitch('pl') then PeerList;
   if FindCmdLineSwitch('pi') then PeerInfo;
-  //if FindCmdLineSwitch('pakafuka') then PeerAkafuka;
+  if FindCmdLineSwitch('pakafuka') then PeerDoAkafuka;
 
   {ToDo: process cmdline args
    FindCmdLineSwitch('s');
