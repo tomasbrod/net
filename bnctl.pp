@@ -11,71 +11,39 @@ USES SysUtils
 	,NetAddr
 	;
 
+{$I bncommon.pp}
 
-type eSocket=class(Exception)
- code :cint;
- constructor Create( icode: cint; msg: string );
-end;
-
-constructor eSocket.Create( icode: cint; msg: string );
+procedure PeerAdd;
+ var addr:NetAddr.t;
  begin
- inherited Create(msg);
- code:=icode;
+ addr.fromstring(paramstr(1));
+ Peers.Add(addr);
 end;
 
-procedure CheckSocket;
- inline;
-var e:cint;
-begin
- e:=SocketError;
- if e<>0 then raise eSocket.Create(e, '...');
-end;
-
-const cMainCfg:string='g.cfg';
-const cMainLog:string='g.log';
-
-procedure SocketSendImpl(var Data; Len:LongInt);
- const sock :tSocket =0;
- var SockAddr :tSockAddr;
- var addrstr :string;
+procedure PeerInfo;
+ var addr:NetAddr.t;
+ var id :Peers.tID;
+ var str:string;
  begin
- Peers.SelectedAddr.ToSocket(SockAddr);
- Peers.SelectedAddr.ToString(addrstr);
- log.msg('Sending packet To '+addrstr);
- fpsendto(
-     {s} sock,
-     {msg} @Data,
-     {len} Len,
-     {flags} 0,
-     {tox} @SockAddr,
-     {tolen} SizeOf(SockAddr)
-   ); CheckSocket;
+ id.FromString(paramstr(1));
+ Peers.Select(id);
+ Peers.SelectedID.ToString(str);
+ writeln(output,'ID  :',str);
+ Peers.SelectedAddr.ToString(str);
+ writeln(output,'ADDR:',str);
+ writeln(output,'DLTA:','?');
 end;
 
-PROCEDURE Init;
- var cfg :TINIFile;
- var str :string;
- begin
- DataBase.Prefix:=GetEnvironmentVariable('BRODNETD_DATA');
- if not FindCmdLineSwitch('stderr') then Log.Init( DataBase.Prefix+DirectorySeparator+cMainLog );
- log.msg('Brodnet Controll, in '+Database.Prefix);
- //if Length(DataBase.Prefix)=0 then Abort;
- Peers.SendProc:=@SocketSendImpl;
- Peers.NewProc:=nil;
- cfg := TINIFile.Create(DataBase.Prefix+DirectorySeparator+cMainCfg);
- try
-  try Peers.ThisID.FromString( cfg.ReadString('PEER','id','') );
-  except log.msg('read peer id from config'); raise; end;
- finally
-  cfg.Free;
- end;
-end;
- 
 BEGIN
- Log.Init(''); //log to stdout
+ Log.F:=stderr; //log to stderr
  try
   Init;
-  {ToDo: process cmgline args
+  if FindCmdLineSwitch('pa') then PeerAdd;
+  //if FindCmdLineSwitch('pl') then PeerList;
+  if FindCmdLineSwitch('pi') then PeerInfo;
+  //if FindCmdLineSwitch('pakafuka') then PeerAkafuka;
+
+  {ToDo: process cmdline args
    FindCmdLineSwitch('s');
   }
  except

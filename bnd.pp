@@ -1,12 +1,5 @@
 {PROGRAM bnDaemon;}
-PROGRAM brodnetd;
-(*
-  Parameters:
-   %1 ... io type
-     ='S' -> io is socket
-     ='C' -> io is character device
-   %2 ... data dir
- *)
+PROGRAM bnd;
  
 {$MODE OBJFPC}{$C+}
 USES SysUtils
@@ -15,6 +8,7 @@ USES SysUtils
 	,DataBase
 	,Peers
 	,IniFiles
+	,NetAddr
 	,Log
 	;
 
@@ -33,25 +27,6 @@ begin
  if InPk^.pktype=Peers.cAkafuka then Peers.tAkafuka(p^).Handle else
  if InPk^.pktype=Peers.cFundeluka then Peers.tFundeluka(p^).Handle else
  Abort;
-end;
-
-type eSocket=class(Exception)
- code :cint;
- constructor Create( icode: cint; msg: string );
-end;
-
-constructor eSocket.Create( icode: cint; msg: string );
- begin
- inherited Create(msg);
- code:=icode;
-end;
-
-procedure CheckSocket;
- inline;
-var e:cint;
-begin
- e:=SocketError;
- if e<>0 then raise eSocket.Create(e, '...');
 end;
 
 PROCEDURE LoopOnSocket;
@@ -80,51 +55,13 @@ PROCEDURE LoopOnSocket;
  until true; {TODO: timeout ... }
 end;
 
-const cMainCfg:string='g.cfg';
-const cMainLog:string='g.log';
-
-procedure SocketSendImpl(var Data; Len:LongInt);
- const sock :tSocket =0;
- var SockAddr :tSockAddr;
- var addrstr :string;
- begin
- Peers.SelectedAddr.ToSocket(SockAddr);
- //Peers.SelectedAddr.ToString(addrstr);
- log.msg('Sending packet To '+addrstr);
- fpsendto(
-     {s} sock,
-     {msg} @Data,
-     {len} Len,
-     {flags} 0,
-     {tox} @SockAddr,
-     {tolen} SizeOf(SockAddr)
-   ); CheckSocket;
-end;
+{$I bncommon.pp}
 
 procedure NewPeerHook( id :Peers.tID );
  var ids:string;
  begin
  id.ToString(ids);
  log.msg('Detected new Peer ',ids);
-end;
-
-PROCEDURE Init;
- var cfg :TINIFile;
- var str :string;
- begin
- DataBase.Prefix:=GetEnvironmentVariable('BRODNETD_DATA');
- if not FindCmdLineSwitch('stderr') then Log.Init( DataBase.Prefix+DirectorySeparator+cMainLog );
- log.msg('BrodnetDaemon, in '+Database.Prefix);
- //if Length(DataBase.Prefix)=0 then Abort;
- Peers.SendProc:=@SocketSendImpl;
- Peers.NewProc:=@NewPeerHook;
- cfg := TINIFile.Create(DataBase.Prefix+DirectorySeparator+cMainCfg);
- try
-  try Peers.ThisID.FromString( cfg.ReadString('PEER','id','') );
-  except log.msg('read peer id from config'); raise; end;
- finally
-  cfg.Free;
- end;
 end;
  
 BEGIN
