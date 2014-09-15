@@ -102,7 +102,7 @@ begin
    data.family:=afInet;
    move(sockaddr.sa_data, data.inet, sizeof(data.inet) );
   end;
-  else AbstractError;
+  else raise Exception.Create('Unknown AF '+IntToStr(sockaddr.sa_family));
  end;
 end;
 

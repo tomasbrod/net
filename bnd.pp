@@ -22,7 +22,7 @@ var p:pointer;
  var addrstr:string;
 begin
  p:=InPk;
- //Peers.SelectedAddr.ToString( addrstr );
+ Peers.SelectedAddr.ToString( addrstr );
  log.msg('Recieved #'+IntToStr(InPk^.pktype)+' From '+addrstr);
  if InPk^.pktype=Peers.cAkafuka then Peers.tAkafuka(p^).Handle else
  if InPk^.pktype=Peers.cFundeluka then Peers.tFundeluka(p^).Handle else
@@ -39,6 +39,7 @@ PROCEDURE LoopOnSocket;
   Peers.Reset;
   //Recieve the incoming packet
   InPk:=@InPkMem;
+  SockAddrLen:=sizeof(sockaddr); //does  not work without this line
   InPkLen:= 
      fpRecvFrom(
      {Socket} sock,
@@ -48,7 +49,8 @@ PROCEDURE LoopOnSocket;
      {addr^} @SockAddr,
      {addrl^} @SockAddrLen
   );
-  CheckSocket;
+  log.msg('Received '+inttostr(InPkLen)+'B message');
+  if InPkLen<0 then CheckSocket;
   Peers.isSelectedAddr:=true;
   Peers.SelectedAddr.FromSocket( SockAddr );
   ProcessPacket;
@@ -61,7 +63,7 @@ procedure NewPeerHook( id :Peers.tID );
  var ids:string;
  begin
  id.ToString(ids);
- log.msg('Detected new Peer ',ids);
+ log.msg('Detected new Peer '+ids);
 end;
  
 BEGIN

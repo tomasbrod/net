@@ -127,7 +127,8 @@ procedure SelfTest;
 IMPLEMENTATION
 uses 
      DataBase
-     ;
+    ,Log
+    ;
 
 const cTable :tTable = 'peers';
 
@@ -300,11 +301,16 @@ procedure tPacket.Handle;
  var db :tAddrAccess;
  var time :System.tDateTime;
  var last :tLastAccessor;
+ var saddr,sid :string;
  begin
  SelectedID:=Sender;
  isSelectedID:=true;
  { addr shouldbe selected by Daemon }
  assert( IsSelectedAddr );
+ SelectedAddr.ToString(saddr);
+ SelectedID.ToString(sid);
+ log.msg('Recieved #'+IntToStr(pktype)+' From '+sid+' ('+saddr+')');
+ log.msg('Last was '+TimeToStr(TimeSince)+' ago');
  db.Init;
  last.Init( Sender );
  time:=Now;
@@ -348,6 +354,7 @@ var fundeluka:tFundeluka;
 var db: tAddrAccess;
 begin
  inherited Handle;
+ log.msg('Recieved '+cAkafukaN);
  if (TimeSince > cAkafukaCooldown) then begin
   fundeluka.Create;
   fundeluka.Send;

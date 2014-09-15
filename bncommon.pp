@@ -11,14 +11,20 @@ procedure SocketSendImpl(var Data; Len:LongInt);
  Peers.SelectedAddr.ToSocket(SockAddr);
  Peers.SelectedAddr.ToString(addrstr);
  log.msg('Sending packet To '+addrstr);
- fpsendto(
+ case SockAddr.sa_family of
+  AF_INET: sock:=fpSocket (AF_INET,SOCK_DGRAM,0);
+  else AbstractError;
+ end;
+ CheckSocket;
+ if fpsendto(
      {s} sock,
      {msg} @Data,
      {len} Len,
      {flags} 0,
      {tox} @SockAddr,
      {tolen} SizeOf(SockAddr)
-   ); CheckSocket;
+   )<0 then CheckSocket;
+ if CloseSocket(sock)<0 then CheckSocket;
 end;
 
 PROCEDURE Init;
@@ -27,7 +33,7 @@ PROCEDURE Init;
  begin
  DataBase.Prefix:=GetEnvironmentVariable('BRODNETD_DATA');
  if not FindCmdLineSwitch('stderr') then Log.Init( DataBase.Prefix+DirectorySeparator+cMainLog );
- log.msg('Brodnet Controll, in '+Database.Prefix);
+ log.msg('Brodnet '+ApplicationName+', in '+Database.Prefix);
  //if Length(DataBase.Prefix)=0 then Abort;
  Peers.SendProc:=@SocketSendImpl;
  Peers.NewProc:=nil;
