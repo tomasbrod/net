@@ -20,24 +20,29 @@ The source code is divided into following units.
 
  File       | Description 
 -----------:|-------------
-[Peers.pas]		| Client evidence. Akafukas.
-[Share.pas]		| Searching. Delivery of results.
-[Tag.pas]		| Tags hashing. Tags of files and peers. Matching tags.
-[DataBase.pas]	| Generic 4-dimensional file database.
-[GeneralPacket.pas] | Common fields in all packets.
-[Keys.pas]		| Cryptographic operations and data structures.
-[Test.pas]		| Unit Tests.
-[brodnetd.pp]	| Connection handler.
+[Peers]		| Client evidence. Akafukas.
+[Share]		| Searching. Delivery of results.
+[Tag]		| Tags hashing. Tags of files and peers. Matching tags.
+[DataBase]	| Generic 4-dimensional file database.
+[NetAddr]	| Network address abstraction.
+[Keys]		| Cryptographic operations and data structures.
+[Log]		| Centralized logging.
+[Test]		| Unit Tests.
+[bncommon]	| Routines shared between both programs.
+[bnd]		| The Daemon.
+[bnctl]		| Managment tool.
 
-[Peers.pas]: Peers.pas
-[Share.pas]: Share.pas
-[Tag.pas]: Tag.pas
-[DataBase.pas]: DataBase.pas
-[GeneralPacket.pas]: GeneralPacket.pas
-[Keys.pas]: Keys.pas
-[Test.pas]: Test.pas "Unit Tests"
-
-
+[Peers]: Peers.pas
+[Share]: Share.pas
+[Tag]: Tag.pas
+[DataBase]: DataBase.pas
+[NetAddr]: NetAddr.pas
+[Keys]: Keys.pas
+[Log]: Log.pas
+[Test]: Test.pas "Unit Tests"
+[bncommon]: bncommon.pp
+[bnd]: bnd.pp
+[bnctl]: bnctl.pp
 
 Daemons and Services
 --------------------
@@ -73,8 +78,8 @@ switch| meaning   | %1 | %2 | %3
 
 impl| netaddr syntax	| meaning
 ----|-----------------|--------
-yes	| //ip4/127.0.0.1/udp/32					| IP4, port 32 UDP
-no	| //ip6/2001:0db8:85a3:0000:0000:8a2e:0370:7334/udp/32	| IP6, port 32 UDP
+yes	| //ip4/127.0.0.1/32					| IP4, port 32 UDP
+no	| //ip6/2001:0db8:85a3:0000:0000:8a2e:0370:7334/32	| IP6, port 32 UDP
 no	| //bluetooth/00:10:C6:F7:5B:AC/l2cap/4567	| bluetooth
 no	| //char/dev/ttyS0							| character device
 no	| //local/tmp/foobar						| unix domain socket
