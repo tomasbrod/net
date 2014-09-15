@@ -62,6 +62,7 @@ end;
 procedure NewPeerHook( id :Peers.tID );
  var ids:string;
  begin
+ {$WARNING This hook is newer called!}
  id.ToString(ids);
  log.msg('Detected new Peer '+ids);
 end;
@@ -70,6 +71,7 @@ BEGIN
  Log.Init(''); //log to stdout
  try
   Init;
+  Peers.NewProc:=@NewPeerHook;
   if FindCmdLineSwitch('s') then begin
    Log.msg('Reading from socket');
    LoopOnSocket;

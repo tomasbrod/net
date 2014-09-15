@@ -464,12 +464,14 @@ constructor tFundeluka.Create;
 begin
  inherited Create(cFundeluka);
  YouSock:=SelectedAddr;
+ Load:=$EE;
 end;
 
 constructor tAkafuka.Create;
 begin
  inherited Create(cAkafuka);
  YouSock:=SelectedAddr;
+ Load:=$DD;
 end;
 
 procedure tFundeluka.Send;
