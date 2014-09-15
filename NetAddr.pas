@@ -13,14 +13,14 @@ TYPE
   { Returns length of the structure based on address family }
 
   procedure ToSocket( var sockaddr :tSockAddr );
-   unimplemented;
+   experimental;
   procedure FromSocket( var sockaddr :tSockAddr );
-   unimplemented;
+   experimental;
 
   procedure ToString( var str :String );
-   unimplemented;
+   experimental;
   procedure FromString( str :String );
-   unimplemented;
+   experimental;
 
   public
   data :packed record
@@ -90,7 +90,13 @@ end;
 
 procedure t.FromSocket( var sockaddr :tSockAddr );
 begin
- AbstractError;
+ case sockaddr.sa_family of
+  Sockets.AF_INET: begin
+   data.family:=afInet;
+   move(sockaddr.sa_data, data.inet, sizeof(data.inet) );
+  end;
+  else AbstractError;
+ end;
 end;
 
 procedure t.ToString( var str :String );
