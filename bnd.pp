@@ -10,7 +10,6 @@ USES SysUtils
 	,IniFiles
 	,NetAddr
 	,Log
-	,Remote
 	;
 
 
@@ -27,7 +26,6 @@ begin
  log.msg('Recieved #'+IntToStr(InPk^.pktype)+' From '+addrstr);
  if InPk^.pktype=Peers.cAkafuka then Peers.tAkafuka(p^).Handle else
  if InPk^.pktype=Peers.cFundeluka then Peers.tFundeluka(p^).Handle else
- if InPk^.pktype=Remote.cCtrl then Remote.tCtrl(p^).Handle else
  Abort;
 end;
 
