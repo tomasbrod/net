@@ -43,7 +43,7 @@ TYPE
  tPacket = packed object
   pktype :tPktype;
   sender :tID;
-  constructor Create ( const itp :tPktype );
+  procedure Create ( const itp :tPktype );
   procedure Handle;
   experimental;
   procedure Send( Len:LongInt ); overload;
@@ -66,7 +66,7 @@ TYPE
   experimental;
   { mark selected address as akafuka and actually sends the packet }
 
-  constructor Create; overload;
+  procedure Create; overload;
   { Creates akafuka packet }
 
   private
@@ -84,7 +84,7 @@ TYPE
   experimental;
   { Computes length of the packet and calls send }
 
-  constructor Create; overload;
+  procedure Create; overload;
   { Creates fundeluka packet }
 
  end;
@@ -483,14 +483,14 @@ end;
 
 { *** Simple Uninteresting Bullshit ***}
 
-constructor tFundeluka.Create;
+procedure tFundeluka.Create;
 begin
  inherited Create(cFundeluka);
  YouSock:=SelectedAddr;
  Load:=$EE;
 end;
 
-constructor tAkafuka.Create;
+procedure tAkafuka.Create;
 begin
  inherited Create(cAkafuka);
  YouSock:=SelectedAddr;
@@ -516,7 +516,7 @@ begin
  self:=SelectedID;
 end;
 
-constructor tPacket.Create ( const itp :tPktype );
+procedure tPacket.Create ( const itp :tPktype );
  begin
  pktype := itp;
  Sender:= ThisID;
