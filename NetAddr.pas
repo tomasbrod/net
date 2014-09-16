@@ -9,8 +9,12 @@ TYPE
  
  tFamily=(afNil=0, afInet=1 );
 
- t= packed object
+ { Network-byte-ordered words }
+ Word2=array [1..2] of byte; {0..65535}
+ Word4=array [1..4] of byte; {0..4294967295}
+
  { Object to store Socket Address }
+ t= packed object
 
   function Length :word;
   { Returns length of the structure based on address family }
@@ -42,6 +46,11 @@ TYPE
    ); 
   end;
  end;
+ 
+operator := (net : Word2) host:word;
+operator := (net : Word4) host:Dword;
+operator := (host : word) net:Word2;
+operator := (host : Dword) net:Word4;
 
 Operator = (aa, ab :t) b : boolean;
 
@@ -181,6 +190,23 @@ var e:cint;
 begin
  e:=SocketError;
  if e<>0 then raise eSocket.Create(e, '...');
+end;
+
+operator := (net : Word2) host:word;
+ begin
+ host:=ShortNetToHost( net );
+end;
+operator := (net : Word4) host:Dword;
+ begin
+ host:=NetToHost( DWord(net) );
+end;
+operator := (host : word) net:Word2;
+ begin
+ net:=ShortNetToHost( host );
+end;
+operator := (host : Dword) net:Word4;
+ begin
+ net:=NetToHost( host );
 end;
 
 END.
