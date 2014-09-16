@@ -152,14 +152,16 @@ procedure t.FromString( str :String );
  end else AbstractError;
 end;
 
+const cLocalHostIP4:Sockets.tInAddr=( s_bytes:(127,0,0,1) );
+const cLocalIP4Port:word=1030;
+
 procedure t.LocalHost( af: tFamily );
- const lhinet:Sockets.tInAddr=( s_bytes:(127,0,0,1) );
  begin
  data.Family:=af;
  case af of
   afInet: begin
-   data.inet.port:=ShortHostToNet(1030);
-   data.inet.addr:=lhinet;
+   data.inet.port:=ShortHostToNet(cLocalIP4Port);
+   data.inet.addr:=cLocalHostIP4;
   end;
   afNil: ;
   else AbstractError;
