@@ -6,6 +6,8 @@ uses Sockets
     ;
 
 TYPE
+ 
+ tFamily=(afNil=0, afInet=1 );
 
  t= packed object
  { Object to store Socket Address }
@@ -23,9 +25,13 @@ TYPE
   procedure FromString( str :String );
    experimental;
 
+  procedure LocalHost( af: tFamily );
+  {Generate localhost address of address family af.}
+   experimental;
+
   public
   data :packed record
-  case Family : (afNil=0, afInet=1 ) of 
+  case Family : tFamily of 
    { note: maximum family is 32 so byte is enough }
    afInet :( inet :packed record 
     port: Word;
@@ -145,6 +151,21 @@ procedure t.FromString( str :String );
   data.family:=afNil;
  end else AbstractError;
 end;
+
+procedure t.LocalHost( af: tFamily );
+ const lhinet:Sockets.tInAddr=( s_bytes:(127,0,0,1) );
+ begin
+ data.Family:=af;
+ case af of
+  afInet: begin
+   data.inet.port:=ShortHostToNet(1030);
+   data.inet.addr:=lhinet;
+  end;
+  afNil: ;
+  else AbstractError;
+ end;
+end;
+
 
 constructor eSocket.Create( icode: integer; msg: string );
  begin
