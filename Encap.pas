@@ -68,6 +68,7 @@ end;
 
 procedure tEncap.Send;
  begin
+ log.msg('Sending Encap');
  Peers.SelectedAddr.LocalHost(Dest.data.Family);
  Peers.IsSelectedID:=False;
  Peers.SelectedID.Clear;
