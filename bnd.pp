@@ -11,12 +11,14 @@ USES SysUtils
 	,NetAddr
 	,Log
 	,Encap
+	,SocketUtil
 	;
 
 
 var
  InPkMem :array [1..1152] of byte; //MTU is 1280
  InPk :^Peers.tPacket;
+var InPkLen :LongInt;
 
 PROCEDURE ProcessPacket;
 var p:pointer;
@@ -24,7 +26,7 @@ var p:pointer;
 begin
  p:=InPk;
  Peers.SelectedAddr.ToString( addrstr );
- log.msg('Recieved #'+IntToStr(InPk^.pktype)+' From '+addrstr);
+ log.msg('Recieved #'+IntToStr(InPk^.pktype)+' ('+IntToStr(InPkLen)+'B) From '+addrstr);
  if InPk^.pktype=Peers.cAkafuka then Peers.tAkafuka(p^).Handle else
  if InPk^.pktype=Peers.cFundeluka then Peers.tFundeluka(p^).Handle else
  if InPk^.pktype=Encap.cEncap then Encap.tEncap(p^).Handle else
@@ -32,29 +34,14 @@ begin
 end;
 
 PROCEDURE LoopOnSocket;
- const sock :tSocket =0;
- var SockAddr :tSockAddr;
- var SockAddrLen :LongWord;
- var InPkLen :LongInt;
  begin
  repeat
   Peers.Reset;
   //Recieve the incoming packet
   InPk:=@InPkMem;
-  SockAddrLen:=sizeof(sockaddr); //does  not work without this line
-  InPkLen:= 
-     fpRecvFrom(
-     {Socket} sock,
-     {packet^} InPk,
-     {maxlin} sizeof(InPkMem),
-     {flags} 0,
-     {addr^} @SockAddr,
-     {addrl^} @SockAddrLen
-  );
-  log.msg('Received '+inttostr(InPkLen)+'B message');
-  if InPkLen<0 then CheckSocket;
+  InPkLen:= sizeof(InPkMem);
+  SocketUtil.Recv( Peers.SelectedAddr, InPk^, InPkLen );
   Peers.isSelectedAddr:=true;
-  Peers.SelectedAddr.FromSocket( SockAddr );
   ProcessPacket;
  until true; {TODO: timeout ... }
 end;

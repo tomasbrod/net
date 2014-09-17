@@ -101,7 +101,7 @@ TYPE
 var
  ThisID :tID;
  SelectedID : tID;
- SelectedAddr :NetAddr.T;
+ SelectedAddr :NetAddr.T; {$NOTE Should Move SelectedAddr to SocketUtil?}
  IsSelectedID : boolean;
  IsSelectedAddr :boolean;
  SendProc: procedure(var Data; Len:LongInt);

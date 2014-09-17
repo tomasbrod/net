@@ -10,6 +10,7 @@ USES SysUtils
 	,Log
 	,Encap
 	,NetAddr
+	,SocketUtil
 	;
 
 {$I bncommon.pp}
