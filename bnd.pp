@@ -10,6 +10,7 @@ USES SysUtils
 	,IniFiles
 	,NetAddr
 	,Log
+	,Encap
 	;
 
 
@@ -26,6 +27,7 @@ begin
  log.msg('Recieved #'+IntToStr(InPk^.pktype)+' From '+addrstr);
  if InPk^.pktype=Peers.cAkafuka then Peers.tAkafuka(p^).Handle else
  if InPk^.pktype=Peers.cFundeluka then Peers.tFundeluka(p^).Handle else
+ if InPk^.pktype=Encap.cEncap then Encap.tEncap(p^).Handle else
  Abort;
 end;
 

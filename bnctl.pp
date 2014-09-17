@@ -8,6 +8,7 @@ USES SysUtils
 	,Peers
 	,IniFiles
 	,Log
+	,Encap
 	,NetAddr
 	;
 
