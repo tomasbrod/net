@@ -16,15 +16,19 @@ USES SysUtils
 {$I bncommon.pp}
 
 procedure PeerAdd;
- var addr:NetAddr.t;
+ var Akafuka:Peers.tAkafuka;
  begin
- addr.fromstring(paramstr(1));
- AbstractError;
+ Log.Msg('Trying to add peer by sending akafuka');
+ SelectedAddr.fromstring(paramstr(1));
+ IsSelectedAddr:=true;
+ Akafuka.Create;
+ Akafuka.Send;
 end;
 
 procedure PeerDoAkafuka;
  begin
- AbstractError;
+ log.msg('ctl DoAkafuka');
+ Peers.DoAkafuka;
 end;
 
 procedure PeerInfo;
@@ -45,6 +49,7 @@ BEGIN
  Log.F:=stderr; //log to stderr
  try
   Init;
+  SocketUtil.StdFamily:=afNil;
   if FindCmdLineSwitch('pa') then PeerAdd;
   //if FindCmdLineSwitch('pl') then PeerList;
   if FindCmdLineSwitch('pi') then PeerInfo;
