@@ -29,7 +29,7 @@ var p:pointer;
 begin
  p:=InPk;
  Peers.SelectedAddr.ToString( addrstr );
- log.msg('Recieved #'+IntToStr(InPk^.pktype)+' ('+IntToStr(InPkLen)+'B) From '+addrstr);
+ log.msg('Received #'+IntToStr(InPk^.pktype)+' ('+IntToStr(InPkLen)+'B) From '+addrstr);
  if InPk^.pktype=Peers.cAkafuka then Peers.tAkafuka(p^).Handle else
  if InPk^.pktype=Peers.cFundeluka then Peers.tFundeluka(p^).Handle else
  if InPk^.pktype=Encap.cEncap then Encap.tEncap(p^).Handle else
@@ -53,7 +53,7 @@ PROCEDURE LoopOnSocket;
    log.msg('Timeout');
    break;
   end;
-  {Recieve}
+  {Receive}
   //log.msg('Waiting for socket to be ready');
   SocketUtil.Recv( Peers.SelectedAddr, InPk^, InPkLen );
                    Peers.isSelectedAddr:=true;
@@ -78,7 +78,7 @@ BEGIN
   if FindCmdLineSwitch('s') then begin
    LoopOnSocket;
   end else begin
-   Log.msg('Use -s to recieve from socket STDIN.');
+   Log.msg('Use -s to receive from socket STDIN.');
   end;
  except
   on e : eSocket do begin

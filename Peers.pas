@@ -333,7 +333,7 @@ procedure tPacket.Handle;
  //var saddr,sid :string;
  SelectedAddr.ToString(saddr);
  SelectedID.ToString(sid);
- log.msg('Recieved #'+IntToStr(pktype)+' From '+sid+' ('+saddr+')');
+ log.msg('Received #'+IntToStr(pktype)+' From '+sid+' ('+saddr+')');
  log.msg('Last was '+TimeToStr(TimeSince)+'('+FloatToStr(TimeSince*SecsPerDay)+'s) ago');
  db.Init;
  try
@@ -348,7 +348,7 @@ var db :tAddrAccess;
 var C :tAddrInfo;
  var r:tRecord;
 begin
- log.msg('Sneding Akafuka');
+ log.msg('Sending Akafuka');
  inherited Send(sizeof(SELF) - (Sizeof(YouSock)-YouSock.Length) );
  {Remove selected addr from db and append it to akafuka db}
  C.sock:=SelectedAddr;
@@ -375,7 +375,7 @@ var fundeluka:tFundeluka;
 var db: tAddrAccess;
 begin
  inherited Handle;
- log.msg('Recieved '+cAkafukaN);
+ log.msg('Received '+cAkafukaN);
  if (TimeSince > cAkafukaCooldown) then begin
   log.msg('Sending '+cFundelukaN);
   fundeluka.Create;
@@ -528,7 +528,7 @@ procedure tPacket.Send(Len:LongInt);
  //sender := ThisID;
  SelectedAddr.ToString(saddr);
  SelectedID.ToString(sid);
- log.msg('Sneding #'+IntToStr(pktype)+' to '+sid+' ('+saddr+')');
+ log.msg('Sending #'+IntToStr(pktype)+' to '+sid+' ('+saddr+')');
  Assert( SendProc <> nil );
  SendProc( self, Len );
 end;
