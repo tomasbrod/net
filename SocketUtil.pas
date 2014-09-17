@@ -70,11 +70,14 @@ end;
 
 procedure SendOrEncap(var Data; Len:LongInt);
  var pkencap :^Encap.tEncap=nil;
+ var str:string;
  begin
  if Peers.SelectedAddr.data.Family = StdFamily then begin
   assert(Peers.IsSelectedAddr);
   Send( Std, Peers.SelectedAddr, Data, Len );
  end else begin
+  WriteStr(str, 'Have to encap becouse dest.AF (',Peers.SelectedAddr.data.Family,') <> OurSocket.AF (',StdFamily,')');
+  log.msg(str);
   GetMem( pkencap, SizeOf(pkencap^)+Len );
   pkencap^.Create( Len, Data );
   Peers.SendProc:=@CreateAndSend;

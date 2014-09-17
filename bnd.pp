@@ -40,10 +40,13 @@ PROCEDURE LoopOnSocket;
   //Recieve the incoming packet
   InPk:=@InPkMem;
   InPkLen:= sizeof(InPkMem);
+  Log.msg('Reading from socket');
   SocketUtil.Recv( Peers.SelectedAddr, InPk^, InPkLen );
   Peers.isSelectedAddr:=true;
   ProcessPacket;
- until true; {TODO: timeout ... }
+  Log.msg('Finished processing input');
+  Flush(log.F);
+ until false; {TODO: timeout ... }
 end;
 
 {$I bncommon.pp}
@@ -61,7 +64,6 @@ BEGIN
   Init;
   Peers.NewProc:=@NewPeerHook;
   if FindCmdLineSwitch('s') then begin
-   Log.msg('Reading from socket');
    LoopOnSocket;
   end else begin
    Log.msg('Use -s to recieve from socket STDIN.');
