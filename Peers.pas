@@ -74,7 +74,7 @@ TYPE
   YouSock :NetAddr.T; { address, the packet was sent to }
  end;
 
- tFundeluka= packed object(tAkafuka)
+ tFundeluka= packed object(tPacket)
 
   procedure Handle;
   experimental;
@@ -87,6 +87,9 @@ TYPE
   procedure Create; overload;
   { Creates fundeluka packet }
 
+  private
+  Load: byte unimplemented; { load of the sender's system }
+  YouSock :NetAddr.T; { address, the packet was sent to }
  end;
  
  eNoAddress = class(Exception)
