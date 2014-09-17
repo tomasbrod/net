@@ -12,6 +12,7 @@ USES SysUtils
 	,Log
 	,Encap
 	,SocketUtil
+	,BaseUnix
 	;
 
 
@@ -19,6 +20,8 @@ var
  InPkMem :array [1..1152] of byte; //MTU is 1280
  InPk :^Peers.tPacket;
 var InPkLen :LongInt;
+
+const cRecvWait=2000{ms};
 
 PROCEDURE ProcessPacket;
 var p:pointer;
@@ -34,19 +37,28 @@ begin
 end;
 
 PROCEDURE LoopOnSocket;
+ var FDS : BaseUnix.tFDSet;
  begin
  repeat
+  {Reset internal state}
   Peers.Reset;
-  //Recieve the incoming packet
   InPk:=@InPkMem;
   InPkLen:= sizeof(InPkMem);
-  Log.msg('Reading from socket');
+  BaseUnix.fpfd_zero(FDS);
+  BaseUnix.fpfd_set(SocketUtil.Std,FDS);
+  {Wait for data}
+  Log.msg('Reading from socket'); Flush(log.F);
+  {fpSelect returns >0 if data is available}
+  if BaseUnix.fpSelect( SocketUtil.Std+1, @FDS, nil, nil, cRecvWait )<=0 then begin
+   log.msg('Timeout');
+   break;
+  end;
+  {Recieve}
+  //log.msg('Waiting for socket to be ready');
   SocketUtil.Recv( Peers.SelectedAddr, InPk^, InPkLen );
-  Peers.isSelectedAddr:=true;
+                   Peers.isSelectedAddr:=true;
   ProcessPacket;
-  Log.msg('Finished processing input');
-  Flush(log.F);
- until false; {TODO: timeout ... }
+ until false; {infinite loop}
 end;
 
 {$I bncommon.pp}
