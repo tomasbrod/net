@@ -16,13 +16,11 @@ USES SysUtils
 {$I bncommon.pp}
 
 procedure PeerAdd;
- var Akafuka:Peers.tAkafuka;
+ var Addr:NetAddr.t;
  begin
- Log.Msg('Trying to add peer by sending akafuka');
- SelectedAddr.fromstring(paramstr(1));
- IsSelectedAddr:=true;
- Akafuka.Create;
- Akafuka.Send;
+ Log.Msg('ctl PeerAdd');
+ Addr.fromstring(paramstr(1));
+ Peers.Add( Addr );
 end;
 
 procedure PeerDoAkafuka;
