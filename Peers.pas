@@ -368,7 +368,7 @@ begin
     { db.Append( r, C ); r is already set to eof by find }
   end; end;
   C.akafuka.Since:=Now;
-  log.msg('Akafuka info: Retry='+IntToStr(C.akafuka.Retry)+' Delta='+FloatToStr(C.akafuka.Delta*SecsPerDay)+'s Since=now');
+  //log.msg('Akafuka info: Retry='+IntToStr(C.akafuka.Retry)+' Delta='+FloatToStr(C.akafuka.Delta*SecsPerDay)+'s Since=now');
   db.OverWrite( r, C );
  finally
   db.done;
@@ -415,7 +415,7 @@ begin
  db.init( SelectedID );
  try
   db.Find( I, SelectedAddr ); {$NOTE OPT: use result from tpacket.handle as index to db}
-  log.msg('Read info @'+IntToStr(i));
+  //log.msg('Read info @'+IntToStr(i));
   db.Read( C, I );
   {
    What if we had sent akafuka to unknown netaddr to get it's ID?
@@ -462,10 +462,10 @@ procedure DoAkafuka;
  list.init(cTable);
  try repeat
   list.Read(row);
-  log.msg('doing '+row);
   if row='tags' then continue;
   id.FromString(row);
   if id.isNil then continue;
+  //log.msg('doing '+row);
   SelectedID:=id;
   isSelectedId:=true;
   db.init(id);
@@ -474,7 +474,7 @@ procedure DoAkafuka;
    try
     db.Read(C, R );
     c.sock.tostring(str);
-    log.msg('Read address @'+IntToStr(R)+' '+str);
+    log.msg('Read address @'+IntToStr(R)+' '+str+' of '+row);
     if C.Akafuka.Retry>cAkafukaRetry then begin
      log.msg('Retry to big, delete @'+IntToStr(R));
      db.Delete(r);

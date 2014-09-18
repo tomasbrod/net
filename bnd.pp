@@ -21,7 +21,7 @@ var
  InPk :^Peers.tPacket;
 var InPkLen :LongInt;
 
-const cRecvWait=2000{ms};
+const cRecvWait=200{ms};
 
 PROCEDURE ProcessPacket;
 var p:pointer;
@@ -29,11 +29,13 @@ var p:pointer;
 begin
  p:=InPk;
  Peers.SelectedAddr.ToString( addrstr );
- log.msg('Received #'+IntToStr(InPk^.pktype)+' ('+IntToStr(InPkLen)+'B) From '+addrstr);
  if InPk^.pktype=Peers.cAkafuka then Peers.tAkafuka(p^).Handle else
  if InPk^.pktype=Peers.cFundeluka then Peers.tFundeluka(p^).Handle else
  if InPk^.pktype=Encap.cEncap then Encap.tEncap(p^).Handle else
- Abort;
+  begin
+  log.msg('Received Unknown #'+IntToStr(InPk^.pktype)+' ('+IntToStr(InPkLen)+'B) From '+addrstr);
+  Abort;
+ end;
 end;
 
 PROCEDURE LoopOnSocket;
@@ -50,7 +52,7 @@ PROCEDURE LoopOnSocket;
   Log.msg('Reading from socket'); Flush(log.F);
   {fpSelect returns >0 if data is available}
   if BaseUnix.fpSelect( SocketUtil.Std+1, @FDS, nil, nil, cRecvWait )<=0 then begin
-   log.msg('Timeout');
+   log.msg('No more Data');
    break;
   end;
   {Receive}
