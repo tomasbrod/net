@@ -25,7 +25,7 @@ const cFundelukaN :string = 'Fundeluka'  experimental;
 const cAkafukaCooldown = 5000{ms} /MSecsPerDay;
 const cAkafukaRetry = 8{times};
 const cAkafukaMaxDelta = 600000{ms} /MSecsPerDay; {10 minutes to ping? Heh!}
-const cAkafukaPeriod = 600000{ms} /MSecsPerDay; {10 minutes to ping? Heh!}
+const cAkafukaPeriod = 20000{ms} /MSecsPerDay;
 
 TYPE
 
@@ -200,7 +200,7 @@ procedure tAddrAccess.Add( const Addr :NetAddr.T );
    //log.msg('Addr Add '+str+' new @'+IntToStr(i));
    Ex.Sock:=Addr;
    Ex.Akafuka.Since:=0;
-   Ex.Akafuka.Delta:=0;
+   Ex.Akafuka.Delta:=-1;
    Ex.Akafuka.Retry:=0;
    OverWrite( i, Ex );
   end;
@@ -352,7 +352,6 @@ var C :tAddrInfo;
  var r:tRecord;
 begin
  log.msg('Sending Akafuka');
- inherited Send(sizeof(SELF) - (Sizeof(YouSock)-YouSock.Length) );
  {Remove selected addr from db and append it to akafuka db}
  C.sock:=SelectedAddr;
  db.Init;
@@ -372,6 +371,7 @@ begin
  finally
   db.done;
  end;
+ inherited Send(sizeof(SELF) - (Sizeof(YouSock)-YouSock.Length) );
 end;
 
 procedure SaveReportedAddr( const Addr: NetAddr.t );
@@ -405,7 +405,7 @@ procedure tFundeluka.Handle;
 var C :tAddrInfo;
 var db: tAddrAccess;
 var i:tRecord;
- var isNew :boolean;
+ var isNew :boolean=false;
 begin
  inherited Handle;
  log.msg('Received '+cFundelukaN);
@@ -413,17 +413,18 @@ begin
  db.init( SelectedID );
  try
   db.Find( I, SelectedAddr ); {$NOTE OPT: use result from tpacket.handle as index to db}
+  log.msg('Read info @'+IntToStr(i));
   db.Read( C, I );
   {
    What if we had sent akafuka to unknown netaddr to get it's ID?
    -> tPacket.Handle had already added the addr to db.
   }
-  C.akafuka.Retry:=0;
   if C.Akafuka.Since>0 then begin
-   if (C.akafuka.Delta=0) then isNew:=true;
+   if (C.akafuka.Delta=-1) then isNew:=true;
    if isNew then log.msg('This is new Peer');
    C.akafuka.Delta:=Now - C.akafuka.Since;
    log.msg('Akafuka info: Retry='+IntToStr(C.akafuka.Retry)+' Delta='+FloatToStr(C.akafuka.Delta*SecsPerDay)+'s Since='+DateTimeToStr(C.Akafuka.Since));
+   C.akafuka.Retry:=0;
    if C.akafuka.Delta>cAkafukaMaxDelta then begin
     log.msg('AkafukaDelta too big');
     db.Delete( I )
@@ -432,7 +433,7 @@ begin
     db.OverWrite( I, C );
     if isNew and assigned(NewProc) then NewProc( SelectedID );
    end;
-  end;
+  end else log.msg('No Akafuka info');
  finally
   db.done;
  end;
@@ -454,12 +455,15 @@ procedure DoAkafuka;
  var C:tAddrInfo;
  var r:tRecord;
  var akafuka:tAkafuka;
+ var str:string;
  begin
  list.init(cTable);
  try repeat
   list.Read(row);
+  log.msg('doing '+row);
   if row='tags' then continue;
   id.FromString(row);
+  if id.isNil then continue;
   SelectedID:=id;
   isSelectedId:=true;
   db.init(id);
@@ -467,15 +471,20 @@ procedure DoAkafuka;
   try repeat
    try
     db.Read(C, R );
+    c.sock.tostring(str);
+    log.msg('Read address @'+IntToStr(R)+' '+str);
     if C.Akafuka.Retry>cAkafukaRetry then begin
+     log.msg('Retry to big, delete @'+IntToStr(R));
      db.Delete(r);
-     system.write('[');
      continue;
      { no increment, becouse delete shifted records to r }
     end;
+    if (Now-C.Akafuka.Since) < cAkafukaPeriod then begin
+     log.msg('Akafuka info recent enough');
+     Inc(R); {Skip to next} continue;
+    end;
    finally
-    db.done;
-    system.write(']');
+    {database is closed after this loop, not here}
    end;
    SelectedAddr:=C.sock;
    isSelectedAddr:=true;
@@ -486,7 +495,6 @@ procedure DoAkafuka;
   db.done;
  until false; except on eRangeError do ; end;
  list.done;
- AbstractError;
 end;
 
 procedure Add( addr :NetAddr.T );
