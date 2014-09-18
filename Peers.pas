@@ -378,12 +378,24 @@ end;
 
 procedure SaveReportedAddr( const Addr: NetAddr.t );
  var db: tAddrAccess;
+ var C: tAddrInfo;
  var str:string;
+ var r:tRecord;
  begin
  Addr.ToString(str);
  log.msg('Sender Reported our Address '+str);
  db.Init( ThisID );
- try db.Add( Addr );
+ try
+  try
+   db.Find( R, Addr );
+   db.Read( C, R );
+  except on eRangeError do begin
+   C.Sock:=Addr;
+   C.Akafuka.Retry:=0;
+   C.Akafuka.Delta:=-1;
+  end; end;
+  C.Akafuka.Since:=Now;
+  db.OverWrite( R, C );
  { Add reported external address }
  finally db.Done; end;
 end;
