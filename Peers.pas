@@ -197,7 +197,7 @@ procedure tAddrAccess.Add( const Addr :NetAddr.T );
   exit;
  except
   on eRangeError do begin
-   log.msg('Addr Add '+str+' new @'+IntToStr(i));
+   //log.msg('Addr Add '+str+' new @'+IntToStr(i));
    Ex.Sock:=Addr;
    Ex.Akafuka.Since:=0;
    Ex.Akafuka.Delta:=0;
@@ -214,11 +214,11 @@ procedure tAddrAccess.Add( const info :tAddrInfo );
  begin
  info.sock.ToString(str);
  if info.sock.data.Family = afNil then exit; {Do not associate with nil address}
- log.msg('Addr Add info '+str);
+ //log.msg('Addr Add info '+str);
  try
   Find( i, info.sock );
   OverWrite( i, Info );
-  log.msg('ow @'+inttostr(i));
+  //log.msg('ow @'+inttostr(i));
  except
   on eRangeError do Append( info );
  end;
@@ -233,7 +233,7 @@ procedure tAddrAccess.Remove( const Addr :tAddrInfo );
  try
   Find( i, Addr.sock );
   Delete( i );
-  log.msg('Addr Del '+str+' @'+IntToStr(i));
+  //log.msg('Addr Del '+str+' @'+IntToStr(i));
  except
   on eRangeError do;
  end;
@@ -367,10 +367,23 @@ begin
     { db.Append( r, C ); r is already set to eof by find }
   end; end;
   C.akafuka.Since:=Now;
+  log.msg('Akafuka info: Retry='+IntToStr(C.akafuka.Retry)+' Delta='+FloatToStr(C.akafuka.Delta*SecsPerDay)+'s Since=now');
   db.OverWrite( r, C );
  finally
   db.done;
  end;
+end;
+
+procedure SaveReportedAddr( const Addr: NetAddr.t );
+ var db: tAddrAccess;
+ var str:string;
+ begin
+ Addr.ToString(str);
+ log.msg('Sender Reported our Address '+str);
+ db.Init( ThisID );
+ try db.Add( Addr );
+ { Add reported external address }
+ finally db.Done; end;
 end;
 
 procedure tAkafuka.Handle;
@@ -384,6 +397,7 @@ begin
   fundeluka.Create;
   fundeluka.Send;
  end else log.msg('Anti-DDoS');
+ SaveReportedAddr( YouSock );
  ResetTimeSince;
 end;
 
@@ -394,10 +408,11 @@ var i:tRecord;
  var isNew :boolean;
 begin
  inherited Handle;
+ log.msg('Received '+cFundelukaN);
  { The assoc re-adds peer to db. Now remove it from akafuka db}
  db.init( SelectedID );
  try
-  db.Find( I, SelectedAddr );
+  db.Find( I, SelectedAddr ); {$NOTE OPT: use result from tpacket.handle as index to db}
   db.Read( C, I );
   {
    What if we had sent akafuka to unknown netaddr to get it's ID?
@@ -406,10 +421,14 @@ begin
   C.akafuka.Retry:=0;
   if C.Akafuka.Since>0 then begin
    if (C.akafuka.Delta=0) then isNew:=true;
+   if isNew then log.msg('This is new Peer');
    C.akafuka.Delta:=Now - C.akafuka.Since;
-   if C.akafuka.Delta>cAkafukaMaxDelta then db.Delete( I )
-   { Drop the peer if delta excedes limit }
-    else begin
+   log.msg('Akafuka info: Retry='+IntToStr(C.akafuka.Retry)+' Delta='+FloatToStr(C.akafuka.Delta*SecsPerDay)+'s Since='+DateTimeToStr(C.Akafuka.Since));
+   if C.akafuka.Delta>cAkafukaMaxDelta then begin
+    log.msg('AkafukaDelta too big');
+    db.Delete( I )
+    { Drop the peer if delta excedes limit }
+   end else begin
     db.OverWrite( I, C );
     if isNew and assigned(NewProc) then NewProc( SelectedID );
    end;
@@ -417,10 +436,8 @@ begin
  finally
   db.done;
  end;
- db.Init( ThisID );
- try db.Add( YouSock );
- { Add reported external address }
- finally db.Done; end;
+ SaveReportedAddr( YouSock );
+ ResetTimeSince;
 end;
 
 procedure DoAkafuka;
