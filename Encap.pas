@@ -31,6 +31,7 @@ type
   procedure Send;
   private
   Len :{NetAddr.Word2}LongWord platform;
+  DestID : Peers.tID;
   Dest :NetAddr.t; {static size. for now}
   {Data follows; dynamic size}
   function StartOfData :pointer;
@@ -48,6 +49,8 @@ procedure tEncap.Handle;
  GetMem( UnEncap, Len );
  Peers.SelectedAddr:= Dest;
  Peers.IsSelectedAddr:= True;
+ Peers.SelectedID:= DestID;
+ Peers.IsSelectedID:= True;
  Move( StartOfData^, UnEncap^, Len );
  UnEncap^.Send(Len); {This will send the packet from _our_ socket}
 end;
@@ -57,6 +60,7 @@ procedure tEncap.Create( Len:LongWord; var Data );
  inherited Create(cEncap);
  assert(Peers.IsSelectedAddr);
  self.Dest:=Peers.SelectedAddr;
+ self.DestID:=Peers.SelectedID;
  self.Len:=Len;
  Move( Data, StartOfData^, Len );
 end;
