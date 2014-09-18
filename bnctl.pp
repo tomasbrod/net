@@ -42,7 +42,7 @@ procedure PeerInfo;
  writeln(output,'ID  :',str);
  Peers.SelectedAddr.ToString(str);
  writeln(output,'ADDR:',str);
- writeln(output,'DLTA:','?');
+ writeln(output,'DLTA:', FloatToStr(Peers.SelectedDelta*SecsPerDay)+'s' );
 end;
 
 BEGIN

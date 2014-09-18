@@ -107,6 +107,7 @@ var
  SelectedAddr :NetAddr.T; {$NOTE Should Move SelectedAddr to SocketUtil?}
  IsSelectedID : boolean;
  IsSelectedAddr :boolean;
+ SelectedDelta :System.tTime;
  SendProc: procedure(var Data; Len:LongInt);
  NewProc :procedure( id :tID );
 
@@ -252,7 +253,7 @@ procedure Select( ID :tID );
  try
   try
    db.Read( cur, 0 );
-   {$NOTE Selects only first address from the db.}
+   {$NOTE Selects only first address from the db. Should decide based on Delta and sock.family}
   except
    on eRangeError do raise eNoAddress.Create(ID);
   end;
@@ -263,6 +264,7 @@ procedure Select( ID :tID );
  SelectedAddr:=cur.sock;
  IsSelectedID:=true;
  IsSelectedAddr:=true;
+ SelectedDelta:=cur.akafuka.Delta;
  SelectedAddr.ToString(saddr);
  log.msg('Selected '+sid+' ('+saddr+')');
 end;
