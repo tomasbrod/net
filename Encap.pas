@@ -26,11 +26,11 @@ type
   of family different from daemon's socket's family}
  
   procedure Handle;
-  procedure Create( Len:LongWord; var Data{:Peers.tPacket} );
+  procedure Create( Len:Word; var Data{:Peers.tPacket} );
   {Caller should allocate sizeof(tEncap) + Len bytes of memory for this object.}
   procedure Send;
   private
-  Len :{NetAddr.Word2}LongWord platform;
+  Len :NetAddr.Word2;
   DestID : Peers.tID;
   Dest :NetAddr.t; {static size. for now}
   {Data follows; dynamic size}
@@ -43,19 +43,21 @@ uses SysUtils
 
 procedure tEncap.Handle;
  var UnEncap: ^Peers.tPacket;
+ var LenW:Word;
  begin
  { Do not call to inherited handle, because we do not want milion of localhost addresses in database.}
  log.msg('Received Encap');
- GetMem( UnEncap, Len );
+ LenW:=Len;
+ GetMem( UnEncap, LenW );
  Peers.SelectedAddr:= Dest;
  Peers.IsSelectedAddr:= True;
  Peers.SelectedID:= DestID;
  Peers.IsSelectedID:= True;
- Move( StartOfData^, UnEncap^, Len );
- UnEncap^.Send(Len); {This will send the packet from _our_ socket}
+ Move( StartOfData^, UnEncap^, LenW );
+ UnEncap^.Send(LenW); {This will send the packet from _our_ socket}
 end;
 
-procedure tEncap.Create( Len:LongWord; var Data );
+procedure tEncap.Create( Len:Word; var Data );
  begin
  inherited Create(cEncap);
  assert(Peers.IsSelectedAddr);
@@ -71,13 +73,15 @@ function tEncap.StartOfData :pointer;
 end;
 
 procedure tEncap.Send;
+ var LenW:Word;
  begin
  log.msg('Sending Encap');
+ LenW:=Len;
  Peers.SelectedAddr.LocalHost(Dest.data.Family);
  Peers.IsSelectedID:=False;
  Peers.SelectedID.Clear;
  Peers.IsSelectedAddr:=True;
- inherited Send( SizeOf(self) + Len );
+ inherited Send( SizeOf(self) + LenW );
 end;
 
 END.
