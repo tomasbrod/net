@@ -192,20 +192,29 @@ begin
 end;
 
 operator := (net : Word2) host:word;
+ var pnet:^word;
  begin
- host:=ShortNetToHost( net );
+ pnet:=@net;
+ host:=ShortNetToHost( pnet^ );
 end;
 operator := (net : Word4) host:Dword;
+ var pnet:^DWord;
  begin
- host:=NetToHost( DWord(net) );
+ pnet:=@net;
+ host:=NetToHost( pnet^ );
 end;
+
 operator := (host : word) net:Word2;
+ var pnet:^Word;
  begin
- net:=ShortNetToHost( host );
+ pnet:=@net;
+ pnet^:= ShortHostToNet( host );
 end;
 operator := (host : Dword) net:Word4;
+ var pnet:^DWord;
  begin
- net:=NetToHost( host );
+ pnet:=@net;
+ pnet^:=HostToNet( host );
 end;
 
 END.
