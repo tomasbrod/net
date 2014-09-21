@@ -513,9 +513,11 @@ procedure Add( addr :NetAddr.T );
  var Akafuka :tAkafuka;
  begin
  isSelectedID:=false;
+ SelectedID.Clear;
  SelectedAddr:=addr;
  isSelectedAddr:=true;
  Akafuka.Create;
+ {$NOTE This should not create peer db row nil field addr.}
  Akafuka.Send;
 end;
 
