@@ -30,7 +30,6 @@ procedure PeerDoAkafuka;
 end;
 
 procedure PeerInfo;
- var addr:NetAddr.t;
  var id :Peers.tID;
  var str:string;
  begin

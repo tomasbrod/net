@@ -20,18 +20,18 @@ TYPE
   { Returns length of the structure based on address family }
 
   procedure ToSocket( var sockaddr :tSockAddr );
-   experimental;
+  {$HINT Not actually testet, byt seems to work}
   procedure FromSocket( var sockaddr :tSockAddr );
-   experimental;
+  {$HINT Not actually testet, byt seems to work}
 
   procedure ToString( var str :String );
-   experimental;
+  {$HINT Not actually testet, byt seems to work}
   procedure FromString( str :String );
-   experimental;
+  {$HINT Not actually testet, byt seems to work}
 
   procedure LocalHost( af: tFamily );
   {Generate localhost address of address family af.}
-   experimental;
+  {$HINT Not actually testet, byt seems to work}
 
   public
   data :packed record
@@ -122,7 +122,6 @@ begin
 end;
 
 procedure t.ToString( var str :String );
- var i:integer;
  begin
  case data.Family of
   afInet: begin
@@ -135,7 +134,7 @@ procedure t.ToString( var str :String );
 end;
 
 procedure t.FromString( str :String );
- var i,e:integer;
+ var i:integer;
  var fam:string;
  begin
  if Copy(str,1,2)<>'//' then raise eConvertError.Create('');

@@ -11,18 +11,17 @@ var StdFamily :NetAddr.tFamily =afNil;
 
 procedure Send( const sock :tSocket; const Addr:NetAddr.t; var Data; Len:LongInt);
  overload;
- experimental;
+ {$HINT Not actually testet, byt seems to work}
 
 procedure Recv( out Addr:NetAddr.t; var Data; var Len:LongInt);
  overload;
- unimplemented;
- experimental;
+ {$HINT Not actually testet, byt seems to work}
 
 procedure CreateAndSend( var Data; Len:LongInt);
- experimental;
+ {$HINT Not actually testet, byt seems to work}
 
 procedure SendOrEncap( var Data; Len:LongInt);
- experimental;
+ {$HINT Not actually testet, byt seems to work}
 
 IMPLEMENTATION
 uses SysUtils

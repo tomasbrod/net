@@ -5,7 +5,6 @@ const cMainLog:string='g.log';
 
 PROCEDURE Init;
  var cfg :TINIFile;
- var str :string;
  begin
  DataBase.Prefix:=GetEnvironmentVariable('BRODNETD_DATA');
  if not FindCmdLineSwitch('stderr') then Log.Init( DataBase.Prefix+DirectorySeparator+cMainLog );

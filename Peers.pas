@@ -17,9 +17,9 @@ uses Keys
 type  tPktype =byte;
 
 const cAkafuka :tPkType = 1;
-const cAkafukaN :string='Akafuka'  experimental;
+const cAkafukaN :string='Akafuka';
 const cFundeluka :tPkType = 2;
-const cFundelukaN :string = 'Fundeluka'  experimental;
+const cFundelukaN :string = 'Fundeluka';
 //const PkAccept :set of tPkType = [cAkafuka, cFundeluka];
 
 const cAkafukaCooldown = 5000{ms} /MSecsPerDay;
@@ -45,7 +45,6 @@ TYPE
   sender :tID;
   procedure Create ( const itp :tPktype );
   procedure Handle;
-  experimental;
   procedure Send( Len:LongInt ); overload;
   function TimeSince: System.tTime;
   procedure ResetTimeSince;
@@ -59,7 +58,6 @@ TYPE
  }
 
   procedure Handle;
-  experimental;
   { Executes approportiate actions to respond to this packet }
 
   procedure Send; overload;
@@ -81,7 +79,6 @@ TYPE
   { unmarkd selected address as akafuka, computes AkafukaDelta }
 
   procedure Send; overload;
-  experimental;
   { Computes length of the packet and calls send }
 
   procedure Create; overload;
@@ -112,10 +109,11 @@ var
  NewProc :procedure( id :tID );
 
 procedure Select( ID :tID );
+ experimental;
 { Selects peer with given ID and automatically picks an sockaddr }
 
 procedure DoAkafuka;
- experimental;
+{$HINT Not actually testet, byt seems to work}
 {
  Send Akafuke to all peers.
  Remove not responding peers.
@@ -123,11 +121,12 @@ procedure DoAkafuka;
 
 procedure Add( addr :NetAddr.T );
 { Add peer only known by its address. }
-experimental;
+{$HINT Not actually testet, byt seems to work}
 
 procedure Reset;
 
 procedure SelfTest;
+ platform;
 
 IMPLEMENTATION
 uses 
@@ -210,7 +209,6 @@ end;
 
 procedure tAddrAccess.Add( const info :tAddrInfo );
  var i:tRecord;
- var Ex : tAddrInfo;
  var str:string;
  begin
  info.sock.ToString(str);
@@ -227,7 +225,6 @@ end;
 
 procedure tAddrAccess.Remove( const Addr :tAddrInfo );
  var i:tRecord;
- var Ex : tAddrInfo;
  var str:string;
  begin
  Addr.sock.ToString(str);
@@ -402,7 +399,6 @@ end;
 
 procedure tAkafuka.Handle;
 var fundeluka:tFundeluka;
-var db: tAddrAccess;
 begin
  inherited Handle;
  log.msg('Received '+cAkafukaN);
@@ -529,14 +525,12 @@ procedure tFundeluka.Create;
 begin
  inherited Create(cFundeluka);
  YouSock:=SelectedAddr;
- Load:=$EE;
 end;
 
 procedure tAkafuka.Create;
 begin
  inherited Create(cAkafuka);
  YouSock:=SelectedAddr;
- Load:=$DD;
 end;
 
 procedure tFundeluka.Send;
