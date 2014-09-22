@@ -23,6 +23,7 @@ The source code is divided into following units.
 [Peers]		| Client evidence. Akafukas.
 [Share]		| Searching. Delivery of results.
 [Tag]		| Tags hashing. Tags of files and peers. Matching tags.
+[Transfer]	| CHK file transfer.
 [DataBase]	| Generic 4-dimensional file database.
 [NetAddr]	| Network address abstraction.
 [Keys]		| Cryptographic operations and data structures.
@@ -35,6 +36,7 @@ The source code is divided into following units.
 [Peers]: Peers.pas
 [Share]: Share.pas
 [Tag]: Tag.pas
+[Transfer]: Transfer.pas
 [DataBase]: DataBase.pas
 [NetAddr]: NetAddr.pas
 [Keys]: Keys.pas

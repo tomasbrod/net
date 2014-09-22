@@ -101,7 +101,7 @@ TYPE
 var
  ThisID :tID;
  SelectedID : tID;
- SelectedAddr :NetAddr.T; {$NOTE Should Move SelectedAddr to SocketUtil?}
+ SelectedAddr :NetAddr.T; {$HINT Should Move SelectedAddr to SocketUtil?}
  IsSelectedID : boolean;
  IsSelectedAddr :boolean;
  SelectedDelta :System.tTime;
@@ -422,7 +422,7 @@ begin
  { The assoc re-adds peer to db. Now remove it from akafuka db}
  db.init( SelectedID );
  try
-  db.Find( I, SelectedAddr ); {$NOTE OPT: use result from tpacket.handle as index to db}
+  db.Find( I, SelectedAddr ); {$HINT OPT: use result from tpacket.handle as index to db}
   //log.msg('Read info @'+IntToStr(i));
   db.Read( C, I );
   {
@@ -517,7 +517,7 @@ procedure Add( addr :NetAddr.T );
  SelectedAddr:=addr;
  isSelectedAddr:=true;
  Akafuka.Create;
- {$NOTE This should not create peer db row nil field addr.}
+ {$HINT This should not create peer db row nil field addr.}
  Akafuka.Send;
 end;
 
