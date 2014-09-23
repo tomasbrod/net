@@ -12,6 +12,9 @@ USES Peers
 
 CONST
  cDataLength=768;
+ cGet:tpktype=4;
+ cDat:tpktype=5;
+ cPcs:tpktype=6;
 
 TYPE
 
@@ -62,10 +65,13 @@ procedure DoRetry;
 procedure Retry( id :tID );
 
 IMPLEMENTATION
+uses SysUtils;
 
 function IsPieced( id:tID ):boolean;
  forward;
-procedure Retry( id :tID );
+procedure GlobalAddDownload( id:tID );
+ forward;
+procedure AddSource( id:tID; source:Peers.tID );
  forward;
 
 procedure SendFile( id: tID );
@@ -89,3 +95,146 @@ procedure RecvFile( id:tID );
  Retry( ID );
 end;
 
+procedure tGet.Create( id :tID; part, count :Word );
+ var p:word;
+ var pdb :tPartAccess;
+ begin
+ inherited Create( cGet );
+ self.id:=id;
+ self.part:=part;
+ self.count:=count;
+ pdb.init( id );
+ try
+  for p:=part to part+count
+   do pdb.SetRequested( p );
+ finally
+  pdb.done;
+ end;
+end;
+
+procedure tGet.Send;
+ begin
+ Peers.tPacket.Send( sizeof(self) );
+end;
+
+procedure tDat.Create( id :tID; part :Word );
+ var db:tDataAccess;
+ var cLen:LongInt;
+ var Len :word;
+ var Ofs:LongWord;
+ begin
+ inherited Create( cDat );
+ self.id:= id;
+ self.part:= part;
+ db.init( id );
+ try
+  Ofs:= part * high(self.PayLoad);
+  cLen:= db.Length - Ofs;
+  if cLen<1 then raise eRangeError.Create('');
+  if cLen>high(self.PayLoad) then cLen:=high(self.PayLoad);
+  Len:=cLen;
+  if (db.Length mod high(self.PayLoad))=0
+   then self.total:= (db.Length div high(self.PayLoad))
+   else self.total:= (db.Length div high(self.PayLoad)) +1
+  ;
+  db.BlockRead( self.PayLoad, Ofs, cLen );
+ finally db.done; end;
+end;
+
+procedure tDat.Send;
+ begin
+ Peers.tPacket.Send( sizeof(self) );
+end;
+
+procedure tPcs.Create( id:tID; part:Word );
+ var db:tPiecesAccess;
+ var cLen:LongInt;
+ var Len :word;
+ var Ofs:LongWord;
+ begin
+ inherited Create( cPcs );
+ self.id:= id;
+ self.part:= part;
+ db.init( id );
+ try
+  Ofs:= part * high(self.PayLoad);
+  cLen:= db.Length - Ofs;
+  if cLen<1 then raise eRangeError.Create('');
+  if cLen>high(self.PayLoad) then cLen:=high(self.PayLoad);
+  Len:=cLen;
+  if (db.Length mod high(self.PayLoad))=0
+   then self.total:= (db.Length div high(self.PayLoad))
+   else self.total:= (db.Length div high(self.PayLoad)) +1
+  ;
+  db.BlockRead( self.PayLoad, Ofs, cLen );
+ finally db.done; end;
+end;
+
+procedure tPcs.Send;
+ begin
+ Peers.tPacket.Send( sizeof(self) );
+end;
+
+procedure tDat.Handle;
+ var pdb :tPartAccess;
+ var db :tDataAccess;
+ var Ofs:LongWord;
+ begin
+ Ofs:= word(part) * high(self.PayLoad);
+ db.init( id );
+ pdb.init( id );
+ db.BlockWrite( self.PayLoad, Ofs, high(self.PayLoad));
+ pdb.SetDone( part );
+ pdb.SetTotal( total );
+ pdb.done;
+ db.done;
+end;
+
+procedure tPcs.Handle;
+ var pdb :tPartAccess;
+ var db :tPiecesAccess;
+ var Ofs:LongWord;
+ begin
+ Ofs:= word(part) * high(self.PayLoad);
+ db.init( id );
+ pdb.init( id );
+ db.BlockWrite( self.PayLoad, Ofs, high(self.PayLoad));
+ pdb.SetDone( part );
+ pdb.SetTotal( total );
+ pdb.done;
+ db.done;
+end;
+
+procedure tGet.Handle;
+ var c :word;
+ var pcs:tPcs;
+ var dat:tDat;
+ var pieced:boolean;
+ var lpart, lcount :word;
+ begin
+ pieced:=IsPieced( id );
+ lpart:=self.part;
+ lcount:=self.count;
+ for c:=lpart to lpart+lcount do begin
+  if not pieced then begin
+   dat.Create( id, c );
+   dat.Send;
+  end else begin
+   pcs.Create( id, c );
+   pcs.Send;
+  end;
+ end;
+end;
+
+{
+tPartAccess
+tDataAccess
+tPiecesAccess
+DoRetry;"
+Retry(tID);"
+IsPieced(tID):Boolean;"
+GlobalAddDownload(tID);"
+AddSource(tID,tID);"
+}
+
+END.
