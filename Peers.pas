@@ -337,6 +337,7 @@ procedure tPacket.Handle;
  SelectedID.ToString(sid);
  log.msg('Received #'+IntToStr(pktype)+' From '+sid+' ('+saddr+')');
  log.msg('Last was '+TimeToStr(TimeSince)+'('+FloatToStr(TimeSince*SecsPerDay)+'s) ago');
+ {$NOTE Should we drop the packet if the sender id is not associated with sender address?}
  db.Init;
  try
   db.Add( SelectedAddr );
