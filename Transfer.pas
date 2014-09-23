@@ -18,63 +18,87 @@ CONST
 
 TYPE
 
- tID=object(Keys.tHash)
+ tFID=object(Keys.tHash)
  end;
  
  tGet=object(Peers.tPacket)
-  procedure Create( id :tID; part, count :Word );
+  procedure Create( id :tFID; part, count :Word );
   procedure Handle;
   procedure Send;
   private
-  id :tID;
+  id :tFID;
   part :NetAddr.Word2;
   count :NetAddr.Word2;
  end;
  
  tDat=object(Peers.tPacket)
-  procedure Create( id :tID; part :Word );
+  procedure Create( id :tFID; part :Word );
   procedure Handle;
   procedure Send;
   private
-  id :tID;
+  id :tFID;
   part :NetAddr.Word2;
   total :NetAddr.Word2;
   PayLoad: array [1..cDataLength] of byte;
  end;
 
  tPcs=object(Peers.tPacket)
-  procedure Create( id :tID; part :Word );
+  procedure Create( id :tFID; part :Word );
   procedure Handle;
   procedure Send;
   private
-  id :tID;
+  id :tFID;
   part :NetAddr.Word2;
   total :NetAddr.Word2;
-  PayLoad: array [1..(cDataLength div sizeof(tID))] of tID;
+  PayLoad: array [1..(cDataLength div sizeof(tFID))] of tFID;
  end;
 
 var OnNoSrc :procedure( id :tHash );
 var OnRecv  :procedure( id :tHash );
 
-procedure SendFile( id: tID );
+procedure SendFile( id: tFID );
 
-procedure RecvFile( id :tID );
+procedure RecvFile( id :tFID );
 
 procedure DoRetry;
 
-procedure Retry( id :tID );
+procedure Retry( id :tFID );
 
 IMPLEMENTATION
-uses SysUtils;
+uses SysUtils
+    ,DataBase
+    ;
 
-function IsPieced( id:tID ):boolean;
+function IsPieced( id:tFID ):boolean;
  forward;
-procedure GlobalAddDownload( id:tID );
+procedure GlobalAddDownload( id:tFID );
  forward;
-procedure AddSource( id:tID; source:Peers.tID );
+procedure AddSource( id:tFID; source:Peers.tID );
  forward;
 
-procedure SendFile( id: tID );
+TYPE { database accessors }
+
+ tPartAccess=object(DataBase.tAccess)
+  ToRetrySearchFrom :Word;
+  constructor Init( fid :tFID );
+  procedure SetRequested( part :Word );
+  procedure SetDone( part :Word );
+  procedure SetTotal( total :Word );
+  {
+  procedure Abort;
+  procedure ToRetry( var part :Word; out count :Word );
+  }
+ end experimental;
+
+ tDataAccess=object(DataBase.tAccess)
+  constructor Init( fid :tFID );
+ end experimental;
+
+ tPiecesAccess=object(DataBase.tAccess)
+  constructor Init( fid :tFID );
+ end experimental;
+
+procedure SendFile( id: tFID );
  var dat :tDat;
  var pcs :tPcs;
  {No tak bude na stacku nepotrebna premenna, svet sa nezruti.}
@@ -88,14 +112,14 @@ procedure SendFile( id: tID );
  end;
 end;
 
-procedure RecvFile( id:tID );
+procedure RecvFile( id:tFID );
  begin
  GlobalAddDownload( id );
  AddSource( id, Peers.SelectedID );
  Retry( ID );
 end;
 
-procedure tGet.Create( id :tID; part, count :Word );
+procedure tGet.Create( id :tFID; part, count :Word );
  var p:word;
  var pdb :tPartAccess;
  begin
@@ -117,7 +141,7 @@ procedure tGet.Send;
  Peers.tPacket.Send( sizeof(self) );
 end;
 
-procedure tDat.Create( id :tID; part :Word );
+procedure tDat.Create( id :tFID; part :Word );
  var db:tDataAccess;
  var cLen:LongInt;
  var Len :word;
@@ -129,13 +153,13 @@ procedure tDat.Create( id :tID; part :Word );
  db.init( id );
  try
   Ofs:= part * high(self.PayLoad);
-  cLen:= db.Length - Ofs;
+  cLen:= db.TotalCount - Ofs;
   if cLen<1 then raise eRangeError.Create('');
   if cLen>high(self.PayLoad) then cLen:=high(self.PayLoad);
   Len:=cLen;
-  if (db.Length mod high(self.PayLoad))=0
-   then self.total:= (db.Length div high(self.PayLoad))
-   else self.total:= (db.Length div high(self.PayLoad)) +1
+  if (db.TotalCount mod high(self.PayLoad))=0
+   then self.total:= (db.TotalCount div high(self.PayLoad))
+   else self.total:= (db.TotalCount div high(self.PayLoad)) +1
   ;
   db.BlockRead( self.PayLoad, Ofs, cLen );
  finally db.done; end;
@@ -146,7 +170,7 @@ procedure tDat.Send;
  Peers.tPacket.Send( sizeof(self) );
 end;
 
-procedure tPcs.Create( id:tID; part:Word );
+procedure tPcs.Create( id:tFID; part:Word );
  var db:tPiecesAccess;
  var cLen:LongInt;
  var Len :word;
@@ -158,13 +182,13 @@ procedure tPcs.Create( id:tID; part:Word );
  db.init( id );
  try
   Ofs:= part * high(self.PayLoad);
-  cLen:= db.Length - Ofs;
+  cLen:= db.TotalCount - Ofs;
   if cLen<1 then raise eRangeError.Create('');
   if cLen>high(self.PayLoad) then cLen:=high(self.PayLoad);
   Len:=cLen;
-  if (db.Length mod high(self.PayLoad))=0
-   then self.total:= (db.Length div high(self.PayLoad))
-   else self.total:= (db.Length div high(self.PayLoad)) +1
+  if (db.TotalCount mod high(self.PayLoad))=0
+   then self.total:= (db.TotalCount div high(self.PayLoad))
+   else self.total:= (db.TotalCount div high(self.PayLoad)) +1
   ;
   db.BlockRead( self.PayLoad, Ofs, cLen );
  finally db.done; end;
@@ -227,14 +251,11 @@ procedure tGet.Handle;
 end;
 
 {
-tPartAccess
-tDataAccess
-tPiecesAccess
 DoRetry;"
-Retry(tID);"
-IsPieced(tID):Boolean;"
-GlobalAddDownload(tID);"
-AddSource(tID,tID);"
+Retry(tFID);"
+IsPieced(tFID):Boolean;"
+GlobalAddDownload(tFID);"
+AddSource(tFID,tID);"
 }
 
 END.

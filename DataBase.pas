@@ -30,6 +30,12 @@ tFieldAccessor=object
   experimental;
  procedure LastPos( out pos :tRecord );
   { Get position of last append, read or write operation }
+ function TotalCount :Cardinal;
+  unimplemented;
+ procedure BlockRead( var Data; offset :Cardinal; count: Cardinal );
+  unimplemented;
+ procedure BlockWrite( var Data; offset :Cardinal; count: Cardinal );
+  unimplemented;
  private
  RecLen :word;
  dat :file;
@@ -94,13 +100,13 @@ procedure UnInsert ( var F :file );
     Assert(nwpos>0);
     if not EoF(F) then begin
      Seek(F, FileSize(F)-1);
-     BlockRead(F, Ex, 1);
+     System.BlockRead(F, Ex, 1);
      Seek(F, nwpos-1);
      {
       nwpos is position of record next of the oddending
       becouse this proc is called after the record to delete was read
      }
-     BlockWrite(F, Ex, 1);
+     System.BlockWrite(F, Ex, 1);
     end;
     Seek(F, FileSize(F)-1);
     Truncate(F);
@@ -136,7 +142,7 @@ procedure tFieldAccessor.Read( var D; const pos :tRecord );
  begin
  if ((pos+1)*RecLen) > FileSize( dat ) then raise eRangeError.Create('Record is Not In File');
  Seek( dat, pos*RecLen);
- BlockRead( dat, D, RecLen);
+ System.BlockRead( dat, D, RecLen);
 end;
 
 procedure tFieldAccessor.Delete( const pos :tRecord );
@@ -147,7 +153,7 @@ procedure tFieldAccessor.Delete( const pos :tRecord );
   GetMem( tmp, RecLen );
   try
    Seek( dat, FileSize(dat) - (1*RecLen) );
-   BlockRead(dat, tmp^, RecLen );
+   System.BlockRead(dat, tmp^, RecLen );
    self.OverWrite( pos, tmp^ );
   finally FreeMem( tmp, RecLen ); end;
  end;
@@ -158,7 +164,7 @@ end;
 procedure tFieldAccessor.OverWrite( const pos :tRecord; const D );
  begin
  Seek( dat, (pos*RecLen) );
- BlockWrite( dat, D, RecLen );
+ System.BlockWrite( dat, D, RecLen );
 end;
 
 procedure tFieldAccessor.Expand( const pos :tRecord );
