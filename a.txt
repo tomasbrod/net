@@ -242,14 +242,47 @@ list.
 File Transfer
 -------------
 
-FileTransfer is used to copy files or parts of files ower the network. 
-Files are split to pieces. Multiple files can share the same pieces. Files 
-are basically pieces of data (with metadata). Thus One piece can contain 
-either data or referneces to other pieces. Pieces are identified by their 
-hash data. If piece contains references to othe pieces, it is identified by 
-hash of the concatenated subpieces.
+[File Transfer][Transfer] is used to copy files or parts of files ower the 
+network.
 
-File transfer is initaited by sending a FileTransfer.tYes packet to peer, 
-who should have the piece. The peer sends back either FileTransfer.tData or 
-list of pieces in one ore multiple FileTransfer.tPcs packets.
-If no reply is recieved (packet lost) in time, the tYes packet is sent again.
+### Parts
+
+Filetransfer answer packets all contain sequence number of part and number 
+of total parts. The Transfer takes care of downloading all parts of the 
+file. When the whole data object is downloaded, its hash is checked. If the 
+hashes do not match, the data object is erased and download is started over 
+again. When the download is complete and the hash matched,
+other units are notified.
+
+To keep tracks on what parts were downloaded, a parts.dat field is stored 
+in files.db. Additionaly an entry to downloadlist.dat is added. Parts of 
+the same file are downloaded from the same peer.
+
+### Pieces
+
+Files can be split to pieces. Multiple files can share the same pieces. One 
+data object is either File or list of pieces (Pieced file). Pieces are 
+normal files. A node tries to download all pieces of file. The lis of 
+pieces for Pieced file is downloaded in Parts (described in previous section).
+
+Pieced files can be reassembled on request (after the node has downloaded 
+all the pieces). Pieced files are identified by hash of the assembled file. 
+The hash can only be checked after all pieces of the file have been 
+downloaded. If the hashes do not match, only the Pieced file is erased and 
+downloaded again. The already downloaded pieces are left in the files.db.
+
+Pieced files have pieces.dat in the files.db instead of content.dat. And 
+files that are pieces of some Pieced file have ref.dat in files.db.
+
+In opposite to Parts, pieces of the same Pieced file can be downloaded from 
+multiple peers *at the same time*. Becouse pieces are just normal files.
+
+### Communication
+
+File transfer is initaited by sending a Transfer.tGet packet to peer, who 
+should have the data object. The peer sends back either file contents in 
+Transfer.tDat or list of pieces in Transfer.tPcs (Pieced file) packet.
+
+If no reply is recieved (packet lost) in time, the tYes packet is sent 
+again.
+
