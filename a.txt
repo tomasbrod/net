@@ -8,7 +8,7 @@ The network is going to cover two modes of operation.
 
 And should serve the following
 
-1. Verifiable Files
+1. Content Hash Keys
 2. Named Files
 3. Keyword Searches
 4. MeSsages
@@ -63,12 +63,13 @@ again.
 
 There can be possibly multiple instances of brodnetd running, so 
 approportiate database locking should be implemented.
+And is still not.
 
 ### BnCtl
 
 Local node can be controlled by bnctl program.
 
-Usage: bnctl [%1] [%2] [%3] [-stderr] [<switches>]
+Usage: bnctl [%1] [%2] [%3] [-stderr] [%switches%]
 
 switch| meaning   | %1 | %2 | %3
 ------|-----------|----|----|----
@@ -89,35 +90,22 @@ no	| //local/tmp/foobar						| unix domain socket
 Discovery
 ---------
 
-The node finds its peers by sending a local area broadcasts (LAND). It is 
+The node finds its peers using local area node discovery (LAND). It is 
 performed by sending Akafuka packet to all devices in range of all network 
-interfaces.
+interfaces (broadcast).
 
 The second mode of discovery is wide area node discovery (WAND). It is 
 performed by sending request to all peers in node list, which 
 should reply with list of nodes. The node then tryies to send Akafuka packet 
 to discovered nodes directly. If successfull (eg: in Internet), it uses 
 them as peers. If unsuccessfull (eg: in Meshnet), it updates its routing 
-table.
-
-### Note on key sizes
-
-*deprecated*
-
-2048 RSA signing keys with SHA256 digest are ok (about 0.5kiB). DSA keys are preffered.
-The whole hello.dat.gpg has to fit in one UDP packet (max 1kiB).
-
-The hello.dat has one 20B Fingerprint, and like 48 4B Area codes ==212B.
-
-The signature is MAX 512B.
-
-Packet is 725B.
+table (tags on the sender).
 
 Greetings (Akafuka Fundeluka)
 ------------------
 
 Akafuka is used to find new peers (LAND) as well as to check 
-availability of peers.
+availability of peers (like PING).
 
 Akafuka (and Fundeluka, they are same) consist of:
 
@@ -128,75 +116,44 @@ Akafuka (and Fundeluka, they are same) consist of:
 The purpose of the reciever's sockaddr filed
 is to inform nodes behind NAT of their external Address.
 This could be possibly used for STUN.
-It can be null, if unknown (eg: broadcast).
+It can be null, if unknown (eg: broadcast in LAND).
 
 ### If node recieves an Akafuka
 
-- it adds the sender to list of peers.
+- it adds the sender to list of peers. (Fundeluka too)
 
 - in cHelloCooldown{ms} since last Hello from the same peer,
   no further actions are performed
 
-- it replies with Fundeluka
+- it replies Fundeluka
+
+The names are reference to Dávid and his awesome Zidan Power.
  
-Areas
------
-
-Each node has an area record. A node can find its area record from its 
-peers. The area record is used to accelerate routing.
-
-The area record is just list of area codes. An area code is 32bit 
-number and specifies a geological or fictional location of the node.
-There are usually more area codes in area record of a given node.
-
-When there are too much nodes in an area, new area should be created. When 
-there are too litle nodes in area, the area code is abadoned.
-
-The area codes could be possibly created and managed autmomatically, but 
-now they are managed by administrator.
-
 File Sharing
 ------------
 
 *unimplemented*
 
-All files in the network have tags. Files are found only by their tags.
+Files in the network can have tags. Files are _found_ only by their tags. 
+And identified by their hash.
 
-Search request (GET) and reply (PUT) is done with packet of the same 
-structure. The only difference is pktype field and that fh field is null in 
-GET packets.
+Search request (Search) and reply (Offer) is done with packet of the same 
+structure. The only difference is pktype field and that fh field can be null in 
+Search packets.
 
-Searching for a file is performed by sending FileShare.T packet to some 
+Searching for a file is performed by sending FileShare.tSearch packet to some 
 peers. This packed is Acknowledged. Peers should search in their datastore 
 or ask their peers. As soon as they find something, they send back a 
-FileShare.T packet. If the search is satisfied, FileTransfer is initiated.
+FileShare.tOffer packet. If the search is satisfied, Transfer is initiated.
 
 ### Avoiding Routing Loop
 
-When a FileShare GET packet arrives, it is forwarded to interested peers 
-only if tags in the pachet differ from the ones in the filestore.
+When a FileShare packet arrives, it is forwarded to interested peers 
+only if tags in the packet differ from the ones in the files.db.
 
-If the packet is PUT, search cache is checked instead.
+If the packet is Offer, search.db is checked instead.
 And if we are also interested in resuilts from the serach, we forward the 
-same packet back to sender. He adds our id to his search cache.
-
-
-
-### Comm
-
-Note: 'tags' is array of hash of tagstring.
-
-1. -> FileShare.T (hash = 0, tags)
-2. 
-   * <- FileShare.T (hash = 1, tags)
-   * <- FileShare.T (hash = 2, tags)
-   * <- FileShare.T (hash = 3, tags)
-3. -> FileTrans.tYes (hash = 2)
-4. 
-   * <- FileTrans.tPcs (hash = 2, order = 1, total = 2, pcs=(a,...) )
-   * <- FileTrans.tPcs (hash = 2, order = 2, total = 2, pcs=(...) )
-5. -> FileTransfer.tYes (hash = a)
-6. <- FileTransfer.tData (hash = a, data=(...) )
+same packet back to sender. He adds our id to subs.dat in his search.db.
 
 Tags
 ----
@@ -208,55 +165,43 @@ Tags are used to find files.
 But files hav max of 200 tags (to not fragment search packets).
 
 Tags of a given object are stored in file tags.dat in the object's 
-directory. To speed up searching tags are stored in <db>/tag/<taghash> 
-files which are file of Keys.tHash.
+directory. To speed up searching list of objects tagged by
+specific tag is stored in %db%.db/tag/%taghash%.dat.
 
 	files/
 	├── tag/
-	│   ├── BACABABA
-	│   └── 1234FEDC
-	├── CA/
-	│   └── CAFEBABE12345678/
-	│       └── tags.dat
-	└── 01/
-	    └── 01234567ABCDEF00/
-	        └── tags.dat
+	│   ├── BACABABA.dat
+	│   └── 1234FEDC.dat
+	├── CAFEBABE12345678/
+	│   └── tags.dat
+	└── 01234567ABCDEF00/
+	    └── tags.dat
 
 ### Searching
 
-For all tags in the query: FileIDs from <db>/tag/%taghash% are all 
+For all tags in the query: FileIDs from %tag%.dat are all 
 added to in-memory linked-list, but for files already in the list, count 
 field is increased and the entry is moved closer to start of the list. 
 
 Finally, the list contains best resuilts near the start.
 
-### Searching
-
-Node recieves a fileshare search. First tag is selected. FileIDs from 
-/tag/%taghash% are all added to in-memory linked-list. Next tag is 
-selected. Files there are added to the list, but for files already in the 
-list count field is increased and the entry is moved closer to start of the 
-list.
-
-
 File Transfer
 -------------
 
 [File Transfer][Transfer] is used to copy files or parts of files ower the 
-network.
+network. Files are identified by SHA1 hash of their contents.
 
 ### Parts
 
 Filetransfer answer packets all contain sequence number of part and number 
 of total parts. The Transfer takes care of downloading all parts of the 
-file. When the whole data object is downloaded, its hash is checked. If the 
-hashes do not match, the data object is erased and download is started over 
-again. When the download is complete and the hash matched,
-other units are notified.
+file. When the whole data object is downloaded, its hash is checked. On 
+error, the data object is erased and download is started over again. When 
+the download is complete and the hash matched, other units are notified.
 
 To keep tracks on what parts were downloaded, a parts.dat field is stored 
 in files.db. Additionaly an entry to downloadlist.dat is added. Parts of 
-the same file are downloaded from the same peer.
+the same file must be downloaded from the same peer.
 
 ### Pieces
 
