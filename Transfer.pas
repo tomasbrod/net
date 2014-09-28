@@ -98,6 +98,13 @@ TYPE { database accessors }
   constructor Init( fid :tFID );
  end experimental;
 
+ tDownloadsAccess=object(DataBase.tAccess)
+  constructor Init;
+  procedure Find( var R: DataBase.tRecord; fid :tID );
+  procedure Add( fid :tID );
+  procedure Remove( fid :tID );
+ end unimplemented;
+
 procedure SendFile( id: tFID );
  var dat :tDat;
  var pcs :tPcs;
@@ -205,6 +212,7 @@ procedure tDat.Handle;
  var Ofs:LongWord;
  begin
  Ofs:= word(part) * high(self.PayLoad);
+ if GetSource( id )<>Sender then raise exception.create('auth');
  db.init( id );
  pdb.init( id );
  db.BlockWrite( self.PayLoad, Ofs, high(self.PayLoad));
@@ -220,6 +228,7 @@ procedure tPcs.Handle;
  var Ofs:LongWord;
  begin
  Ofs:= word(part) * high(self.PayLoad);
+ if GetSource( id )<>Sender then raise exception.create('auth');
  db.init( id );
  pdb.init( id );
  db.BlockWrite( self.PayLoad, Ofs, high(self.PayLoad));
@@ -250,11 +259,30 @@ procedure tGet.Handle;
  end;
 end;
 
+procedure DoRetry;
+ var gdb: tDownloadsAccess;
+ var cur: tID;
+ var R: tRecord;
+ begin
+ R:=0;
+ gdb.init;
+ try
+  repeat
+   gdb.read(cur, R);
+   Retry( cur );
+   inc( R );
+  until false;
+ finally
+  gdb.done;
+ end;
+end;
+
+
 {
-DoRetry;"
 Retry(tFID);"
 IsPieced(tFID):Boolean;"
 GlobalAddDownload(tFID);"
+tDownloadsAccess
 AddSource(tFID,tID);"
 }
 
