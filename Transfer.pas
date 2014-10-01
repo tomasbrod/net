@@ -8,6 +8,7 @@ INTERFACE
 USES Peers
     ,Keys
     ,NetAddr
+    ,SysUtils
     ;
 
 CONST
@@ -52,6 +53,11 @@ TYPE
   total :NetAddr.Word2;
   PayLoad: array [1..(cDataLength div sizeof(tFID))] of tFID;
  end;
+ 
+ eNoSource=class(Exception)
+  fid: tFID;
+  constructor Create( ifid: tFid );
+ end;
 
 var OnNoSrc :procedure( id :tHash );
 var OnRecv  :procedure( id :tHash );
@@ -60,13 +66,14 @@ procedure SendFile( id: tFID );
 
 procedure RecvFile( id :tFID );
 
+procedure RecvFileAbort( id :tFID );
+
 procedure DoRetry;
 
 procedure Retry( id :tFID );
 
 IMPLEMENTATION
-uses SysUtils
-    ,DataBase
+uses DataBase
     ;
 
 function IsPieced( id:tFID ):boolean;
@@ -79,15 +86,14 @@ procedure AddSource( id:tFID; source:Peers.tID );
 TYPE { database accessors }
 
  tPartAccess=object(DataBase.tAccess)
-  ToRetrySearchFrom :Word;
   constructor Init( fid :tFID );
   procedure SetRequested( part :Word );
   procedure SetDone( part :Word );
   procedure SetTotal( total :Word );
-  {
   procedure Abort;
-  procedure ToRetry( var part :Word; out count :Word );
-  }
+  function isToRetry( part :Word ):boolean;
+  procedure FindToRetry( var part :Word );
+  { Finds first part to retry, starting at part, throws eRangeError on no more }
  end experimental;
 
  tDataAccess=object(DataBase.tAccess)
@@ -96,6 +102,11 @@ TYPE { database accessors }
 
  tPiecesAccess=object(DataBase.tAccess)
   constructor Init( fid :tFID );
+ end experimental;
+
+ tSourcesAccess=object(DataBase.tAccess)
+  constructor Init( fid :tFID );
+  procedure Select;
  end experimental;
 
  tDownloadsAccess=object(DataBase.tAccess)
@@ -259,16 +270,47 @@ procedure tGet.Handle;
  end;
 end;
 
+procedure Retry( id :tFID );
+ const cMaxGetCount=42;
+ const cMaxGet=4;
+ var db :tPartAccess;
+ var part :word;
+ var top  :word;
+ var get :tGet;
+ var pks :byte;
+ begin
+ db.init( id );
+ part:=0;
+ pks:=0;
+ for pks:=1 to cMaxGet do begin
+  try db.FindToRetry( part );
+  except on eRangeError do break; end;
+  top:=part+1;
+  while ((top-part)<=cMaxGetCount) and db.isToRetry( top ) do top:=top+1;
+  get.create( id, part, top-part-1 );
+  get.send;
+ end;
+end;
+
 procedure DoRetry;
  var gdb: tDownloadsAccess;
  var cur: tFID;
  var R: tRecord;
+ var src :tSourcesAccess;
  begin
  R:=0;
  gdb.init;
  try
   repeat
    gdb.read(cur, R);
+   src.init( cur );
+   try src.select;
+   except on eNoSource do begin
+     src.done;
+     if assigned(onNoSrc) then onNoSrc( cur );
+     raise;
+   end; end;
+   src.done;
    Retry( cur );
    inc( R );
   until false;
@@ -279,10 +321,9 @@ end;
 
 
 {
-Retry(tFID);"
+Retry(tFID);
 IsPieced(tFID):Boolean;"
 GlobalAddDownload(tFID);"
-tDownloadsAccess
 AddSource(tFID,tID);"
 }
 
