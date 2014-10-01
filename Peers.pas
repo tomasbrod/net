@@ -230,11 +230,11 @@ procedure tAddrAccess.Remove( const Addr :tAddrInfo );
  Addr.sock.ToString(str);
  try
   Find( i, Addr.sock );
-  Delete( i );
-  //log.msg('Addr Del '+str+' @'+IntToStr(i));
  except
-  on eRangeError do;
+  on eRangeError do exit;
  end;
+ Delete( i );
+ //log.msg('Addr Del '+str+' @'+IntToStr(i));
 end;
 
 procedure Select( ID :tID );
@@ -469,8 +469,12 @@ procedure DoAkafuka;
  var str:string;
  begin
  list.init(cTable);
- try repeat
-  list.Read(row);
+ repeat
+  try
+   list.Read(row);
+  except
+   on eRangeError do break;
+  end;
   if row='tags' then continue;
   id.FromString(row);
   if id.isNil then continue;
@@ -479,9 +483,12 @@ procedure DoAkafuka;
   isSelectedId:=true;
   db.init(id);
   r:=0;
-  try repeat
+  repeat
    try
     db.Read(C, R );
+   except
+    on eRangeError do break;
+   end;
     c.sock.tostring(str);
     log.msg('Read address @'+IntToStr(R)+' '+str+' of '+row);
     if C.Akafuka.Retry>cAkafukaRetry then begin
@@ -494,17 +501,14 @@ procedure DoAkafuka;
      log.msg('Akafuka info recent enough');
      Inc(R); {Skip to next} continue;
     end;
-   finally
-    {database is closed after this loop, not here}
-   end;
    SelectedAddr:=C.sock;
    isSelectedAddr:=true;
    Akafuka.Create;
    Akafuka.Send;
    inc(R);
-  until false; except on eRangeError do ; end;
+  until false;
   db.done;
- until false; except on eRangeError do ; end;
+ until false;
  list.done;
 end;
 
