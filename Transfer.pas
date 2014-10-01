@@ -212,7 +212,7 @@ procedure tDat.Handle;
  var Ofs:LongWord;
  begin
  Ofs:= word(part) * high(self.PayLoad);
- if GetSource( id )<>Sender then raise exception.create('auth');
+ //if GetSource( id )<>Sender then raise exception.create('auth');
  db.init( id );
  pdb.init( id );
  db.BlockWrite( self.PayLoad, Ofs, high(self.PayLoad));
@@ -228,7 +228,7 @@ procedure tPcs.Handle;
  var Ofs:LongWord;
  begin
  Ofs:= word(part) * high(self.PayLoad);
- if GetSource( id )<>Sender then raise exception.create('auth');
+ //if GetSource( id )<>Sender then raise exception.create('auth');
  db.init( id );
  pdb.init( id );
  db.BlockWrite( self.PayLoad, Ofs, high(self.PayLoad));
@@ -261,7 +261,7 @@ end;
 
 procedure DoRetry;
  var gdb: tDownloadsAccess;
- var cur: tID;
+ var cur: tFID;
  var R: tRecord;
  begin
  R:=0;
