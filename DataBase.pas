@@ -216,4 +216,23 @@ procedure tRowList.Read( out row :tRow );
   if FindNext(Search)<>0 then Done;
 end;
 
+function tFieldAccessor.TotalCount :Cardinal;
+ begin
+ TotalCount:= FileSize( dat ) div RecLen;
+end;
+
+procedure tFieldAccessor.BlockRead( var Data; offset :Cardinal; count: Cardinal );
+ begin
+ if ((offset+count)*RecLen) > FileSize( dat ) then raise eRangeError.Create('Record is Not In File');
+ Seek( dat, offset*RecLen);
+ System.BlockRead( dat, Data, RecLen*count);
+end;
+
+procedure tFieldAccessor.BlockWrite( var Data; offset :Cardinal; count: Cardinal );
+ begin
+ Seek( dat, (offset*RecLen) );
+ System.BlockWrite( dat, Data, RecLen*count );
+end;
+
+
 END.
