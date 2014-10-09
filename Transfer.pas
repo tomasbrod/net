@@ -17,6 +17,9 @@ CONST
  cDat:tpktype=5;
  cPcs:tpktype=6;
 
+const cRetryPeriod = 2000{ms} /MSecsPerDay;
+const cRetryMax = 8;
+
 TYPE
 
  tFID=object(Keys.tHash)
@@ -319,6 +322,111 @@ procedure DoRetry;
  end;
 end;
 
+{*********** DataBase *********}
+
+constructor tPartAccess.Init( fid :tFID );
+ var row: DataBase.tRow;
+begin
+ fid.ToString(Row);
+ tAccess.Init( sizeof(tPartInfo), 'object', Row, 'part' );
+end;
+
+procedure tPartAccess.getState( out state :tPartInfo; part :Word );
+ begin
+ Read(state, part);
+end;
+
+procedure tPartAccess.setState( part: word; state :tPartInfo );
+ begin
+ OverWrite(part, state);
+end;
+
+procedure tPartAccess.SetRequested( part :Word );
+ var state: tPartInfo;
+ begin
+ try getState( state, part );
+ except on eRangeError do state.state:=psUnknown; end;
+ if state.state>=psComplete then raise exception.create('Trying to request complete piece');
+ state.state:=psWaiting;
+ state.retry:= state.retry+1;
+ state.since:=Now;
+ setState( part, state);
+end;
+
+function tPartAccess.isRequested( part :Word) :boolean;
+ var state: tPartInfo;
+ begin
+ getState( state, part );
+ isRequested:=(state.state=psWaiting);
+end;
+
+function tPartAccess.isComplete( part :Word ) :boolean;
+ var state: tPartInfo;
+ begin
+ getState( state, part );
+ isComplete:=(state.state=psComplete);
+end;
+
+procedure tPartAccess.SetDone( part :Word );
+ var state: tPartInfo;
+ begin
+ getState( state, part );
+ assert(state.state=psWaiting);
+ state.state:=psComplete;
+ state.since:=Now;
+ setState( part, state);
+end;
+
+procedure tPartAccess.SetTotal( total :Word );
+ var r:tRecord;
+ var c:tPartInfo;
+ begin
+ for r:=0 to total do begin
+  try
+   getState(c,r);
+  except
+   on eRangeError do begin
+    c.state:=psPassive;
+    c.since:=Now;
+    c.retry:=0;
+   end;
+  end;
+  setState(r,c);
+ end;
+end;
+
+procedure tPartAccess.Abort;
+ begin
+ Purge;
+end;
+
+function tPartAccess.isToRetry( part :Word ):boolean;
+ var state: tPartInfo;
+ begin
+ getState( state, part );
+ isToRetry:= 
+             (state.state in [psUnknown,psPassive]) or
+             (
+               (state.state=psWaiting)and
+               ((Now-state.since)>cRetryPeriod)
+             )
+ ;
+end;
+
+procedure tPartAccess.FindToRetry( var part :Word );
+ begin
+ repeat
+  try if isToRetry( part ) then break;
+  except
+   on eRangeError do raise eRangeError.Create('No more parts to retry @Transfer.');
+  end;
+  inc( part );
+ until false;
+end;
+ 
+
+{
+}
 
 {
 Retry(tFID);
