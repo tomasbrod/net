@@ -120,7 +120,7 @@ constructor tFieldAccessor.Init( const iRecLen :word; const Table :tTable; const
  RecLen:=iRecLen;
 end;
 
-destructor  tFieldAccessor.Done;
+destructor tFieldAccessor.Done;
  begin
  Close( dat );
 end;
@@ -181,7 +181,7 @@ end;
 
 procedure tFieldAccessor.Purge;
  begin
- Close( dat );
+ Done;
  Erase( dat );
 end;
 
