@@ -137,23 +137,29 @@ File Sharing
 Files in the network can have tags. Files are _found_ only by their tags. 
 And identified by their hash.
 
-Search request (Search) and reply (Offer) is done with packet of the same 
+Search request (Request) and reply (Offer) is done with packet of the same 
 structure. The only difference is pktype field and that fh field can be null in 
 Search packets.
 
-Searching for a file is performed by sending FileShare.tSearch packet to some 
-peers. This packed is Acknowledged. Peers should search in their datastore 
+Searching for a file is performed by sending Share.tRequest packet to some 
+peers. This packed is acknowledged by Share.tAccept or Share.tReject.
+Peers should search in their datastore 
 or ask their peers. As soon as they find something, they send back a 
-FileShare.tOffer packet. If the search is satisfied, Transfer is initiated.
+Share.tOffer packet. If the search is satisfied, Transfer is initiated.
+
+Share.tOffer can be recieved and will be handled even if no Share.tRequest 
+has been sent.
 
 ### Avoiding Routing Loop
 
-When a FileShare packet arrives, it is forwarded to interested peers 
+When a Share packet arrives, it is forwarded to interested peers 
 only if tags in the packet differ from the ones in the files.db.
 
-If the packet is Offer, search.db is checked instead.
-And if we are also interested in resuilts from the serach, we forward the 
-same packet back to sender. He adds our id to subs.dat in his search.db.
+If the packet is Request, search.db is checked and if we are also 
+interested in resuilts from the serach, we forward the same packet back to 
+sender. He adds our id to subs.dat in his search.db. Subs.dat is read when 
+node finds resuilt for the search and the resuilts are forwarded to peers 
+listed there.
 
 Tags
 ----
@@ -162,7 +168,7 @@ Every file has tags.
 Even nodes have tags.
 Tags are used to find files. 
 
-But files hav max of 200 tags (to not fragment search packets).
+But files have max of 200 tags (to not fragment search packets).
 
 Tags of a given object are stored in file tags.dat in the object's 
 directory. To speed up searching list of objects tagged by
@@ -183,7 +189,8 @@ For all tags in the query: FileIDs from %tag%.dat are all
 added to in-memory linked-list, but for files already in the list, count 
 field is increased and the entry is moved closer to start of the list. 
 
-Finally, the list contains best resuilts near the start.
+Finally, the list contains best resuilts near the start. Only first 
+cResuitsCount is sent to subscrier.
 
 File Transfer
 -------------
