@@ -196,8 +196,10 @@ network. Files are identified by SHA1 hash of their contents.
 Filetransfer answer packets all contain sequence number of part and number 
 of total parts. The Transfer takes care of downloading all parts of the 
 file. When the whole data object is downloaded, its hash is checked. On 
-error, the data object is erased and download is started over again. When 
-the download is complete and the hash matched, other units are notified.
+error, the data object is erased and download is started over again. There 
+shouldn't be errors, since parts are checked for integrity by 
+Transport layer (UDP). After the download is complete and the hash is matched, 
+other units are notified.
 
 To keep tracks on what parts were downloaded, a parts.dat field is stored 
 in files.db. Additionaly an entry to downloadlist.dat is added. Parts of 
@@ -217,10 +219,16 @@ downloaded. If the hashes do not match, only the Pieced file is erased and
 downloaded again. The already downloaded pieces are left in the files.db.
 
 Pieced files have pieces.dat in the files.db instead of content.dat. And 
-files that are pieces of some Pieced file have ref.dat in files.db.
+files that are pieces of some Pieced file have ref.dat in files.db. The 
+pieces.dat filie is transfered split to parts the same way as parted file 
+and must be downloaded completly from one peer.
 
 In opposite to Parts, pieces of the same Pieced file can be downloaded from 
 multiple peers *at the same time*. Becouse pieces are just normal files.
+
+There is a DoRetry routine that checks all files in progress and resends 
+requests if no reply had been received in Transfer.cRetryPeriod, to 
+accomodate for packet loss.
 
 ### Communication
 
@@ -228,6 +236,6 @@ File transfer is initaited by sending a Transfer.tGet packet to peer, who
 should have the data object. The peer sends back either file contents in 
 Transfer.tDat or list of pieces in Transfer.tPcs (Pieced file) packet.
 
-If no reply is recieved (packet lost) in time, the tYes packet is sent 
+If no reply is recieved (packet lost) in time, the tGet packet is sent 
 again.
 
