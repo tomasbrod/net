@@ -31,11 +31,9 @@ tFieldAccessor=object
  procedure LastPos( out pos :tRecord );
   { Get position of last append, read or write operation }
  function TotalCount :Cardinal;
-  unimplemented;
+  experimental;
  procedure BlockRead( var Data; offset :Cardinal; count: Cardinal );
-  unimplemented;
  procedure BlockWrite( var Data; offset :Cardinal; count: Cardinal );
-  unimplemented;
  private
  RecLen :word;
  dat :file;
