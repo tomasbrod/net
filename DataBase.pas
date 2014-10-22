@@ -1,7 +1,7 @@
 unit DataBase;
 
 INTERFACE
-uses SysUtils;
+uses Classes,SysUtils,Dbf;
 
 TYPE
 
@@ -9,6 +9,13 @@ tTable = string[15];
 tRow = string[63];
 tField = string[15];
 tRecord = Word;
+
+tDbDataSet=class ( tDbf )
+ public
+ {constructor Create(AOwner: TComponent); override;}
+ procedure Open (const S: string );
+ procedure CreateTable;
+end;
 
 tFieldAccessor=object
  { To read and write fields in database }
@@ -230,6 +237,26 @@ procedure tFieldAccessor.BlockWrite( var Data; offset :Cardinal; count: Cardinal
  begin
  Seek( dat, (offset*RecLen) );
  System.BlockWrite( dat, Data, RecLen*count );
+end;
+
+{
+constructor tDbDataSet.Create(AOwner: TComponent);
+ begin
+ inherited Create(AOwner);
+end;
+}
+
+procedure tDbDataSet.Open (const S: string );
+ begin
+ FilePathFull := DataBase.Prefix;
+ OpenMode:=Dbf.omNormal;
+ TableName:= S + '.dbf';
+end;
+
+procedure tDbDataSet.CreateTable;
+ begin
+ TableLevel := 7;
+ inherited CreateTable;
 end;
 
 

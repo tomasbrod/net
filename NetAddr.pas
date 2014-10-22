@@ -32,6 +32,11 @@ TYPE
   procedure LocalHost( af: tFamily );
   {Generate localhost address of address family af.}
   {$HINT Not actually testet, byt seems to work}
+  
+  procedure Clear;
+   unimplemented;
+  function  isNil:boolean;
+   unimplemented;
 
   public
   data :packed record
@@ -176,6 +181,10 @@ procedure t.LocalHost( af: tFamily );
  end;
 end;
 
+procedure t.Clear;
+ begin AbstractError; end;
+function  t.isNil:boolean;
+ begin AbstractError; end;
 
 constructor eSocket.Create( icode: integer; msg: string );
  begin
