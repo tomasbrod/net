@@ -19,6 +19,9 @@ TYPE{s}
 
 Operator = (aa, ab :tHash) b : boolean;
 
+operator := ( ahash: tHash ) astring : string;
+operator := ( astring: string ) ahash : tHash;
+
 IMPLEMENTATION
 uses SysUtils;
 
@@ -65,5 +68,13 @@ begin
  b:=true;
 end;
 
+operator := ( ahash: tHash ) astring : string;
+ begin
+ ahash.ToString( astring );
+end;
+operator := ( astring: string ) ahash : tHash;
+ begin
+ ahash.FromString( astring );
+end;
 
 END.

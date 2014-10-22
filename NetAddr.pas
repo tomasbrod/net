@@ -59,6 +59,9 @@ operator := (host : Dword) net:Word4;
 
 Operator = (aa, ab :t) b : boolean;
 
+operator := ( at : t) aString : string;
+operator := ( aString : string) at : t;
+
 {
 Operator := (aa :t ) r : pSockAddr;
 Operator := ( aa :pSockAddr ) r : t;
@@ -185,6 +188,15 @@ procedure t.Clear;
  begin AbstractError; end;
 function  t.isNil:boolean;
  begin AbstractError; end;
+
+operator := ( at : t) aString : string;
+ begin
+ at.ToString( aString );
+end;
+operator := ( aString : string) at : t;
+ begin
+ at.FromString( aString );
+end;
 
 constructor eSocket.Create( icode: integer; msg: string );
  begin
