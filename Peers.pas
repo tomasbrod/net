@@ -50,6 +50,7 @@ TYPE
   procedure ResetTimeSince;
   { returns time since last packet from the peer of that type arrived }
    unimplemented;
+   deprecated;
  end;
 
  tAkafuka =packed object(tPacket)
@@ -69,6 +70,7 @@ TYPE
   { Creates akafuka packet }
 
   private
+  SenderID: tID;
   Load: byte unimplemented; { load of the sender's system }
   YouSock :NetAddr.T; { address, the packet was sent to }
  end;
@@ -86,6 +88,7 @@ TYPE
   { Creates fundeluka packet }
 
   private
+  SenderID: tID;
   Load: byte unimplemented; { load of the sender's system }
   YouSock :NetAddr.T; { address, the packet was sent to }
  end;
@@ -103,6 +106,7 @@ var
  ThisID :tID;
  SelectedID : tID;
  SelectedAddr :NetAddr.T; {$HINT Should Move SelectedAddr to SocketUtil?}
+ SelectedDbRec :LongInt;
  IsSelectedID : boolean deprecated;
  IsSelectedAddr :boolean deprecated;
  SelectedDelta :System.tTime;
@@ -165,12 +169,12 @@ constructor tAkafukaDB.Create;
   Open ('peers');
  except
   on Exception {$NOTE Use proper exception class} do begin
-   FieldDefs.Add( 'row',   ftAutoInc,  0, True  );
-   FieldDefs.Add( 'id',    ftString,  40, True  );
-   FieldDefs.Add( 'addr',  ftString,  50, True  );
-   FieldDefs.Add( 'delta', ftDateTime, 0, False );
-   FieldDefs.Add( 'since', ftDateTime, 0, False );
-   FieldDefs.Add( 'retry', ftSmallInt, 0, False );
+   FieldDefs.Add( {0} 'row',   ftAutoInc,  0, True  );
+   FieldDefs.Add( {1} 'id',    ftString,  40, True  );
+   FieldDefs.Add( {2} 'addr',  ftString,  50, True  );
+   FieldDefs.Add( {3} 'delta', ftDateTime, 0, True );
+   FieldDefs.Add( {4} 'since', ftDateTime, 0, True );
+   FieldDefs.Add( {5} 'retry', ftSmallInt, 0, True );
    AddIndex( 'peersrow',  'row',  [ixUnique, ixPrimary]);
    AddIndex( 'peersid',   'id',   [          ixCaseInsensitive]);
    AddIndex( 'peersaddr', 'addr', [ixUnique, ixCaseInsensitive]);
@@ -179,13 +183,31 @@ constructor tAkafukaDB.Create;
  end;
 end;
 
+procedure tAkafukaDB.HandleAfterScroll( DataSet: TDataSet );
+ begin
+ tHash(ID):=Fields[1].AsString;
+ Addr:=Fields[2].AsString;
+ Delta:=Fields[3].AsDateTime;
+ Since:=Fields[4].AsDateTime;
+ Retry:=Fields[5].AsInteger;
+end;
+  
+procedure tAkafukaDB.Post;
+ begin
+ Fields[1].AsString:=String(tHash(ID));
+ Fields[2].AsString:=String(Addr);
+ Fields[3].AsDateTime:=Delta;
+ Fields[4].AsDateTime:=Since;
+ Fields[5].AsInteger:=Retry;
+end;
+
 procedure tAkafukaDB.FindAddr ( iaddr: NetAddr.T );
  var AddrStr : string;
  begin
  if iaddr.isNil then raise Exception.Create('Unknown address');
+ if iaddr = addr then exit;
  iaddr.ToString(AddrStr);
- IndexName:= 'peersaddr';
- if not SearchKey ( AddrStr, Dbf_common.stEqual ) then raise Exception.Create('Unknown address');
+ if not Locate ( 'addr', AddrStr, [] ) then raise Exception.Create('Address not found');
 end;
 
 
@@ -218,6 +240,24 @@ procedure Select( ID :tID );
  //SelectedDelta:=cur.akafuka.Delta;
  SelectedAddr.ToString(saddr);
  log.msg('Selected '+sid+' ('+saddr+')');
+end;
+
+procedure tPacket.Handle;
+ begin
+ { addr shouldbe selected by Daemon }
+ assert( IsSelectedAddr );
+ {Lookup sender ID from database}
+ try
+  AkafukaDB.FindAddr( SelectedAddr );
+ except
+  on Exception do raise Exception.Create('Sender address not in database');
+ end;
+ {Initialize state}
+ SelectedID:=AkafukaDB.ID;
+ SelectedAddr:=AkafukaDB.Addr;
+ SelectedDbRec:=AkafukaDB.RecNo;
+ log.msg('Received #'+IntToStr(pktype)+' From '+String(tHash(SelectedID))+' ('+String(SelectedAddr)+')');
+ log.msg('Last was '+TimeToStr(AkafukaDB.Since)+'('+FloatToStr(AkafukaDB.Since*SecsPerDay)+'s) ago');
 end;
 
 {****************************************
@@ -256,7 +296,6 @@ end;
 *)
 
 function tPacket.TimeSince: System.tTime;
-var cur: System.tDateTime;
 begin
  (*
  db.Init( Sender );
@@ -267,148 +306,104 @@ begin
   db.Done;
  end;
  *)
- result := 0;
+ result := high(tTime);
 end;
 
 procedure tPacket.ResetTimeSince;
  begin
- (*
- last.Init( Sender );
- try last.Store(pktype, Now);
- finally last.Done; end;
- *)
+ AbstractError;
 end;
 
 {*********************************
  *********** Akafuka   ***********
  *********************************}
 
-procedure tPacket.Handle;
- var saddr,sid :string;
- begin
- {
- SelectedID:=Sender;
- isSelectedID:=true;
- }
- { addr shouldbe selected by Daemon }
- assert( IsSelectedAddr );
-
- {Lookup sender ID from database}
- try
-  AkafukaDB.FindAddr( SelectedAddr );
- except
-  on Exception do raise Exception.Create('Sender address not in database');
- end;
- SelectedID.FromString(AkafukaDB.FieldByName('id').AsString);
-
- SelectedAddr.ToString(saddr);
- SelectedID.ToString(sid);
- log.msg('Received #'+IntToStr(pktype)+' From '+sid+' ('+saddr+')');
- log.msg('Last was '+TimeToStr(TimeSince)+'('+FloatToStr(TimeSince*SecsPerDay)+'s) ago');
-end;
-
 procedure tAkafuka.Send;
- var r:tRecord;
-begin
+ begin
  log.msg('Sending Akafuka');
- {Remove selected addr from db and append it to akafuka db}
- //C.sock:=SelectedAddr;
- { Search for the address }
  try
   AkafukaDB.FindAddr( SelectedAddr );
+  AkafukaDB.Edit;
+  INC(AkafukaDB.Retry);
  except
   on Exception do begin
    AkafukaDB.Append;
-   SelectedID.ToString(AkafukaDB.FieldByName('id').AsString);
-   SelectedAddr.ToString(AkafukaDB.FieldByName('addr').AsString);
-   AkafukaDB.FieldByName('delta').AsInteger:=0;
-   AkafukaDB.FieldByName('retry').AsInteger:=0;
+   SelectedDbRec:=AkafukaDB.RecNo;
+   AkafukaDB.ID:=SelectedID;
+   AkafukaDB.Addr:=SelectedAddr;
+   AkafukaDB.Delta:=0;
+   AkafukaDB.Retry:=1;
   end;
  end;
- AkafukaDB.FieldByName('since'):=Now;
+ AkafukaDB.Since:=Now;
  AkafukaDB.Post;
- log.msg('Akafuka info: Retry='+IntToStr(AkafukaDB.FieldByName('retry'))+' Delta='+FloatToStr(AkafukaDB.FieldByName('delta')*SecsPerDay)+'s Since=now');
+ log.msg('Akafuka info: Retry='+IntToStr(AkafukaDB.Retry)+' Delta='+FloatToStr(AkafukaDB.Delta*SecsPerDay)+'s Since=now');
  inherited Send(sizeof(SELF) - (Sizeof(YouSock)-YouSock.Length) );
 end;
 
 procedure SaveReportedAddr( const Addr: NetAddr.t );
- var C: tAddrInfo;
- var str:string;
- var r:tRecord;
  begin
- Addr.ToString(str);
- log.msg('Sender Reported our Address '+str);
- (*
- db.Init( ThisID );
+ log.msg('Sender reported our address to be '+String(Addr));
+ {Search db for addr }
  try
-  try
-   db.Find( R, Addr );
-   db.Read( C, R );
-  except on eRangeError do begin
-   C.Sock:=Addr;
-   C.Akafuka.Retry:=0;
-   C.Akafuka.Delta:=-1;
-  end; end;
-  C.Akafuka.Since:=Now;
-  db.OverWrite( R, C );
- { Add reported external address }
- finally db.Done; end;
- *)
+  AkafukaDB.FindAddr(Addr);
+ { and ( id=id and panic) }
+  if AkafukaDB.ID<>ThisID then raise eInvalidInsert.Create('Attempt to assingn same address to multiple peers');
+  log.msg('Already');
+ except on Exception do; end;
+ { or : }
+ AkafukaDB.Append;
+ AkafukaDB.Addr:=Addr;
+ AkafukaDB.ID:=ThisID;
+ AkafukaDB.Retry:=0;
+ AkafukaDB.Delta:=0;
+ AkafukaDB.Since:=Now;
+ AkafukaDB.Post;
+ log.msg('Saved Sender reported our address to be '+String(Addr));
 end;
 
 procedure tAkafuka.Handle;
 var fundeluka:tFundeluka;
+var isNew: boolean;
 begin
- inherited Handle;
  log.msg('Received '+cAkafukaN);
- if (TimeSince > cAkafukaCooldown) then begin
+ try
+  inherited Handle;
+  isNew:=false;
+ except on Exception do begin
+  { This means that peer/addr is not yet associated, we fix this and call the handler again }
+  isNew:=true;
+  log.msg('Add addr;id to db.');
+  AkafukaDB.Append;
+  AkafukaDB.ID:=SenderID;
+  AkafukaDB.Addr:=SelectedAddr;
+  AkafukaDB.Since:=Now;
+  AkafukaDB.Delta:=cAkafukaPeriod; {to trigger Akafuka on next DoAkafuka}
+  AkafukaDB.Retry:=0;
+  AkafukaDB.Post;
+  inherited Handle; { now it should be OK }
+ end; end;
+ if isNew or (TimeSince > cAkafukaCooldown) then begin
   log.msg('Sending '+cFundelukaN);
   fundeluka.Create;
   fundeluka.Send;
- end else log.msg('Anti-DDoS');
+ end else log.msg('Anti-DDoS, not sending '+cFundelukaN);
  SaveReportedAddr( YouSock );
- ResetTimeSince;
 end;
 
 procedure tFundeluka.Handle;
-var C :tAddrInfo;
-var i:tRecord;
- var isNew :boolean=false;
-begin
- inherited Handle;
+ begin
+ inherited Handle; { this also rejects unknown or invalid senders and leaves db at sender addr }
+ AkafukaDB.RecNo:=SelectedDbRec;
+ if AkafukaDB.ID<>SenderID then raise eInvalidInsert.Create('Invalid Sender ID');
+ AkafukaDB.Edit;
  log.msg('Received '+cFundelukaN);
- { The assoc re-adds peer to db. Now remove it from akafuka db}
- (*
- db.init( SelectedID );
- try
-  db.Find( I, SelectedAddr ); {$HINT OPT: use result from tpacket.handle as index to db}
-  //log.msg('Read info @'+IntToStr(i));
-  db.Read( C, I );
-  {
-   What if we had sent akafuka to unknown netaddr to get it's ID?
-   -> tPacket.Handle had already added the addr to db.
-  }
-  if C.Akafuka.Since>0 then begin
-   if (C.akafuka.Delta=-1) then isNew:=true;
-   if isNew then log.msg('This is new Peer');
-   C.akafuka.Delta:=Now - C.akafuka.Since;
-   log.msg('Akafuka info: Retry='+IntToStr(C.akafuka.Retry)+' Delta='+FloatToStr(C.akafuka.Delta*SecsPerDay)+'s Since='+DateTimeToStr(C.Akafuka.Since));
-   C.akafuka.Retry:=0;
-   if C.akafuka.Delta>cAkafukaMaxDelta then begin
-    log.msg('AkafukaDelta too big');
-    db.Delete( I )
-    { Drop the peer if delta excedes limit }
-   end else begin
-    db.OverWrite( I, C );
-    if isNew and assigned(NewProc) then NewProc( SelectedID );
-   end;
-  end else log.msg('No Akafuka info');
- finally
-  db.done;
- end;
- *)
+ { Calculate delta, reset timestamp }
+ AkafukaDB.Delta:=Now - AkafukaDB.Since;
+ AkafukaDB.Since:=Now;
+ AkafukaDB.Post;
+ log.msg('Akafuka info: Retry='+IntToStr(AkafukaDB.Retry)+' Delta='+FloatToStr(AkafukaDB.Delta*SecsPerDay)+'s Since='+DateTimeToStr(AkafukaDB.Since));
  SaveReportedAddr( YouSock );
- ResetTimeSince;
 end;
 
 procedure DoAkafuka;
@@ -420,11 +415,28 @@ procedure DoAkafuka;
  }
  var row:DataBase.tRow;
  var id:tID;
- var C:tAddrInfo;
  var r:tRecord;
  var akafuka:tAkafuka;
  var str:string;
  begin
+ 
+ { How we search: }
+ try
+  AkafukaDB.Filter:=' since >cAkafukaPeriod ';
+  (
+  AkafukaDB.IndexName:='peerssince'
+
+  AkafukaDB.SetRange(tDateTime(cAkafukaPeriod),tDateTime(cAkafukaMaxDelta),false);
+   {To retry}
+  AkafukaDB.SetRange(tDateTime(cAkafukaMaxDelta),high(tDateTime),false);
+   {To delete}
+  )
+ finally
+  CancelRange;
+  Filter:='';
+  IndexName:='';
+ end;
+ 
  (*
  list.init(cTable);
  repeat
