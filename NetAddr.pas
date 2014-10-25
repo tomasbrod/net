@@ -76,6 +76,7 @@ IMPLEMENTATION
 uses 
      DataBase
     ,UnixType
+    ,Log
      ;
 
 Operator = (aa, ab :Sockets.tInAddr) b : boolean;
@@ -143,6 +144,7 @@ procedure t.FromString( str :String );
  var i:integer;
  var fam:string;
  begin
+ if System.Length(str)=0 then begin Clear; exit end;
  if Copy(str,1,2)<>'//' then raise eConvertError.Create('');
  Delete(str,1,2);
  i:=pos('/',str); if i=0 then i:=System.Length(str)+1;

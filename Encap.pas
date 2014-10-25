@@ -77,7 +77,6 @@ procedure tEncap.Send;
  LenW:=Len;
  Peers.SelectedAddr.LocalHost(Dest.data.Family);
  Peers.SelectedID.Clear;
- Peers.SelectedAddr.Clear;
  inherited Send( SizeOf(self) + LenW );
 end;
 

@@ -253,13 +253,14 @@ end;
 procedure tDbDataSet.Open (const S: string );
  begin
  FilePathFull := DataBase.Prefix;
- OpenMode:=Dbf.omNormal;
  TableName:= S + '.dbf';
+ TableLevel := 7;
+ OpenMode:=Dbf.omAutoCreate;
+ Active:=True;
 end;
 
 procedure tDbDataSet.CreateTable;
  begin
- TableLevel := 7;
  inherited CreateTable;
 end;
 

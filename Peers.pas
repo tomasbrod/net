@@ -159,22 +159,20 @@ constructor tAkafukaDB.Create;
  begin
  inherited Create( nil );
  AfterScroll:=@HandleAfterScroll;
- try
-  Open ('peers');
- except
-  on Exception {$NOTE Use proper exception class} do begin
    FieldDefs.Add( {0} 'row',   ftAutoInc,  0, True  );
    FieldDefs.Add( {1} 'id',    ftString,  40, True  );
    FieldDefs.Add( {2} 'addr',  ftString,  50, True  );
    FieldDefs.Add( {3} 'delta', ftFloat, 0, True );
    FieldDefs.Add( {4} 'since', ftDateTime, 0, True );
    FieldDefs.Add( {5} 'retry', ftSmallInt, 0, True );
-   AddIndex( 'row',  'row',  [ixUnique, ixPrimary]);
-   AddIndex( 'id',   'id',   [          ixCaseInsensitive]);
-   AddIndex( 'addr', 'addr', [ixUnique, ixCaseInsensitive]);
-   AddIndex( 'since', 'DTOS(since)', []);
-  end;
- end;
+   with IndexDefs.Add do begin Name:='id'; Expression:=Name; Options:=[ixCaseInsensitive]; end;
+   with IndexDefs.Add do begin Name:='addr'; Expression:=Name; Options:=[ixCaseInsensitive]; end;
+   with IndexDefs.Add do begin Name:='delta'; Expression:='delta'; Options:=[]; end;
+   {
+   with IndexDefs.Add do begin Name:='since'; Expression:='DTOS(since)'; Options:=[]; end;
+   with IndexDefs.Add do begin Name:='retry'; Expression:=Name; Options:=[]; end;
+   }
+ Open ('peers');
 end;
 
 procedure tAkafukaDB.HandleAfterScroll( DataSet: TDataSet );
@@ -409,6 +407,7 @@ procedure DoAkafuka;
  }
  var akafuka:tAkafuka;
  begin
+ log.msg('DoAkafuka on '+IntToStr(AkafukaDB.ExactRecordCount));
  try
   {Lets delete timeouted peers}
   AkafukaDB.IndexName:='since';
@@ -419,9 +418,10 @@ procedure DoAkafuka;
    AkafukaDB.Delete;
    //AkafukaDB.Next;
   end;
+  AkafukaDB.IndexName:='';
   AkafukaDB.CancelRange;
   {Try sending akafuka again}
-  AkafukaDB.SetRange( tDateTime(cAkafukaPeriod), 1.7E308, false );
+  //AkafukaDB.SetRange( tDateTime(cAkafukaPeriod), 1.7E308, false );
   AkafukaDB.First;
   while not AkafukaDB.EOF do begin
    log.msg('Akafuka Retry: '+String(tHash(AkafukaDB.ID))+' '+String(AkafukaDB.Addr));
@@ -514,5 +514,6 @@ end;
 INITIALIZATION
  AkafukaDB:=tAkafukaDB.Create;
 FINALIZATION
+ AkafukaDB.Active:=False;
  AkafukaDB.Free;
 END.
