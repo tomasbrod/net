@@ -157,6 +157,7 @@ end;
 
 constructor tAkafukaDB.Create;
  begin
+ inherited Create( nil );
  AfterScroll:=@HandleAfterScroll;
  try
   Open ('peers');
@@ -513,5 +514,5 @@ end;
 INITIALIZATION
  AkafukaDB:=tAkafukaDB.Create;
 FINALIZATION
- AkafukaDB.Destroy;
+ AkafukaDB.Free;
 END.
