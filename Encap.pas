@@ -50,9 +50,7 @@ procedure tEncap.Handle;
  LenW:=Len;
  GetMem( UnEncap, LenW );
  Peers.SelectedAddr:= Dest;
- Peers.IsSelectedAddr:= True;
  Peers.SelectedID:= DestID;
- Peers.IsSelectedID:= True;
  Move( StartOfData^, UnEncap^, LenW );
  UnEncap^.Send(LenW); {This will send the packet from _our_ socket}
 end;
@@ -60,7 +58,7 @@ end;
 procedure tEncap.Create( Len:Word; var Data );
  begin
  inherited Create(cEncap);
- assert(Peers.IsSelectedAddr);
+ assert(not Peers.SelectedAddr.isNil);
  self.Dest:=Peers.SelectedAddr;
  self.DestID:=Peers.SelectedID;
  self.Len:=Len;
@@ -78,9 +76,8 @@ procedure tEncap.Send;
  log.msg('Sending Encap');
  LenW:=Len;
  Peers.SelectedAddr.LocalHost(Dest.data.Family);
- Peers.IsSelectedID:=False;
  Peers.SelectedID.Clear;
- Peers.IsSelectedAddr:=True;
+ Peers.SelectedAddr.Clear;
  inherited Send( SizeOf(self) + LenW );
 end;
 

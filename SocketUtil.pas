@@ -53,7 +53,7 @@ end;
 procedure CreateAndSend(var Data; Len:LongInt);
  var sock :tSocket;
  begin
- assert(Peers.IsSelectedAddr);
+ assert(not Peers.SelectedAddr.isNil);
  case Peers.SelectedAddr.data.Family of
   afInet: sock:=fpSocket( AF_INET, SOCK_DGRAM, 0 );
   //afIP6: sock:=fpSocket( AF_INET6, SOCK_DGRAM, 0 );
@@ -72,7 +72,7 @@ procedure SendOrEncap(var Data; Len:LongInt);
  var str:string;
  begin
  if Peers.SelectedAddr.data.Family = StdFamily then begin
-  assert(Peers.IsSelectedAddr);
+  assert(not Peers.SelectedAddr.isNil);
   Send( Std, Peers.SelectedAddr, Data, Len );
  end else begin
   WriteStr(str, 'Have to encap becouse dest.AF (',Peers.SelectedAddr.data.Family,') <> OurSocket.AF (',StdFamily,')');

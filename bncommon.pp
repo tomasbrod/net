@@ -7,7 +7,7 @@ PROCEDURE Init;
  var cfg :TINIFile;
  begin
  DataBase.Prefix:=GetEnvironmentVariable('BRODNETD_DATA');
- if DataBase.Prefix='' then DataBase.Prefix:=GetCurrentDir+DirectorySeparator+'data');
+ if DataBase.Prefix='' then DataBase.Prefix:=GetCurrentDir+DirectorySeparator+'data';
  if not FindCmdLineSwitch('stderr') then Log.Init( DataBase.Prefix+DirectorySeparator+cMainLog );
  log.msg('Brodnet '+ApplicationName+', in '+Database.Prefix);
  //if Length(DataBase.Prefix)=0 then Abort;

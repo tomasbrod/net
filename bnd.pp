@@ -58,7 +58,6 @@ PROCEDURE LoopOnSocket;
   {Receive}
   //log.msg('Waiting for socket to be ready');
   SocketUtil.Recv( Peers.SelectedAddr, InPk^, InPkLen );
-                   Peers.isSelectedAddr:=true;
   ProcessPacket;
  until false; {infinite loop}
 end;
