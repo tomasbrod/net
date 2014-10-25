@@ -61,6 +61,10 @@ tRowList=object
  Search: SysUtils.tSearchRec;
 end;
 
+eSearch = class ( Exception )
+ constructor Create;
+end;
+
 var Prefix :string ='./data';
 {TODO: extract from parameters }
 
@@ -259,5 +263,9 @@ procedure tDbDataSet.CreateTable;
  inherited CreateTable;
 end;
 
+constructor eSearch.Create;
+ begin
+ inherited Create('Database search failed!');
+end;
 
 END.
