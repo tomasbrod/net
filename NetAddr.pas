@@ -34,9 +34,7 @@ TYPE
   {$HINT Not actually testet, byt seems to work}
   
   procedure Clear;
-   unimplemented;
   function  isNil:boolean;
-   unimplemented;
 
   public
   data :packed record
@@ -185,9 +183,14 @@ procedure t.LocalHost( af: tFamily );
 end;
 
 procedure t.Clear;
- begin AbstractError; end;
+ begin
+ self.data.family:=afNil;
+end;
+
 function  t.isNil:boolean;
- begin AbstractError; end;
+ begin
+ isNil:= self.data.family=afNil;
+end;
 
 operator := ( at : t) aString : string;
  begin
