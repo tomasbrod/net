@@ -133,6 +133,7 @@ uses
     ,db
     ,Log
     ,Dbf_Common
+    ,Dbf
     ;
 
 {*********************************
@@ -159,12 +160,12 @@ constructor tAkafukaDB.Create;
  begin
  inherited Create( nil );
  AfterScroll:=@HandleAfterScroll;
-   FieldDefs.Add( {0} 'row',   ftAutoInc,  0, True  );
-   FieldDefs.Add( {1} 'id',    ftString,  40, True  );
-   FieldDefs.Add( {2} 'addr',  ftString,  50, True  );
-   FieldDefs.Add( {3} 'delta', ftFloat, 0, True );
-   FieldDefs.Add( {4} 'since', ftDateTime, 0, True );
-   FieldDefs.Add( {5} 'retry', ftSmallInt, 0, True );
+   OpenMode:=omAutoCreate;
+   FieldDefs.Add( {0} 'id',    ftString,  40, True  );
+   FieldDefs.Add( {1} 'addr',  ftString,  50, True  );
+   FieldDefs.Add( {2} 'delta', ftFloat, 0, True );
+   FieldDefs.Add( {3} 'since', ftDateTime, 0, True );
+   FieldDefs.Add( {4} 'retry', ftSmallInt, 0, True );
    with IndexDefs.Add do begin Name:='id'; Expression:=Name; Options:=[ixCaseInsensitive]; end;
    with IndexDefs.Add do begin Name:='addr'; Expression:=Name; Options:=[ixCaseInsensitive]; end;
    with IndexDefs.Add do begin Name:='delta'; Expression:='delta'; Options:=[]; end;
@@ -177,20 +178,21 @@ end;
 
 procedure tAkafukaDB.HandleAfterScroll( DataSet: TDataSet );
  begin
- tHash(ID):=Fields[1].AsString;
- Addr:=Fields[2].AsString;
- Delta:=Fields[3].AsFloat;
- Since:=Fields[4].AsDateTime;
- Retry:=Fields[5].AsInteger;
+ tHash(ID):=Fields[0].AsString;
+ Addr:=Fields[1].AsString;
+ Delta:=Fields[2].AsFloat;
+ Since:=Fields[3].AsDateTime;
+ Retry:=Fields[4].AsInteger;
 end;
   
 procedure tAkafukaDB.Post;
  begin
- Fields[1].AsString:=String(tHash(ID));
- Fields[2].AsString:=String(Addr);
- Fields[3].AsFloat:=Delta;
- Fields[4].AsDateTime:=Since;
- Fields[5].AsInteger:=Retry;
+ Fields[0].AsString:=String(tHash(ID));
+ Fields[1].AsString:=String(Addr);
+ Fields[2].AsFloat:=Delta;
+ Fields[3].AsDateTime:=Since;
+ Fields[4].AsInteger:=Retry;
+ inherited Post;
 end;
 
 procedure tAkafukaDB.FindAddr ( iaddr: NetAddr.T );
@@ -324,6 +326,7 @@ procedure tAkafuka.Send;
    AkafukaDB.Retry:=0;
   end;
  end;
+ log.msg('Akafuka since last: '+FloatToStr((Now-AkafukaDB.Since)*SecsPerDay)+'s');
  AkafukaDB.Retry:=AkafukaDB.Retry+1;
  AkafukaDB.Since:=Now;
  AkafukaDB.Post;

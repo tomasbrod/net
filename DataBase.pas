@@ -14,7 +14,6 @@ tDbDataSet=class ( tDbf )
  public
  {constructor Create(AOwner: TComponent); override;}
  procedure Open (const S: string );
- procedure CreateTable;
 end;
 
 tFieldAccessor=object
@@ -252,16 +251,13 @@ end;
 
 procedure tDbDataSet.Open (const S: string );
  begin
+ writeln('tDBF version: ',Version);
  FilePathFull := DataBase.Prefix;
  TableName:= S + '.dbf';
- TableLevel := 7;
  OpenMode:=Dbf.omAutoCreate;
+ TableLevel:=25;
+ Exclusive:=False;
  Active:=True;
-end;
-
-procedure tDbDataSet.CreateTable;
- begin
- inherited CreateTable;
 end;
 
 constructor eSearch.Create;
