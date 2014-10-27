@@ -308,7 +308,6 @@ end;
 
 procedure tPacket.ResetTimeSince;
  begin
- AbstractError;
 end;
 
 {*********************************
@@ -446,16 +445,13 @@ procedure DoAkafuka;
 end;
 
 procedure Add( addr :NetAddr.T );
- { Send akafuka, the peer should reply fundeluka and packet handler 
- saves the peer to db, and fundeluka packet }
- var Akafuka :tAkafuka;
+ { saves the peer to db, and fundeluka packet }
  begin
  SelectedID.Clear;
  SelectedAddr:=addr;
  try
   AkafukaDB.FindAddr( SelectedAddr );
   AkafukaDB.Edit;
-  SelectedID:=AkafukaDB.ID;
  except
   on DataBase.eSearch do begin
    AkafukaDB.Append;
@@ -465,9 +461,10 @@ procedure Add( addr :NetAddr.T );
    AkafukaDB.Retry:=0;
   end;
  end;
+ AkafukaDB.Since:=0;
+ SelectedID:=AkafukaDB.ID;
+ SelectedDelta:=AkafukaDB.Delta;
  AkafukaDB.Post;
- Akafuka.Create;
- Akafuka.Send;
 end;
 
 { *** Simple Uninteresting Bullshit ***}
