@@ -73,7 +73,6 @@ end;
 procedure tEncap.Send;
  var LenW:Word;
  begin
- log.msg('Sending Encap');
  LenW:=Len;
  Peers.SelectedAddr.LocalHost(Dest.data.Family);
  Peers.SelectedID.Clear;

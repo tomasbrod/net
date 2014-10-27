@@ -251,13 +251,14 @@ end;
 
 procedure tDbDataSet.Open (const S: string );
  begin
- writeln('tDBF version: ',Version);
  FilePathFull := DataBase.Prefix;
  TableName:= S + '.dbf';
  OpenMode:=Dbf.omAutoCreate;
  TableLevel:=25;
- Exclusive:=False;
+ Exclusive:=True;
  Active:=True;
+ PackTable;
+ RegenerateIndexes;
 end;
 
 constructor eSearch.Create;

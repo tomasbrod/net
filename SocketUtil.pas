@@ -33,8 +33,8 @@ procedure Send(const sock :tSocket; const Addr:NetAddr.t; var Data; Len:LongInt)
  var SockAddr :tSockAddr;
  var addrstr :string;
  begin
- Peers.SelectedAddr.ToString(addrstr);
- log.msg('Sending packet To '+addrstr);
+ Addr.ToString(addrstr);
+ //log.msg('Sending packet To '+addrstr);
  Addr.ToSocket(SockAddr);
  if fpsendto( {s} sock, {msg} @Data, {len} Len, {flags} 0, {name} @SockAddr, {namelen} SizeOf(SockAddr))<0 then CheckSocket;
 end;
@@ -76,7 +76,7 @@ procedure SendOrEncap(var Data; Len:LongInt);
   Send( Std, Peers.SelectedAddr, Data, Len );
  end else begin
   WriteStr(str, 'Have to encap becouse dest.AF (',Peers.SelectedAddr.data.Family,') <> OurSocket.AF (',StdFamily,')');
-  log.msg(str);
+  //log.msg(str);
   GetMem( pkencap, SizeOf(pkencap^)+Len );
   pkencap^.Create( Len, Data );
   Peers.SendProc:=@CreateAndSend;

@@ -36,6 +36,7 @@ begin
   log.msg('Received Unknown #'+IntToStr(InPk^.pktype)+' ('+IntToStr(InPkLen)+'B) From '+addrstr);
   Abort;
  end;
+ Peers.tPacket(p^).ResetTimeSince;
 end;
 
 PROCEDURE LoopOnSocket;
@@ -48,17 +49,28 @@ PROCEDURE LoopOnSocket;
   InPkLen:= sizeof(InPkMem);
   BaseUnix.fpfd_zero(FDS);
   BaseUnix.fpfd_set(SocketUtil.Std,FDS);
+  Flush(log.F);
   {Wait for data}
-  Log.msg('Reading from socket'); Flush(log.F);
+  try
   {fpSelect returns >0 if data is available}
-  if BaseUnix.fpSelect( SocketUtil.Std+1, @FDS, nil, nil, cRecvWait )<=0 then begin
-   log.msg('No more Data');
-   break;
+   if BaseUnix.fpSelect( SocketUtil.Std+1, @FDS, nil, nil, cRecvWait )<=0 then begin
+    log.msg('No more Data');
+    break;
+   end;
+   {Receive}
+   //log.msg('Waiting for socket to be ready');
+   SocketUtil.Recv( Peers.SelectedAddr, InPk^, InPkLen );
+  except
+   on Exception do begin Log.msg('While: Reading from socket'); raise end;
   end;
-  {Receive}
-  //log.msg('Waiting for socket to be ready');
-  SocketUtil.Recv( Peers.SelectedAddr, InPk^, InPkLen );
-  ProcessPacket;
+  try
+   ProcessPacket;
+  except
+   on e:Exception do begin
+    Log.msg('While: Processing packet'); 
+    Log.msg(e.ClassName+': '+e.message);
+    DumpExceptionBackTrace(Log.F);
+  end; end;
  until false; {infinite loop}
 end;
 
