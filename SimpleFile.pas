@@ -5,17 +5,39 @@ Managment of files in datastore
 *)
 
 INTERFACE
-uses Classes, Db;
-
-function OpenStream( fid: tFID; mode: db.tBlobStreamMode ) : Classes.tStream;
-
-IMPLEMENATION
-uses 
-  log
+uses {srať to, dám všetky jednotky sem}
+  Log
+  ,DataBase
   ,SysUtils
   ,dbf
   ,dbf_common
+  ,Classes
+  ,Db
+  ,getopts
   ;
+
+type tData = class (tDBFBlobStream)
+ (* Read only stream with the data of the file *)
+ public
+ constructor Create( fid: tFID );
+ destructor  Destroy; override;
+ { for future reference
+ function Read( var Buffer; Count: LongInt ) :LongInt; override;
+ function Seek( const Offset: Int64; Origin: TSeekOrigin ):Int64; override
+ }
+ end;
+
+procedure Add( fid: tFID; stream: tStream );
+(* Import data from the stream to database and run necessary checks. Throws 
+exception on error *)
+
+function Exists( fid: tFID ) :boolean;
+
+procedure Delete( fid: tFID );
+
+function GetDataSet: tDbDataSet;
+
+IMPLEMENTATION
 
 (* The filestore
 
