@@ -26,7 +26,7 @@ TYPE
  tFID=object(Keys.tHash)
  end;
  
- tGet=object(Peers.tPacket)
+ tRequest=object(Peers.tPacket)
   procedure Create( id :tFID; part, count :Word );
   procedure Handle;
   procedure Send;
@@ -36,14 +36,13 @@ TYPE
   count :NetAddr.Word2;
  end;
  
- tDat=object(Peers.tPacket)
+ tData=object(Peers.tPacket)
   procedure Create( id :tFID; part :Word );
   procedure Handle;
   procedure Send;
   private
   id :tFID;
   part :NetAddr.Word2;
-  total :NetAddr.Word2;
   PayLoad: array [1..cDataLength] of byte;
  end;
 
