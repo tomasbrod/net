@@ -2,6 +2,7 @@ UNIT Transfer;
 
 {
  To send and recieve CHK files over brodnet.
+ Also to assemble pieced and parted files.
 }
 
 INTERFACE
@@ -78,9 +79,70 @@ function  Retry( id :tFID ) :Integer;
 
 IMPLEMENTATION
 uses DataBase
+    ,db
+    ,Dbf_Common
+    ,Dbf
+    ,Log
     ;
 
 TYPE { database accessors }
+
+(*
+ 
+ ## Database:
+ 
+ - parts:
+  - holds info and data about not yet downloaded parts
+  - no fully downloaded
+  - state:
+    - passive: retry = 0
+    - waiting: retry > 0
+    - complete: ?
+ - files:
+  - info and data of simple files
+ - pices:
+  - reference of pieced files to simple files
+
+ 
+*)
+
+type tPartsDB = class (DataBase.tDbDataSet)
+ public
+ constructor Create; {override;}overload;
+end;
+
+constructor tPartsDB.Create;
+ begin
+ inherited Create( nil );
+   OpenMode:=omAutoCreate;
+   FieldDefs.Add( {0} 'id',    ftString,  40, True  );
+   FieldDefs.Add( {1} 'num', ftLargeInt, 0, True );
+   FieldDefs.Add( {2} 'done', ftBoolean, 0, True );
+   FieldDefs.Add( {3} 'since', ftFloat, 0, True );
+   FieldDefs.Add( {4} 'retry', ftSmallInt, 0, True );
+   FieldDefs.Add( {5} 'data', ftBlob, 0, True );
+   //with IndexDefs.Add do begin Name:='addr'; Expression:=Name; Options:=[ixCaseInsensitive]; end;
+ Open ('parts');
+end;
+
+type tPartedDB = class (DataBase.tDbDataSet)
+ public
+ constructor Create; {override;}overload;
+end;
+
+constructor tPartedDB.Create;
+ begin
+ inherited Create( nil );
+   OpenMode:=omAutoCreate;
+   FieldDefs.Add( {0} 'id',    ftString,  40, True  );
+   FieldDefs.Add( {1} 'num', ftLargeInt, 0, True );
+   FieldDefs.Add( {2} 'done', ftBoolean, 0, True );
+   FieldDefs.Add( {3} 'since', ftFloat, 0, True );
+   FieldDefs.Add( {4} 'retry', ftSmallInt, 0, True );
+   FieldDefs.Add( {5} 'data', ftBlob, 0, True );
+   //with IndexDefs.Add do begin Name:='addr'; Expression:=Name; Options:=[ixCaseInsensitive]; end;
+ Open ('parted');
+end;
 
  tPartInfo=object
   state :( psUnknown, psPassive, psWaiting, psComplete );
