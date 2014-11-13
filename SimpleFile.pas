@@ -17,16 +17,7 @@ uses {srať to, dám všetky jednotky sem}
   ,Keys
   ;
 
-type tData = class (tDBFBlobStream)
- (* Read only stream with the data of the file *)
- public
- constructor Create( fid: tFID );
- { for future reference
- destructor  Destroy; override;
- function Read( var Buffer; Count: LongInt ) :LongInt; override;
- function Seek( const Offset: Int64; Origin: TSeekOrigin ):Int64; override
- }
- end;
+function OpenRead( fid: tFID ):tStream;
 
 procedure Add( fid: tFID; stream: tStream );
 (* Import data from the stream to database and run necessary checks. Throws 
@@ -86,12 +77,12 @@ constructor tFileTable.Create;
  Open ('simplefiles');
 end;
 
-constructor tData.Create( fid: tFID );
+function OpenRead( fid: tFID ):tStream;
  var SuccessLocate:boolean;
  begin
  SuccessLocate:= Store.Locate( 'key', String(tHash(fid)), [] );
  if not SuccessLocate then raise DataBase.eSearch.Create;
- inherited Create( Store.Fields[1] );
+ resuilt:= Store. CreateBlobStream( Store.Fields[1] );
 end;
 
 procedure Add( fid: tFID; stream: tStream );
