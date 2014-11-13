@@ -1,4 +1,4 @@
-unit SimpleFiles;
+unit SimpleFile;
 
 (*
 Managment of files in datastore

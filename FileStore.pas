@@ -12,6 +12,6 @@ Uses
 type tFID = object (Keys.tHash) end;
 
 IMPLEMENTATION
-Uses SimpleFiles;
+Uses SimpleFile;
 
 END.
