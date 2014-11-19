@@ -17,6 +17,9 @@ uses {srať to, dám všetky jednotky sem}
   ,Keys
   ;
 
+var
+ FinishProc : procedure ( fid: tFID );
+
 function OpenRead( fid: tFID ):tStream;
 
 procedure Add( fid: tFID; stream: tStream );
@@ -74,7 +77,7 @@ constructor tFileTable.Create;
  FieldDefs.Add( {0} 'key',    ftString,  40, True  );
  FieldDefs.Add( {1} 'data',    ftBlob,   0, False  );
  with IndexDefs.Add do begin Name:='key'; Expression:=Name; Options:=[ixPrimary, ixUnique, ixCaseInsensitive]; end;
- Open ('simplefiles');
+ Open ('simplefst');
 end;
 
 function OpenRead( fid: tFID ):tStream;
@@ -82,7 +85,7 @@ function OpenRead( fid: tFID ):tStream;
  begin
  SuccessLocate:= Store.Locate( 'key', String(tHash(fid)), [] );
  if not SuccessLocate then raise DataBase.eSearch.Create;
- resuilt:= Store. CreateBlobStream( Store.Fields[1] );
+ result:= Store. CreateBlobStream( Store.Fields[1], bmRead );
 end;
 
 procedure Add( fid: tFID; stream: tStream );
