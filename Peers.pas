@@ -110,7 +110,8 @@ var
  SelectedAddr :NetAddr.T; {$HINT Should Move SelectedAddr to SocketUtil?}
  SelectedDelta :System.tTime;
  SendProc: procedure(var Data; Len:LongInt);
- NewProc :procedure( id :tID );
+ AppearProc :procedure( id :tID );
+ DisappearProc :procedure( id :tID );
 
 procedure Select( ID :tID );
 { Selects peer with given ID and automatically picks an sockaddr }
@@ -382,6 +383,7 @@ begin
 end;
 
 procedure tFundeluka.Handle;
+ var isnew:boolean;
  begin
  //log.msg('Received '+cFundelukaN);
  inherited Handle; { this also rejects unknown or invalid senders and leaves db at sender addr }
@@ -394,6 +396,7 @@ procedure tFundeluka.Handle;
   if SelectedID<>SenderID then raise eInvalidInsert.Create('Invalid Sender ID');
 
  { Calculate delta, reset timestamp }
+ isnew:= AkafukaDB.Delta=cAkafukaUnknown;
  AkafukaDB.Delta:=Now - AkafukaDB.Since;
  log.msg('Akafuka: '+FloatToStr(AkafukaDB.Delta*SecsPerDay)+'s after '+IntToStr(AkafukaDB.Retry)+' retries');
  AkafukaDB.Since:=Now;
@@ -403,7 +406,9 @@ procedure tFundeluka.Handle;
  if AkafukaDB.Delta > cAkafukaMaxDelta then begin
   log.msg('Akafuka Delta too high');
   AkafukaDB.Delete;
- end;
+  if assigned(DisappearProc) then DisappearProc( AkafukaDB.ID );
+ end else
+  if isnew and assigned(AppearProc) then AppearProc( SenderID );
 
  SaveReportedAddr( YouSock );
 end;
@@ -428,6 +433,7 @@ procedure DoAkafuka;
     {Lets delete timeouted peers. But do not delete before period}
     log.msg('Akafuka timeout: '+String(tHash(AkafukaDB.ID))+' '+String(AkafukaDB.Addr));
     AkafukaDB.Delete;
+    if assigned(DisappearProc) then DisappearProc( AkafukaDB.ID );
    end else begin
     Akafuka.Create;
     SelectedID:=AkafukaDB.ID;
