@@ -31,7 +31,7 @@ function Exists( fid: tFID ) :boolean;
 
 procedure Delete( fid: tFID );
 
-procedure HandleTransferFinished( fid: tFID );
+procedure OnTransferFinished( fid: tFID );
 (* Check if the file is part of any splitfile and if the splitfile is 
 downloaded completly, check integrity of that splitfile. *)
 
