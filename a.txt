@@ -246,3 +246,28 @@ Transfer.tDat or list of pieces in Transfer.tPcs (Pieced file) packet.
 If no reply is recieved (packet lost) in time, the tGet packet is sent 
 again.
 
+The new approach
+----------------
+
+Support for inetd has to be dropped for now. The daemon must be run as 
+standalone service, becouse we need presistent program state.
+
+The list of peers is stored in memory. It is loaded from file on 
+initialization and saved regulary (in doAkafuka, maybe). Peers are 
+akafukaed individualy.
+
+State of filetransfers is stored in a linked list so that completed parts 
+could be unlinked fast. Uncompleted parts are (re)requested once in a 
+while, every time only fixed amoult of parts are requested, to not overload 
+network.
+
+Only data files are alloved to be pieced. Assembly of pieced files is 
+performed on higher level than transfer. Support for pieced files is 
+planned, but low priority.
+
+Whenever a new peer is seen, PGP key is requested from it. Also share 
+request is made with the current "interested in" tags.
+
+There is a list of share offers waiting acknowledgement. Theese are 
+retransmitted every once in a while. (Should also requests be 
+retransmitted?)
