@@ -165,7 +165,7 @@ procedure t.FromString( str :String );
   
  end else if fam='nil' then begin
   data.family:=afNil;
- end else AbstractError;
+ end else raise eConvertError.Create('');
 end;
 
 const cLocalHostIP4:Sockets.tInAddr=( s_bytes:(127,0,0,1) );
