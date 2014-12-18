@@ -243,4 +243,6 @@ operator := (host : Dword) net:Word4;
  pnet^:=HostToNet( host );
 end;
 
+FINALIZATION
+ writeln(stderr,'Fin');
 END.

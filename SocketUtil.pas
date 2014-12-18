@@ -2,88 +2,80 @@ unit SocketUtil;
 
 INTERFACE
 uses Sockets
+	,SysUtils
     ,NetAddr
-    ,Encap
     ;
 
-const Std :tSocket=0; {STDIN}
-var StdFamily :NetAddr.tFamily =afNil;
+type tDataGramSocket=object
+ public
+ handle: Sockets.tSocket;
+ procedure Send( const Addr:NetAddr.t; var Data; Len:LongInt);
+ procedure Recv( out Addr:NetAddr.t; var Data; var Len:LongInt);
+ constructor Bind( const Addr:NetAddr.t; xtype:LongInt );
+ constructor Init( family: NetAddr.tFamily; xtype:LongInt );
+ destructor Done;
+ end;
 
-procedure Send( const sock :tSocket; const Addr:NetAddr.t; var Data; Len:LongInt);
- overload;
- {$HINT Not actually testet, byt seems to work}
+type eSocket=class(Exception)
+ code :integer;
+ constructor Create( icode: integer; msg: string );
+end;
 
-procedure Recv( out Addr:NetAddr.t; var Data; var Len:LongInt);
- overload;
- {$HINT Not actually testet, byt seems to work}
-
-procedure CreateAndSend( var Data; Len:LongInt);
- {$HINT Not actually testet, byt seems to work}
-
-procedure SendOrEncap( var Data; Len:LongInt);
- {$HINT Not actually testet, byt seems to work}
+procedure CheckSocket; inline;
 
 IMPLEMENTATION
-uses SysUtils
-    ,Log
-    ,Peers
+uses Peers
     ;
 
-procedure Send(const sock :tSocket; const Addr:NetAddr.t; var Data; Len:LongInt);
+procedure tDataGramSocket.Send( const Addr:NetAddr.t; var Data; Len:LongInt);
  var SockAddr :tSockAddr;
  var addrstr :string;
  begin
- Addr.ToString(addrstr);
+ //Addr.ToString(addrstr);
  //log.msg('Sending packet To '+addrstr);
  Addr.ToSocket(SockAddr);
- if fpsendto( {s} sock, {msg} @Data, {len} Len, {flags} 0, {name} @SockAddr, {namelen} SizeOf(SockAddr))<0 then CheckSocket;
+ if fpsendto( {s} handle, {msg} @Data, {len} Len, {flags} 0, {name} @SockAddr, {namelen} SizeOf(SockAddr))<0 then CheckSocket;
 end;
 
-procedure Recv( out Addr:NetAddr.t; var Data; var Len:LongInt);
+procedure tDataGramSocket.Recv( out Addr:NetAddr.t; var Data; var Len:LongInt);
  var SockAddr:tSockAddr;
  var addrlen : tSockLen;
  begin
  addrlen:= sizeof(SockAddr);
- Len:= fprecvfrom( Std, @Data, Len, 0, @SockAddr, @AddrLen );
+ Len:= fprecvfrom( handle, @Data, Len, 0, @SockAddr, @AddrLen );
  if Len<0 then CheckSocket;
  Addr.FromSocket(SockAddr);
- StdFamily:=Addr.data.Family;
 end;
 
-procedure CreateAndSend(var Data; Len:LongInt);
- var sock :tSocket;
+constructor tDataGramSocket.Bind( const Addr:NetAddr.t; xtype:LongInt );
+ var SockAddr :tSockAddr;
  begin
- assert(not Peers.SelectedAddr.isNil);
- case Peers.SelectedAddr.data.Family of
-  afInet: sock:=fpSocket( AF_INET, SOCK_DGRAM, 0 );
-  //afIP6: sock:=fpSocket( AF_INET6, SOCK_DGRAM, 0 );
-  else AbstractError;
- end;
- if sock<0 then CheckSocket;
- try
-  Send( sock, Peers.SelectedAddr, Data, Len );
- finally
-  CloseSocket(sock);
- end;
+ Addr.ToSocket(SockAddr);
+ handle:= Sockets.fpsocket( SockAddr.sa_family, SOCK_DGRAM, xtype );
+ if handle<0 then CheckSocket;
+ if fpbind(handle, @SockAddr, sizeof(SockAddr))<0 then CheckSocket;
 end;
 
-procedure SendOrEncap(var Data; Len:LongInt);
- var pkencap :^Encap.tEncap=nil;
- var str:string;
+constructor tDataGramSocket.Init( family: NetAddr.tFamily; xtype:LongInt );
+ begin AbstractError; end;
+
+destructor tDataGramSocket.Done;
  begin
- if Peers.SelectedAddr.data.Family = StdFamily then begin
-  assert(not Peers.SelectedAddr.isNil);
-  Send( Std, Peers.SelectedAddr, Data, Len );
- end else begin
-  WriteStr(str, 'Have to encap becouse dest.AF (',Peers.SelectedAddr.data.Family,') <> OurSocket.AF (',StdFamily,')');
-  //log.msg(str);
-  GetMem( pkencap, SizeOf(pkencap^)+Len );
-  pkencap^.Create( Len, Data );
-  Peers.SendProc:=@CreateAndSend;
-  pkencap^.Send;
-  Peers.SendProc:=@SendOrEncap;
-  FreeMem( pkencap, SizeOf(pkencap^)+Len );
- end;
+ fpShutdown(handle,2);
+end;
+
+constructor eSocket.Create( icode: integer; msg: string );
+ begin
+ inherited Create(msg);
+ code:=icode;
+end;
+
+procedure CheckSocket;
+ inline;
+var e:integer;
+begin
+ e:=SocketError;
+ if e<>0 then raise eSocket.Create(e, '...');
 end;
 
 END.
