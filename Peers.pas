@@ -1,101 +1,75 @@
 unit Peers;
 
 INTERFACE
-uses Keys
-    ,NetAddr
-    ,Sockets
-    ,UnixType
+uses NetAddr
     ,SysUtils
+    ,EventLog
     ;
 
-{ TODO: New Peer hook }
-
-{ TODO: Split:
- * tNetAddr
-}
-
-type  tPktype =byte;
-
-const cAkafuka :tPkType = 1;
-const cAkafukaN :string='Akafuka';
-const cFundeluka :tPkType = 2;
-const cFundelukaN :string = 'Fundeluka';
-//const PkAccept :set of tPkType = [cAkafuka, cFundeluka];
+var Log:tEventLog;
 
 const cAkafukaCooldown = 5000{ms} /MSecsPerDay;
-const cAkafukaRetry = 3{times};
-const cAkafukaMaxDelta = 600000{ms} /MSecsPerDay; {10 minutes to ping? Heh!}
+const cMaxRetry = 3{times};
+const cMaxDelta = 600000{ms} /MSecsPerDay; {10 minutes to ping? Heh!}
 const cAkafukaPeriod = 5000{ms} /MSecsPerDay;
 const cAkafukaUnknown  = 10;
 
-TYPE
-
- tID= packed object(Keys.tHash)
- {
-  Unique identifier of the peer.
-  Technicaly a 160bit SHA1 hash of master public key of peer.
- }
- end;
-  
+type
+ tPktype =byte;
  tPacket = packed object
+  { Base object for all packets }
   pktype :tPktype;
   procedure Create ( const itp :tPktype );
-  procedure Handle;
-  procedure Send( Len:LongInt ); overload;
-  function TimeSince: System.tTime;
-   unimplemented;
-  procedure ResetTimeSince;
-  { returns time since last packet from the peer of that type arrived }
-   unimplemented;
+  procedure Handle( const from: NetAddr.t);
+  procedure Send( const rcpt: NetAddr.t; Len:LongInt ); overload;
  end;
 
- tAkafuka =packed object(tPacket)
+const cAkafuka :tPkType = 1;
+const cAkafukaN ='Akafuka';
+type tAkafuka =packed object(tPacket)
  {
   A Ping-Pong packet.
   Name is reference to Zidan (Dávid) Sufusky Sufurky
  }
-
-  procedure Handle;
-  { Executes approportiate actions to respond to this packet }
-
-  procedure Send; overload;
-  { mark selected address as akafuka and actually sends the packet }
-
+  procedure Handle( const from: NetAddr.t);
+  procedure Send( const rcpt: NetAddr.t);
   procedure Create; overload;
-  { Creates akafuka packet }
-
-  private
-  SenderID: tID;
-  Load: byte unimplemented; { load of the sender's system }
-  YouSock :NetAddr.T; { address, the packet was sent to }
  end;
 
- tFundeluka= packed object(tPacket)
-
-  procedure Handle;
-  { unmarkd selected address as akafuka, computes AkafukaDelta }
-
-  procedure Send; overload;
-  { Computes length of the packet and calls send }
-
+const cFundeluka :tPkType = 2;
+const cFundelukaN = 'Fundeluka';
+type tFundeluka= packed object(tPacket)
+  procedure Handle( const from: NetAddr.t);
+  procedure Send( const rcpt: NetAddr.t);
   procedure Create; overload;
-  { Creates fundeluka packet }
-
-  private
-  SenderID: tID;
-  Load: byte unimplemented; { load of the sender's system }
-  YouSock :NetAddr.T; { address, the packet was sent to }
  end;
  
+type tInfo= record
+  Addr: NetAddr.t;
+  Delta: tTime;
+ end;
+procedure Get( out info:tInfo; const addr:netaddr.t ); overload;
+procedure Add( addr :NetAddr.T );
+ 
+var
+ SendProc: procedure(const rcpt:netaddr.t; var Data; Len:LongInt);
+ StateChangeProc :procedure( event: byte; info:tInfo );
+
+procedure DoAkafuka;
+{
+ Send Akafuke to all peers.
+ Remove not responding peers.
+}
+
+type {Exceptions}
  eNoAddress = class(Exception)
  {
-  Exception signaling that peer has no associated sockaddr.
+  Exception signaling that recipient is not in list of peers.
   Thus no packet can be sent.
  }
-  ID : tID; { id of erroring peer }
-  constructor Create( iid :tID );
+  Addr: NetAddr.t;
+  constructor Create( iAddr: NetAddr.t );
  end;
-
  eUnknownSender = class(Exception)
  {
   Exception signaling that sender is not in database
@@ -104,41 +78,45 @@ TYPE
   constructor Create( iAddr : NetAddr.t );
  end;
  
-var
- ThisID :tID;
- SelectedID : tID;
- SelectedAddr :NetAddr.T; {$HINT Should Move SelectedAddr to SocketUtil?}
- SelectedDelta :System.tTime;
- SendProc: procedure(var Data; Len:LongInt);
- AppearProc :procedure( id :tID );
- DisappearProc :procedure( id :tID );
-
-procedure Select( ID :tID );
-{ Selects peer with given ID and automatically picks an sockaddr }
-
-procedure DoAkafuka;
-{
- Send Akafuke to all peers.
- Remove not responding peers.
-}
-
-procedure Add( addr :NetAddr.T );
-{ Add peer only known by its address. }
-
-procedure Reset;
-
 procedure SelfTest;
- platform;
+ deprecated;
 
 IMPLEMENTATION
 uses 
      DataBase
-    ,db
-    ,Log
-    ,Dbf_Common
-    ,Dbf
-    ,Variants
     ;
+
+{ Data storage }
+
+type
+ tPeerList=object(tLinkedList)
+  addr:netaddr.t;
+  delta:ttime;
+  function Search(addr:netaddr.t):pointer;
+ end;
+var PeerList:tPeersListItem;
+
+type tPendingList=object(tPeerList)
+  since:tdatetime;
+  retry:word;
+ end;
+var PendingList:tPendingList;
+
+function tPeersList.Search(addr:netaddr.t):pointer;
+ var cur:^tPeerList;
+ begin
+ cur:=@self;
+ if assigned(cur) then
+ repeat
+  if cur^.addr=addr then begin
+   if (cur<>@self)and assigned(cur^.Prev) then cur^.Swap(@self); {DYNAMIC programming :)}
+   result:=cur;
+   break;
+  end;
+  cur:=cur^.Next;
+ until not assigned(cur);
+ result:=nil;
+end;
 
 {*********************************
  *********** Addresses *********** 
