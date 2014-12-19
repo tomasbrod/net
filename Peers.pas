@@ -89,27 +89,27 @@ uses
 { Data storage }
 
 type
- tPeerList=object(tLinkedList)
+ tPeersList=object(tLinkedList)
   addr:netaddr.t;
   delta:ttime;
-  function Search(addr:netaddr.t):pointer;
+  function Search(iaddr:netaddr.t):pointer;
  end;
-var PeerList:tPeersListItem;
+var PeerList:tPeersList;
 
-type tPendingList=object(tPeerList)
+type tPendingList=object(tPeersList)
   since:tdatetime;
   retry:word;
  end;
 var PendingList:tPendingList;
 
-function tPeersList.Search(addr:netaddr.t):pointer;
- var cur:^tPeerList;
+function tPeersList.Search(iaddr:netaddr.t):pointer;
+ var cur:^tPeersList;
  begin
  cur:=@self;
  if assigned(cur) then
  repeat
-  if cur^.addr=addr then begin
-   if (cur<>@self)and assigned(cur^.Prev) then cur^.Swap(@self); {DYNAMIC programming :)}
+  if cur^.addr=iaddr then begin
+   if cur<>@self then cur^.Swap(@self); {DYNAMIC programming :)}
    result:=cur;
    break;
   end;
@@ -122,100 +122,8 @@ end;
  *********** Addresses *********** 
  *********************************}
 
-type tAkafukaDB = class (DataBase.tDbDataSet)
- private procedure HandleAfterScroll( DataSet: TDataSet );
- public
- constructor Create; {override;}overload;
- procedure Post; override; //To save changes
- public
- ID: Peers.tID;
- Addr: NetAddr.T;
- Delta: System.tTime;
- Since: tDateTime;
- Retry: Integer;
- procedure FindAddr ( iaddr: NetAddr.T );
- procedure FindID ( aID: tID );
-end;
-
-constructor tAkafukaDB.Create;
- begin
- inherited Create( nil );
- AfterScroll:=@HandleAfterScroll;
-   OpenMode:=omAutoCreate;
-   FieldDefs.Add( {0} 'id',    ftString,  40, True  );
-   FieldDefs.Add( {1} 'addr',  ftString,  50, True  );
-   FieldDefs.Add( {2} 'delta', ftFloat, 0, True );
-   FieldDefs.Add( {3} 'since', ftFloat, 0, True );
-   FieldDefs.Add( {4} 'retry', ftSmallInt, 0, True );
-   with IndexDefs.Add do begin Name:='addr'; Expression:=Name; Options:=[ixCaseInsensitive]; end;
-   {
-   with IndexDefs.Add do begin Name:='retry'; Expression:=Name; Options:=[ixDescending]; end;
-   }
-   with IndexDefs.Add do begin Name:='since'; Expression:=Name; Options:=[]; end;
-   with IndexDefs.Add do begin Name:='select'; Expression:='id+STR(delta,16,14)'; Options:=[]; end;
- Open ('peers');
-end;
-
-procedure tAkafukaDB.HandleAfterScroll( DataSet: TDataSet );
- begin
- tHash(ID):=Fields[0].AsString;
- Addr:=Fields[1].AsString;
- Delta:=Fields[2].AsFloat;
- Since:=Fields[3].AsFloat;
- Retry:=Fields[4].AsInteger;
-end;
-  
-procedure tAkafukaDB.Post;
- begin
- Fields[0].AsString:=String(tHash(ID));
- Fields[1].AsString:=String(Addr);
- Fields[2].AsFloat:=Delta;
- Fields[3].AsFloat:=Since;
- Fields[4].AsInteger:=Retry;
- inherited Post;
-end;
-
-procedure tAkafukaDB.FindAddr ( iaddr: NetAddr.T );
- var AddrStr : string;
- begin
- assert( not iaddr.isNil);
- if iaddr = addr then exit;
- iaddr.ToString(AddrStr);
- if not Locate ( 'addr', AddrStr, [] ) then raise DataBase.eSearch.Create;
-end;
-
-procedure tAkafukaDB.FindID ( aID: tID );
- begin
- IndexName:='select';
- SetRange( String(tHash(aID)), String(tHash(aID))+'99999999.99999999');
- {
- First; while not EOF do begin
-  log.msg('-- '+String(tHash(aID))+ FloatToStr( Delta ));
-  Next;
- end;
- }
- First;
- if EOF then raise DataBase.eSearch.Create;
-end;
-
-var AkafukaDB :tAkafukaDB;
-
-procedure Select( ID :tID );
- {- All addresses in the db were available at last Akafuka}
- var saddr,sid :string;
- begin
- if (not SelectedAddr.isNil) and (not SelectedID.isNil) and (SelectedID = ID) then exit;
- ID.ToString(sid);
- log.msg('Select '+sid);
- AkafukaDB.FindID( ID );
- SelectedID:=AkafukaDB.ID;
- SelectedAddr:=AkafukaDB.Addr;
- SelectedDelta:=AkafukaDB.Delta;
- SelectedAddr.ToString(saddr);
- log.msg('Selected '+sid+' ('+saddr+')');
-end;
-
-procedure tPacket.Handle;
+procedure tPacket.Handle( const from:netaddr.t );
+ { do nothing }
  begin
  { addr shouldbe selected by Daemon }
  assert( not SelectedAddr.isNil );
@@ -231,9 +139,9 @@ procedure tPacket.Handle;
  SelectedAddr:=AkafukaDB.Addr;
  SelectedDelta:=AkafukaDB.Delta;
  log.msg('Received #'+IntToStr(pktype)+' From '+String(tHash(SelectedID))+' ('+String(SelectedAddr)+')');
- {
+ (*
  log.msg('Last was '+TimeToStr(AkafukaDB.Since)+'('+FloatToStr(AkafukaDB.Since*SecsPerDay)+'s) ago');
- }
+ *)
 end;
 
 {****************************************
@@ -269,11 +177,9 @@ procedure tLastAccessor.Load( pktype :tPkType; out Time: System.tTime );
   on eRangeError do Time:=0;
  end;
 end;
-*)
 
 function tPacket.TimeSince: System.tTime;
 begin
- (*
  db.Init( Sender );
  try
   db.Load( pktype, cur );
@@ -281,19 +187,20 @@ begin
  finally
   db.Done;
  end;
- *)
  result := high(tTime);
 end;
 
 procedure tPacket.ResetTimeSince;
  begin
 end;
+ *)
 
 {*********************************
  *********** Akafuka   ***********
  *********************************}
 
-procedure tAkafuka.Send;
+procedure tAkafuka.Send( const rcpt: NetAddr.t);
+ { Add to pendging }
  begin
  //log.msg('Sending Akafuka');
  SenderID:=ThisID;
@@ -306,6 +213,7 @@ procedure tAkafuka.Send;
  inherited Send(sizeof(SELF) - (Sizeof(YouSock)-YouSock.Length) );
 end;
 
+(*
 procedure SaveReportedAddr( const Addr: NetAddr.t );
  var oldrecno:integer;
  begin
@@ -331,8 +239,10 @@ procedure SaveReportedAddr( const Addr: NetAddr.t );
   AkafukaDB.RecNo:=OldRecNo;
  end;
 end;
+*)
 
-procedure tAkafuka.Handle;
+procedure tAkafuka.Handle( const from: NetAddr.t);
+ { Send fundeluka. If not in roster then send akafuka. }
 var fundeluka:tFundeluka;
 var isNew: boolean;
 begin
@@ -360,7 +270,8 @@ begin
  SaveReportedAddr( YouSock );
 end;
 
-procedure tFundeluka.Handle;
+procedure tFundeluka.Handle( const from: NetAddr.t);
+ { Move from pending to roster and update delta. }
  var isnew:boolean;
  begin
  //log.msg('Received '+cFundelukaN);
@@ -392,12 +303,7 @@ procedure tFundeluka.Handle;
 end;
 
 procedure DoAkafuka;
- {
- Go through each peer and
-  - Remove timeouted in akafuka.dat
-  - Resend Akafuka in akafuka.dat
-  - Send Akafuka in addr.dat
- }
+ { Retry pending. Check roster for old peers and send them akafuka. }
  var akafuka:tAkafuka;
  begin
  log.msg('DoAkafuka on '+IntToStr(AkafukaDB.ExactRecordCount)+' records');
@@ -429,7 +335,7 @@ procedure DoAkafuka;
 end;
 
 procedure Add( addr :NetAddr.T );
- { saves the peer to db, and fundeluka packet }
+ { Send akafuka }
  begin
  SelectedID.Clear;
  SelectedAddr:=addr;
@@ -484,7 +390,7 @@ procedure tPacket.Create ( const itp :tPktype );
  pktype := itp;
 end;
 
-procedure tPacket.Send(Len:LongInt);
+procedure tPacket.Send( const rcpt:netaddr.t; Len:LongInt);
  var saddr,sid :string;
  begin
  SelectedAddr.ToString(saddr);
@@ -494,12 +400,12 @@ procedure tPacket.Send(Len:LongInt);
  SendProc( self, Len );
 end;
 
-constructor eNoAddress.Create( iid :tID );
+constructor eNoAddress.Create( iAddr : NetAddr.t );
 var idstr:string;
 begin
- iid.ToString(idstr);
+ iaddr.ToString(idstr);
  inherited Create( 'No Address associated to Peer '+idstr );
- id:=iid;
+ addr:=iaddr;
 end;
 
 constructor eUnknownSender.Create( iAddr : NetAddr.t );
@@ -508,20 +414,15 @@ constructor eUnknownSender.Create( iAddr : NetAddr.t );
  Addr:=iAddr;
 end;
 
-procedure Reset;
-begin
- SelectedID.Clear;
- SelectedAddr.Clear;
-end;
-
 procedure SelfTest;
  begin
  AbstractError;
 end;
 
 INITIALIZATION
- AkafukaDB:=tAkafukaDB.Create;
+ PeersList.InitRoot;
+ PendingList.InitRoot;
 FINALIZATION
- AkafukaDB.Active:=False;
- AkafukaDB.Free;
+ PendingList.Done;
+ PeersList.Done;
 END.

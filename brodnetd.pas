@@ -24,7 +24,7 @@ PROCEDURE Idle;
  log.info('Processing sheduled tasks');
 end;
 
-procedure NewPeerHook( id :Peers.tID );
+procedure NewPeerHook( event: byte; info:tInfo );
  var ids:string;
  begin
  id.ToString(ids);
@@ -129,7 +129,7 @@ BEGIN
  {Hook callbacks}
  fpSignal(SigInt,@TerminateHook);
  fpSignal(SigTerm,@TerminateHook);
- //Peers.NewProc:=@NewPeerHook;
+ Peers.StateChangeProc:=@PeerStateHook;
  
  {Setup server socket}
  StartListening(socket, config);
