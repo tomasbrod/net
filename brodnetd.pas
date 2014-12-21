@@ -16,13 +16,17 @@ USES SysUtils
 
 var Log: tEventLog;
 
-const cRecvWait=1500{ms};
+const cRecvWait=5000{ms};
 
 PROCEDURE Idle;
+ var took:tdatetime;
  begin
- log.debug('Processing sheduled tasks');
+ took:=now;
+
  Peers.DoAkafuka;
- log.debug('Processing sheduled tasks done');
+
+ took:=now-took;
+ log.info('System idle tasks took: '+FloatToStr(took*MsecsPerDay)+'ms');
 end;
 
 procedure PeerStateHook( event: byte; info:tInfo );
@@ -93,9 +97,17 @@ procedure TerminateHook (sig : cint);
  ReqQuit:=ReqQuit or true;
 end;
 
+function TerminateHook2( ctrlbreak:boolean ):boolean;
+ begin
+ if ctrlbreak then log.info('Control Break') else log.info('Control Cancel');
+ TerminateHook(0);
+ result:=true;
+end;
+
 procedure StartListening(var socket:tDatagramSocket; const config:tINIFile);
  var addr:NetAddr.T;
  begin
+ log.debug('Initializing network');
  try addr.FromString( config.ReadString('PEER','inet4_bind','--') );
  except on eConvertError do begin
    log.Error('Invalid inet4_bind config');
@@ -107,6 +119,8 @@ procedure StartListening(var socket:tDatagramSocket; const config:tINIFile);
    log.error('Failed to bind'{+todo});
    raise {todo};
  end; end;
+ log.info('Listening on: '+string(addr));
+ log.info('Idle treshold set to: '+IntToStr(cRecvWait)+'ms');
 end;
 
 var Config:tINIFile;
@@ -122,22 +136,34 @@ BEGIN
  Log:=tEventLog.Create(nil);
  Log.LogType:=ltFile;
  //Log.FileName:=Database.Prefix+DirectorySeparator+'g.log'; //temp
- Log.FileName:='/dev/stderr';
+ Log.FileName:='/dev/stderr'; //even more temp
  Log.Active:=True;
  Log.info('*** '+ApplicationName+', in '+Database.Prefix);
- 
+ Peers.Log:=Log;
  {Hook callbacks}
- //fpSignal(SigInt,@TerminateHook);
- SysUtils.HookSignal(0);
+ fpSignal(SigInt,@TerminateHook);
  fpSignal(SigTerm,@TerminateHook);
+ SysSetCtrlBreakHandler(@TerminateHook2);
  Peers.StateChangeProc:=@PeerStateHook;
  
  {Setup server socket}
  StartListening(socket, config);
+ 
+ {Restore state}
+ log.debug('Reading presistent storage');
+ Peers.LoadState;
+
  {Enter the main loop}
  log.info('Entering main loop');
- Loop(socket);
- if ReqQuit then Log.info('Requested shutdown!');
+ try
+  Loop(socket);
+  if ReqQuit then Log.info('Requested shutdown!');
+ finally
+  
+  {Save state}
+  log.debug('Saving presistent data');
+  Peers.SaveState;
+ end;
  
  {
  except
@@ -150,5 +176,6 @@ BEGIN
    DumpExceptionBackTrace(Log.F);
   end;
  }
+ log.error('Failed to stop network, unimplemented');
  Log.info('STOP');
 END.

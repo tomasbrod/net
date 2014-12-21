@@ -70,6 +70,7 @@ var Prefix :string ='./data';
 const FieldExtension :string='dat';
 
 procedure Open( out F :File; const Table :tTable; const Row :tRow; const Field :tField );
+procedure dbAssign( out F:File; const fn:tFileName );
 
 procedure UnInsert ( var F :file );
  experimental;
@@ -82,21 +83,26 @@ procedure Init( iprefix: string );
 
 IMPLEMENTATION
 
+procedure dbAssign( out F:File; const fn:tFileName );
+var path :tFileName;
+begin
+ path:=Prefix + DirectorySeparator + ExtractFileDir(fn);
+ {Create the file and directory if not exist}
+ if not FileExists(fn) then begin
+  if not DirectoryExists(path) then ForceDirectories(path);
+  FileClose(FileCreate(fn)); //ineffective
+ end;
+ { And Assign the handle. Note: caller should reset() the file. }
+ Assign( F, fn );
+end;
+
 procedure Open( out F :File; const Table :tTable; const Row :tRow; const Field :tField );
 var path,name :tFileName;
 begin
- path:=
-  Prefix + DirectorySeparator
-  + Table + DirectorySeparator
+ path:= Table + DirectorySeparator
   + Row + DirectorySeparator;
  name:=Field + ExtensionSeparator + FieldExtension;
- {Create the file and directory if not exist}
- if not FileExists(path+name) then begin
-  if not DirectoryExists(path) then ForceDirectories(path);
-  FileClose(FileCreate(path+name));
- end;
- { And Assign the handle. Note: caller should reset() the file. }
- Assign( F, path + name);
+ dbAssign( F, path+name );
 end;
 
 procedure UnInsert ( var F :file );

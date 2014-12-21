@@ -67,6 +67,9 @@ procedure DoAkafuka;
  Remove not responding peers.
 }
 
+procedure SaveState;
+procedure LoadState;
+
 type {Exceptions}
  eNoAddress = class(Exception)
  {
@@ -307,10 +310,10 @@ procedure DoAkafuka;
  var peer:tPeersList;
  var akafuka:tAkafuka;
  begin
- log.debug('DoAkafuka');
- log.debug('Retry pending');
+ //log.debug('DoAkafuka');
+ //log.debug('Retry pending');
  pending:=tPendingList(PendingList.Next);
- while assigned(pending) do begin
+ while pending<>PendingList do begin
   if (now-pending.since)>cAkafukaPeriod then begin
    if pending.retry>cMaxRetry then begin
     log.info('Peer '+string(pending.addr)+' dropped, not responding');
@@ -325,16 +328,16 @@ procedure DoAkafuka;
   end;
   pending:=tPendingList(pending.next);
  end;
- log.debug('Akafuka old peers');
+ //log.debug('Akafuka old peers');
  peer:=tPeersList(PeerList.Next);
- while assigned(peer) do begin
+ while peer<>PeerList do begin
   if (now-peer.since)>cAkafukaPeriod then begin
    log.debug('Peer '+string(peer.addr)+' is too old, akafuka');
    Peers.Add(peer.addr,peer);
   end;
   peer:=tPeersList(peer.next);
  end;
- log.debug('Akafuka complete');
+ //log.debug('Akafuka complete');
 end;
  
 procedure Add( addr :NetAddr.T; peer:tPeersList );
@@ -369,6 +372,49 @@ procedure Get( out info:tInfo; const addr:netaddr.t);
  info.addr:=peer.addr;
  info.delta:=peer.delta;
  info.since:=peer.since;
+end;
+
+{ *** Saving And Loading *** }
+
+type tDiskPeerInfo=record
+ addr:netaddr.t;
+ end;
+
+procedure SaveState;
+ var f: file of tDiskPeerInfo;
+ var v: tDiskPeerInfo;
+ var p:tPeersList;
+ var c:word=0;
+ begin
+ DataBase.dbAssign(f,'peers.dat');
+ reset(f);
+ truncate(f);
+ p:=tPeersList(PeerList.next);
+ while p<>PeerList do begin
+  v.addr:=p.addr;
+  write(f,v);
+  p:=tPeersList(p.next);
+  inc(c);
+ end;
+ close(f);
+ log.info('Saved '+IntToStr(c)+' peers to presistent storage');
+end;
+ 
+procedure LoadState;
+ var f: file of tDiskPeerInfo;
+ var v: tDiskPeerInfo;
+ var c:word=0;
+ begin
+ log.debug('Begin reading list of peers');
+ DataBase.dbAssign(f,'peers.dat');
+ reset(f);
+ while not eof(f) do begin
+  read(f,v);
+  Peers.Add(v.addr);
+  inc(c);
+ end;
+ close(f);
+ log.info('Restored '+IntToStr(c)+' peers from presistent storage');
 end;
  
 { *** Simple Uninteresting Bullshit ***}
