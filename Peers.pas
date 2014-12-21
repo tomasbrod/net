@@ -14,6 +14,7 @@ const cMaxDelta = 600000{ms} /MSecsPerDay; {10 minutes to ping? Heh!}
 const cAkafukaPeriod = 5000{ms} /MSecsPerDay;
 const cAkafukaUnknown  = 10;
 
+{Generic packet}
 type
  tPktype =byte;
  tPacket = packed object
@@ -22,8 +23,10 @@ type
   procedure Create ( const itp :tPktype );
   procedure Handle( const from: NetAddr.t);
   procedure Send( const rcpt: NetAddr.t; Len:LongInt ); overload;
+  procedure AfterProcessing( const from:netaddr.t);
  end;
 
+{Packet structures}
 const cAkafuka :tPkType = 1;
 const cAkafukaN ='Akafuka';
 type tAkafuka =packed object(tPacket)
@@ -43,13 +46,16 @@ type tFundeluka= packed object(tPacket)
   procedure Send( const rcpt: NetAddr.t);
   procedure Create; overload;
  end;
- 
+
+{Peer list}
 type tInfo= record
   Addr: NetAddr.t;
   Delta: tTime;
+  Since: tDateTime;
  end;
 procedure Get( out info:tInfo; const addr:netaddr.t ); overload;
 procedure Add( addr :NetAddr.T );
+{procedure GetList; unimplemented;}
  
 var
  SendProc: procedure(const rcpt:netaddr.t; var Data; Len:LongInt);
@@ -105,6 +111,7 @@ type tPendingList=class(tNodeWithAddress)
  since:tdatetime;
  retry:word;
  procedure CopyFrom(peer:tPeersList);
+ procedure FreeSelfAndPeer;
  end;
 var PendingList:tPendingList;
 
@@ -129,7 +136,19 @@ procedure tPendingList.CopyFrom(peer:tPeersList);
  inherited;
  ofpeer:=peer;
  addr:=peer.addr;
+ retry:=0;
+ since:=now;
 end;
+
+procedure tPendingList.FreeSelfAndPeer;
+ begin
+ if assigned(ofpeer) then ofpeer.free;
+ free;
+end;
+
+{Private forward declarations}
+
+procedure Add( addr :NetAddr.T; peer:tPeersList ); forward;
 
 {*********************************
  *********** Addresses *********** 
@@ -213,28 +232,9 @@ end;
 
 procedure tAkafuka.Send( const rcpt: NetAddr.t);
  { Add to pendging }
- var entry:tPendingList;
  begin
- entry:=tPendingList.Create;
- with entry do begin
-  CopyFrom(rcpt);
-  addr:=rcpt;
-  since:=now;
-  retry:=0;
-  delta:=0;
- end;
- PendingList.Insert(entry);
-
-
- //log.msg('Sending Akafuka');
- SenderID:=ThisID;
- YouSock:=SelectedAddr;
- AkafukaDB.Edit;
- AkafukaDB.Retry:=AkafukaDB.Retry+1;
- AkafukaDB.Since:=Now;
- AkafukaDB.Post;
- //log.msg('Akafuka info: Retry='+IntToStr(AkafukaDB.Retry)+' Delta='+FloatToStr(AkafukaDB.Delta*SecsPerDay)+'s');
- inherited Send(sizeof(SELF) - (Sizeof(YouSock)-YouSock.Length) );
+ log.debug('Sending Akafuka to '+string(rcpt));
+ inherited Send( rcpt, sizeof(SELF) );
 end;
 
 (*
@@ -267,120 +267,110 @@ end;
 
 procedure tAkafuka.Handle( const from: NetAddr.t);
  { Send fundeluka. If not in roster then send akafuka. }
-var fundeluka:tFundeluka;
-var isNew: boolean;
-begin
- //log.msg('Received '+cAkafukaN);
- try
-  inherited Handle;
-  isNew:=false;
- except on eUnknownSender do begin
-  { This means that peer/addr is not yet associated, we fix this and call the handler again }
-  isNew:=true;
-  log.msg('Add addr;id to db.');
-  AkafukaDB.Append;
-  AkafukaDB.ID:=SenderID;
-  AkafukaDB.Addr:=SelectedAddr;
-  AkafukaDB.Since:=Now; {to trigger Akafuka on next DoAkafuka}
-  AkafukaDB.Delta:=cAkafukaUnknown;
-  AkafukaDB.Retry:=0;
-  AkafukaDB.Post;
-  inherited Handle; { now it should be OK }
- end; end;
- if isNew or (TimeSince > cAkafukaCooldown) then begin
-  fundeluka.Create;
-  fundeluka.Send;
- end else log.msg('Anti-DDoS, not sending '+cFundelukaN);
- SaveReportedAddr( YouSock );
+ var fundeluka:tFundeluka;
+ var peer:tPeersList;
+ var isNew: boolean;
+ begin
+ inherited;
+ log.debug('Received '+cAkafukaN);
+ fundeluka.Create;
+ if {timesincelast>cAkafukaCooldown} true
+  then fundeluka.Send(from);
+ peer:=tPeersList(PeerList.Search(from));
+ isnew:= not assigned(peer);
+ if not assigned(peer)
+  then Peers.Add(from);
 end;
 
 procedure tFundeluka.Handle( const from: NetAddr.t);
  { Move from pending to roster and update delta. }
  var isnew:boolean;
+ var peer:tPeersList;
+ var pending:tPendingList;
  begin
- //log.msg('Received '+cFundelukaN);
- inherited Handle; { this also rejects unknown or invalid senders and leaves db at sender addr }
- AkafukaDB.Edit;
-
- if SelectedID.isNil then begin
-  SelectedID:=SenderID;
-  AkafukaDB.ID:=SelectedID;
- end else
-  if SelectedID<>SenderID then raise eInvalidInsert.Create('Invalid Sender ID');
-
- { Calculate delta, reset timestamp }
- isnew:= AkafukaDB.Delta=cAkafukaUnknown;
- AkafukaDB.Delta:=Now - AkafukaDB.Since;
- log.msg('Akafuka: '+FloatToStr(AkafukaDB.Delta*SecsPerDay)+'s after '+IntToStr(AkafukaDB.Retry)+' retries');
- AkafukaDB.Since:=Now;
- AkafukaDB.Retry:=0;
- AkafukaDB.Post;
-
- if AkafukaDB.Delta > cAkafukaMaxDelta then begin
-  log.msg('Akafuka Delta too high');
-  AkafukaDB.Delete;
-  if assigned(DisappearProc) then DisappearProc( AkafukaDB.ID );
- end else
-  if isnew and assigned(AppearProc) then AppearProc( SenderID );
-
- SaveReportedAddr( YouSock );
+ inherited;
+ log.debug('Received '+cFundelukaN);
+ pending:=tPendingList(PendingList.Search(from));
+ if not assigned(pending) then assert(false);
+ peer:=tPeersList(pending.ofpeer);
+ isnew:= not assigned(peer);
+ if isnew then begin peer:=tPeersList.Create ; PeerList.Insert(peer) end;
+ peer.delta:=now-pending.since;
+ peer.since:=now;
+ pending.free;
+ log.info('Peer '+string(from)+': delta='+FloatToStr(peer.delta*MSecsPerDay)+' retry='+IntToStr(pending.retry));
 end;
 
 procedure DoAkafuka;
  { Retry pending. Check roster for old peers and send them akafuka. }
+ var pending:tPendingList;
+ var peer:tPeersList;
  var akafuka:tAkafuka;
  begin
- log.msg('DoAkafuka on '+IntToStr(AkafukaDB.ExactRecordCount)+' records');
- try
-  {Try sending akafuka again}
-  while true do begin
-   AkafukaDB.IndexName:='since';
-   AkafukaDB.SetRange( 0, Now-cAkafukaPeriod );
-   if AkafukaDB.EOF then break;
-   if AkafukaDB.Retry>=cAkafukaRetry then begin
-    {Lets delete timeouted peers. But do not delete before period}
-    log.msg('Akafuka timeout: '+String(tHash(AkafukaDB.ID))+' '+String(AkafukaDB.Addr));
-    AkafukaDB.Delete;
-    if assigned(DisappearProc) then DisappearProc( AkafukaDB.ID );
+ log.debug('DoAkafuka');
+ log.debug('Retry pending');
+ pending:=tPendingList(PendingList.Next);
+ while assigned(pending) do begin
+  if (now-pending.since)>cAkafukaPeriod then begin
+   if pending.retry>cMaxRetry then begin
+    log.info('Peer '+string(pending.addr)+' dropped, not responding');
+    pending.freeselfandpeer;
    end else begin
-    Akafuka.Create;
-    SelectedID:=AkafukaDB.ID;
-    SelectedAddr:=AkafukaDB.Addr;
-    log.msg('Akafuka Retry: '+String(tHash(AkafukaDB.ID))+' '+String(AkafukaDB.Addr)+' r='+IntToStr(AkafukaDB.Retry));
-    Akafuka.Send;
+    log.debug('Retry pending '+string(pending.addr));
+    akafuka.create;
+    akafuka.send(pending.addr);
+    inc(pending.retry);
+    pending.since:=now;
    end;
   end;
- finally
-  AkafukaDB.CancelRange;
-  AkafukaDB.Filter:='';
-  AkafukaDB.Filtered:=False;
-  AkafukaDB.IndexName:='';
+  pending:=tPendingList(pending.next);
+ end;
+ log.debug('Akafuka old peers');
+ peer:=tPeersList(PeerList.Next);
+ while assigned(peer) do begin
+  if (now-peer.since)>cAkafukaPeriod then begin
+   log.debug('Peer '+string(peer.addr)+' is too old, akafuka');
+   Peers.Add(peer.addr,peer);
+  end;
+  peer:=tPeersList(peer.next);
+ end;
+ log.debug('Akafuka complete');
+end;
+ 
+procedure Add( addr :NetAddr.T; peer:tPeersList );
+ { add to pending, send akafuka }
+ var pending:tPendingList;
+ var akafuka:tAkafuka;
+ begin
+ log.debug('Try to add peer '+string(addr));
+ pending:=tPendingList(PendingList.Search(addr));
+ if assigned(pending) then begin
+  log.debug('Already pending');
+ end else begin
+  pending:=tPendingList.Create;
+  pending.addr:=addr;
+  pending.retry:=0;
+  pending.since:=now;
+  pending.ofpeer:=peer;
+  akafuka.create;
+  akafuka.send(addr);
  end;
 end;
 
 procedure Add( addr :NetAddr.T );
- { Send akafuka }
  begin
- SelectedID.Clear;
- SelectedAddr:=addr;
- try
-  AkafukaDB.FindAddr( SelectedAddr );
-  AkafukaDB.Edit;
- except
-  on DataBase.eSearch do begin
-   AkafukaDB.Append;
-   AkafukaDB.ID:=SelectedID;
-   AkafukaDB.Addr:=SelectedAddr;
-   AkafukaDB.Delta:=cAkafukaUnknown;
-   AkafukaDB.Retry:=0;
-  end;
- end;
- AkafukaDB.Since:=0;
- SelectedID:=AkafukaDB.ID;
- SelectedDelta:=AkafukaDB.Delta;
- AkafukaDB.Post;
+ Add(addr,nil);
 end;
 
+procedure Get( out info:tInfo; const addr:netaddr.t);
+ var peer:tPeersList;
+ begin
+ peer:=tPeersList(PeerList.Search(addr));
+ info.addr:=peer.addr;
+ info.delta:=peer.delta;
+ info.since:=peer.since;
+end;
+ 
 { *** Simple Uninteresting Bullshit ***}
 
 procedure tFundeluka.Create;
@@ -393,12 +383,10 @@ begin
  inherited Create(cAkafuka);
 end;
 
-procedure tFundeluka.Send;
+procedure tFundeluka.Send( const rcpt:NetAddr.t );
 begin
- SenderID:=ThisID;
- YouSock:=SelectedAddr;
- //log.msg('Sending '+cFundelukaN);
- inherited Send(sizeof(SELF) - (Sizeof(YouSock)-YouSock.Length) );
+ log.info('Sending '+cFundelukaN);
+ inherited Send( rcpt, sizeof(SELF) );
 end;
 
 {
@@ -414,14 +402,17 @@ procedure tPacket.Create ( const itp :tPktype );
  pktype := itp;
 end;
 
+procedure tPacket.AfterProcessing( const from: netaddr.t);
+ begin
+end;
+
 procedure tPacket.Send( const rcpt:netaddr.t; Len:LongInt);
  var saddr,sid :string;
  begin
- SelectedAddr.ToString(saddr);
- SelectedID.ToString(sid);
- log.msg('Sending #'+IntToStr(pktype)+' to '+sid+' ('+saddr+')');
+ rcpt.ToString(saddr);
+ log.debug('Sending #'+IntToStr(pktype)+' to '+saddr+'');
  Assert( SendProc <> nil );
- SendProc( self, Len );
+ SendProc( rcpt, self, Len );
 end;
 
 constructor eNoAddress.Create( iAddr : NetAddr.t );
@@ -444,9 +435,9 @@ procedure SelfTest;
 end;
 
 INITIALIZATION
- PeersList:=tPeersList.CreateRoot;
+ PeerList:=tPeersList.CreateRoot;
  PendingList:=tPendingList.CreateRoot;
 FINALIZATION
  PendingList.Free;
- PeersList.Free;
+ PeerList.Free;
 END.

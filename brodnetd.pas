@@ -8,7 +8,6 @@ USES SysUtils
 	,Peers
 	,IniFiles
 	,NetAddr
-	,Encap
 	,SocketUtil
 	,BaseUnix
 	
@@ -21,31 +20,32 @@ const cRecvWait=1500{ms};
 
 PROCEDURE Idle;
  begin
- log.info('Processing sheduled tasks');
+ log.debug('Processing sheduled tasks');
+ Peers.DoAkafuka;
+ log.debug('Processing sheduled tasks done');
 end;
 
-procedure NewPeerHook( event: byte; info:tInfo );
+procedure PeerStateHook( event: byte; info:tInfo );
  var ids:string;
  begin
- id.ToString(ids);
- log.info('Detected new Peer '+ids);
+ info.addr.ToString(ids);
+ log.info('Detected Peer state change: addr='+ids+' delta='+FloatToStr(info.delta*MsecsPerDay)+'ms since='+DateTimeToStr(info.since));
 end;
 
-PROCEDURE ProcessPacket( pk:Peers.tPacket; len:LongWord );
+PROCEDURE ProcessPacket( pk:Peers.tPacket; len:LongWord; const from:netaddr.t );
  var p:pointer;
  var addrstr:string;
 begin
  try
  p:=@Pk;
- Peers.SelectedAddr.ToString( addrstr );
- if Pk.pktype=Peers.cAkafuka then Peers.tAkafuka(p^).Handle else
- if Pk.pktype=Peers.cFundeluka then Peers.tFundeluka(p^).Handle else
- if Pk.pktype=Encap.cEncap then Encap.tEncap(p^).Handle else
+ from.ToString( addrstr );
+ if Pk.pktype=Peers.cAkafuka then Peers.tAkafuka(p^).Handle(from) else
+ if Pk.pktype=Peers.cFundeluka then Peers.tFundeluka(p^).Handle(from) else
   begin
   log.error('Received Unknown #'+IntToStr(Pk.pktype)+' ('+IntToStr(SizeOf(Pk))+'B) From '+addrstr);
   Abort;
  end;
- Peers.tPacket(p^).ResetTimeSince;
+ Peers.tPacket(p^).AfterProcessing(from);
  except
   on e:Exception do begin
    Log.Error('Processing packet'); 
@@ -60,10 +60,10 @@ PROCEDURE Loop(socket:tDataGramSocket);
  var FDS : BaseUnix.tFDSet;
  var InPk: ^Peers.tPacket;
  var InPkLen: LongInt;
+ var from:netaddr.t;
  begin
  repeat
   {Reset internal state}
-  Peers.Reset;
   InPk:=@InPkMem;
   InPkLen:= sizeof(InPkMem);
   BaseUnix.fpfd_zero(FDS);
@@ -78,11 +78,11 @@ PROCEDURE Loop(socket:tDataGramSocket);
    end;
    {Receive}
    //log.msg('Waiting for socket to be ready');
-   socket.Recv( Peers.SelectedAddr, InPk^, InPkLen );
+   socket.Recv( from, InPk^, InPkLen );
   except
    on Exception do begin Log.Error('Reading from socket'); raise end;
   end;
-  ProcessPacket(InPk^,InPkLen);
+  ProcessPacket(InPk^,InPkLen,from);
  until (ReqQuit);
 end;
 
@@ -127,7 +127,8 @@ BEGIN
  Log.info('*** '+ApplicationName+', in '+Database.Prefix);
  
  {Hook callbacks}
- fpSignal(SigInt,@TerminateHook);
+ //fpSignal(SigInt,@TerminateHook);
+ SysUtils.HookSignal(0);
  fpSignal(SigTerm,@TerminateHook);
  Peers.StateChangeProc:=@PeerStateHook;
  
