@@ -84,38 +84,51 @@ procedure SelfTest;
 IMPLEMENTATION
 uses 
      DataBase
+    ,LinkedList
     ;
 
 { Data storage }
 
-type
- tPeersList=object(tLinkedList)
+type tNodeWithAddress=class(LinkedList.tDLNode)
   addr:netaddr.t;
-  delta:ttime;
-  function Search(iaddr:netaddr.t):pointer;
+  function Search(iaddr:netaddr.t):tNodeWithAddress;
+ end;
+
+type tPeersList=class(tNodeWithAddress)
+ delta:tTime;
+ since:tDateTime;
  end;
 var PeerList:tPeersList;
 
-type tPendingList=object(tPeersList)
-  since:tdatetime;
-  retry:word;
+type tPendingList=class(tNodeWithAddress)
+ ofpeer:tPeersList;
+ since:tdatetime;
+ retry:word;
+ procedure CopyFrom(peer:tPeersList);
  end;
 var PendingList:tPendingList;
 
-function tPeersList.Search(iaddr:netaddr.t):pointer;
- var cur:^tPeersList;
+function tNodeWithAddress.Search(iaddr:netaddr.t):tNodeWithAddress;
+ var cur:tNodeWithAddress;
  begin
- cur:=@self;
+ cur:=self;
  if assigned(cur) then
  repeat
-  if cur^.addr=iaddr then begin
-   if cur<>@self then cur^.Swap(@self); {DYNAMIC programming :)}
+  if cur.addr=iaddr then begin
+   if cur<>self then cur.Swap(self); {DYNAMIC programming :)}
    result:=cur;
    break;
   end;
-  cur:=cur^.Next;
- until not assigned(cur);
+  cur:=tNodeWithAddress(cur.Next);
+ until cur=self; {becouse the list is circular}
  result:=nil;
+end;
+
+procedure tPendingList.CopyFrom(peer:tPeersList);
+ begin
+ inherited;
+ ofpeer:=peer;
+ addr:=peer.addr;
 end;
 
 {*********************************
@@ -125,6 +138,7 @@ end;
 procedure tPacket.Handle( const from:netaddr.t );
  { do nothing }
  begin
+ (*
  { addr shouldbe selected by Daemon }
  assert( not SelectedAddr.isNil );
  {Lookup sender ID from database}
@@ -138,10 +152,8 @@ procedure tPacket.Handle( const from:netaddr.t );
  SelectedID:=AkafukaDB.ID;
  SelectedAddr:=AkafukaDB.Addr;
  SelectedDelta:=AkafukaDB.Delta;
- log.msg('Received #'+IntToStr(pktype)+' From '+String(tHash(SelectedID))+' ('+String(SelectedAddr)+')');
- (*
- log.msg('Last was '+TimeToStr(AkafukaDB.Since)+'('+FloatToStr(AkafukaDB.Since*SecsPerDay)+'s) ago');
  *)
+ log.debug('Received #'+IntToStr(pktype)+' From '+String(from));
 end;
 
 {****************************************
@@ -201,7 +213,19 @@ end;
 
 procedure tAkafuka.Send( const rcpt: NetAddr.t);
  { Add to pendging }
+ var entry:tPendingList;
  begin
+ entry:=tPendingList.Create;
+ with entry do begin
+  CopyFrom(rcpt);
+  addr:=rcpt;
+  since:=now;
+  retry:=0;
+  delta:=0;
+ end;
+ PendingList.Insert(entry);
+
+
  //log.msg('Sending Akafuka');
  SenderID:=ThisID;
  YouSock:=SelectedAddr;
@@ -420,9 +444,9 @@ procedure SelfTest;
 end;
 
 INITIALIZATION
- PeersList.InitRoot;
- PendingList.InitRoot;
+ PeersList:=tPeersList.CreateRoot;
+ PendingList:=tPendingList.CreateRoot;
 FINALIZATION
- PendingList.Done;
- PeersList.Done;
+ PendingList.Free;
+ PeersList.Free;
 END.
