@@ -28,7 +28,7 @@ uses Peers
     ;
 
 procedure tDataGramSocket.Send( const Addr:NetAddr.t; var Data; Len:LongInt);
- var SockAddr :tSockAddr;
+ var SockAddr :tSockAddrL;
  var addrstr :string;
  begin
  //Addr.ToString(addrstr);
@@ -38,7 +38,7 @@ procedure tDataGramSocket.Send( const Addr:NetAddr.t; var Data; Len:LongInt);
 end;
 
 procedure tDataGramSocket.Recv( out Addr:NetAddr.t; var Data; var Len:LongInt);
- var SockAddr:tSockAddr;
+ var SockAddr:tSockAddrL;
  var addrlen : tSockLen;
  begin
  addrlen:= sizeof(SockAddr);
@@ -48,11 +48,17 @@ procedure tDataGramSocket.Recv( out Addr:NetAddr.t; var Data; var Len:LongInt);
 end;
 
 constructor tDataGramSocket.Bind( const Addr:NetAddr.t; xtype:LongInt );
- var SockAddr :tSockAddr;
+ var SockAddr :tSockAddrL;
+ var so:integer;
  begin
  Addr.ToSocket(SockAddr);
  handle:= Sockets.fpsocket( SockAddr.sa_family, SOCK_DGRAM, xtype );
  if handle<0 then CheckSocket;
+ if addr.data.family=afInet6 then begin
+  //Set socket option to only take ipv6
+  so:=1;
+  if fpSetSockOpt(handle, IPPROTO_IPV6, IPV6_V6ONLY, @so, sizeof(so))<0 then CheckSocket;
+ end;
  if fpbind(handle, @SockAddr, sizeof(SockAddr))<0 then CheckSocket;
 end;
 
@@ -75,7 +81,7 @@ procedure CheckSocket;
 var e:integer;
 begin
  e:=SocketError;
- if e<>0 then raise eSocket.Create(e, '...');
+ if e<>0 then raise eSocket.Create(e, '...'+IntToStr(e));
 end;
 
 END.

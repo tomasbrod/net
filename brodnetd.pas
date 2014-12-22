@@ -8,11 +8,9 @@ USES SysUtils
 	,DataBase
 	,Peers
 	,IniFiles
-	,fpJSON
-	,fpjsonrtti
-	,jsonconf
 	,NetAddr
 	,SocketUtil
+	,sSockets
 	,BaseUnix
 	,EventLog
 	;
@@ -63,35 +61,46 @@ end;
 var InPkMem: array [1..1024] of byte;
 var ReqQuit:boolean=false;
 
-PROCEDURE Loop(socket: array of tDataGramSocket);
+var socketa: array [1..8] of tDatagramSocket;
+var socketc:word=0;
+var ctrl_socketa: array [1..8] of tDatagramSocket unimplemented;
+var ctrl_socketc:word=0;
+
+PROCEDURE Loop;
  var FDS : BaseUnix.tFDSet;
+ var FDSM: LongInt=99 unimplemented;
  var InPk: ^Peers.tPacket;
  var InPkLen: LongInt;
  var from:netaddr.t;
+ var i:word;
  begin
- repeat
   {Reset internal state}
   InPk:=@InPkMem;
   InPkLen:= sizeof(InPkMem);
   BaseUnix.fpfd_zero(FDS);
-  BaseUnix.fpfd_set(socket.handle,FDS);
-  //Flush(log.F);
+  for i:=1 to socketc do BaseUnix.fpfd_set(socketa[i].handle,FDS);
+  (*for i:=1 to ctrl_socketc do BaseUnix.fpfd_set(ctrl_socketa[i].handle,FDS);*)
   {Wait for data}
   try
   {fpSelect returns >0 if data is available}
-   if BaseUnix.fpSelect( socket.handle+1, @FDS, nil, nil, cRecvWait )<=0 then begin
+   if BaseUnix.fpSelect( FDSM, @FDS, nil, nil, cRecvWait )<=0 then begin
     if not ReqQuit then Idle;
-    continue;
+   end else begin
+   (*
+   for i:=1 to ctrl_socketc do if BaseUnix.fpfd_isset(ctrl_socketa[i].handle,FDS)=1 then begin
+    log.info('Received command on socket '+IntToStr(i));
+    ProcessCommand(ctrl_socketa[i]);
    end;
-   {Receive}
-   //log.msg('Waiting for socket to be ready');
-   socket.Recv( from, InPk^, InPkLen );
+   *)
+   for i:=1 to socketc do if BaseUnix.fpfd_isset(socketa[i].handle,FDS)=1 then begin
+    log.info('Received packet on socket '+IntToStr(i));
+    {Receive}
+    socketa[i].Recv( from, InPk^, InPkLen );
+   end;
+   end;
   except
-   on Exception do begin Log.Error('Reading from socket'); raise end;
+   on Exception do raise; {putis}
   end;
-  ProcessPacket(InPk^,InPkLen,from);
- until (ReqQuit);
- sleep(500);
 end;
 
 procedure TerminateHook (sig : cint); 
@@ -111,31 +120,43 @@ function TerminateHook2( ctrlbreak:boolean ):boolean;
  result:=true;
 end;
 
-procedure StartListening(var socket:tDatagramSocket; const config:tINIFile);
+procedure StartListening(const config:tINIFile);
  var addr:NetAddr.T;
  var str:ansistring;
- begin
- log.debug('Initializing network');
- str:=config.ReadString('DAEMON','bind','');
- {while (str<>'') do begin}
+ procedure dostr;
+  begin
   try addr.FromString( Copy2SpaceDel(str) );
   except on eConvertError do begin
     log.Error('Invalid bind config');
     log.Info('example: bind=//ip4/0.0.0.0/1030');
     raise {todo};
   end; end;
-  try socket.Bind(addr,0);
+ end;
+
+ begin
+ log.debug('Initializing network');
+ str:=config.ReadString('DAEMON','bind','');
+ socketc:=1; while (str<>'')and(socketc<high(socketa)) do begin
+  dostr;
+  try
+   socketa[socketc].Bind(addr,0);
+   //if fpListen(socketa[socketc].handle, 0)<0 then CheckSocket; not working
   except on eSocket do begin
     log.error('Failed to bind to '+string(addr));
     raise {todo};
   end; end;
-  log.info('Listening on: '+string(addr));
- {end;}
+  log.info('Listening #'+IntToStr(socketc)+' on: '+string(addr));
+ inc(socketc); end; dec(socketc);
+ (*
+ log.debug('Initializing ctrl');
+ str:=config.ReadString('DAEMON','ctrl_bind','');
+ ...
+ *)
+
  log.info('Idle treshold set to: '+IntToStr(cRecvWait)+'ms');
 end;
 
 var Config:tINIFile;
-var socket: array of tDatagramSocket;
 
 BEGIN
  {Setup database}
@@ -161,8 +182,7 @@ BEGIN
  Peers.StateChangeProc:=@PeerStateHook;
  
  {Setup server socket}
- SetLength(socket,1);
- StartListening(socket, config);
+ StartListening(config);
  config.Free;
  
  {Restore state}
@@ -172,7 +192,7 @@ BEGIN
  {Enter the main loop}
  log.debug('Entering main loop');
  try
-  Loop(socket);
+  repeat Loop; until ReqQuit;
  finally
   
   {Save state}

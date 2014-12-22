@@ -3,10 +3,17 @@ unit NetAddr;
 INTERFACE
 uses Sockets
     ,SysUtils
+    ,UnixType
     ;
 
+ {Redefine socaddr here, becouse original is too short for ipv6 and unix}
+ type tSockAddrL = packed record
+           sa_family: sa_family_t;
+           sa_data: array [0..107] of cuint8;
+  end;
+ type tSockAddr= type tSockAddrL deprecated;
+
 TYPE
- 
  tFamily=(afNil=0, afInet=1, afInet6 );
 
  { Network-byte-ordered words }
@@ -19,9 +26,9 @@ TYPE
   function Length :word;
   { Returns length of the structure based on address family }
 
-  procedure ToSocket( var sockaddr :tSockAddr );
+  procedure ToSocket( var sockaddr :tSockAddrL );
   {$HINT Not actually testet, byt seems to work}
-  procedure FromSocket( var sockaddr :tSockAddr );
+  procedure FromSocket( var sockaddr :tSockAddrL );
   {$HINT Not actually testet, byt seems to work}
 
   procedure ToString( var str :String );
@@ -74,12 +81,11 @@ type eSocket=class(Exception)
  constructor Create( icode: integer; msg: string );
 end;
 
-procedure CheckSocket; inline;
+procedure CheckSocket; inline; deprecated;
 
 IMPLEMENTATION
 uses 
      DataBase
-    ,UnixType
     ,Log
      ;
 
@@ -111,7 +117,7 @@ begin
  end;
 end;
 
-procedure t.ToSocket( var sockaddr :tSockAddr );
+procedure t.ToSocket( var sockaddr :tSockAddrL );
 begin
  case data.family of
   afInet: begin
@@ -120,13 +126,18 @@ begin
   end;
   afInet6: begin
    sockaddr.sa_family:=Sockets.AF_INET6;
-   Move(data.inet6, sockaddr.sa_data, sizeof(data.inet6) );
+   with tInetSockAddr6(pointer(@sockaddr)^) do begin
+    sin6_port:=data.inet6.port;
+    sin6_flowinfo:=0;
+    sin6_addr:=data.inet6.addr;
+    sin6_scope_id:=0;
+   end;
   end;
   else AbstractError; 
  end;
 end;
 
-procedure t.FromSocket( var sockaddr :tSockAddr );
+procedure t.FromSocket( var sockaddr :tSockAddrL );
 begin
  case sockaddr.sa_family of
   Sockets.AF_INET: begin

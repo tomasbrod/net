@@ -1,4 +1,4 @@
-unit Log;
+unit Log deprecated;
 
 INTERFACE
 uses SysUtils
