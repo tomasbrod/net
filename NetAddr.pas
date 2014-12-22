@@ -7,7 +7,7 @@ uses Sockets
 
 TYPE
  
- tFamily=(afNil=0, afInet=1 );
+ tFamily=(afNil=0, afInet=1, afInet6 );
 
  { Network-byte-ordered words }
  Word2=array [1..2] of byte; {0..65535}
@@ -43,6 +43,10 @@ TYPE
    afInet :( inet :packed record 
     port: Word;
     addr: tInAddr;
+   end; );
+   afInet6 :( inet6 :packed record 
+    port: Word;
+    addr: tIn6Addr;
    end; );
    afNil :(
     pad_pV4IlkA4mKQL :packed array [0..128] of byte;
@@ -102,6 +106,7 @@ begin
  case data.Family of
   afNil: ;
   afInet: result+=sizeof( data.inet );
+  afInet6: result+=sizeof( data.inet6 );
   else result:=sizeof(self);
  end;
 end;
@@ -112,6 +117,10 @@ begin
   afInet: begin
    sockaddr.sa_family:=Sockets.AF_INET;
    Move(data.inet, sockaddr.sa_data, sizeof(data.inet) );
+  end;
+  afInet6: begin
+   sockaddr.sa_family:=Sockets.AF_INET6;
+   Move(data.inet6, sockaddr.sa_data, sizeof(data.inet6) );
   end;
   else AbstractError; 
  end;
@@ -124,6 +133,10 @@ begin
    data.family:=afInet;
    move(sockaddr.sa_data, data.inet, sizeof(data.inet) );
   end;
+  Sockets.AF_INET6: begin
+   data.family:=afInet6;
+   move(sockaddr.sa_data, data.inet6, sizeof(data.inet6) );
+  end;
   else raise Exception.Create('Unknown AF '+IntToStr(sockaddr.sa_family));
  end;
 end;
@@ -135,7 +148,11 @@ procedure t.ToString( var str :String );
    str:='//ip4/'+Sockets.NetAddrToStr(data.inet.addr)+
     '/'+IntToStr(ShortNetToHost(data.inet.port));
   end;
-  afNil: str:='nil';
+  afInet6: begin
+   str:='//ip6/'+Sockets.NetAddrToStr6(data.inet6.addr)+
+    '/'+IntToStr(ShortNetToHost(data.inet6.port));
+  end;
+  afNil: str:='//nil';
   else AbstractError;
  end;
 end;
@@ -162,6 +179,19 @@ procedure t.FromString( str :String );
   fam:=copy(str,1,i-1);
   delete(str,1,i);
   data.inet.port:=ShortHostToNet(StrToInt(fam));
+  
+ end else if fam='ip6' then begin
+  data.family:=afInet6;
+
+  i:=pos('/',str); if i=0 then i:=System.Length(str)+1;
+  fam:=copy(str,1,i-1);
+  delete(str,1,i);
+  data.inet6.addr:=StrToNetAddr6(fam);
+  
+  i:=pos('/',str); if i=0 then i:=System.Length(str)+1;
+  fam:=copy(str,1,i-1);
+  delete(str,1,i);
+  data.inet6.port:=ShortHostToNet(StrToInt(fam));
   
  end else if fam='nil' then begin
   data.family:=afNil;
@@ -214,7 +244,7 @@ procedure CheckSocket;
 var e:cint;
 begin
  e:=SocketError;
- if e<>0 then raise eSocket.Create(e, '...');
+ if e<>0 then raise eSocket.Create(e, '...'+IntToStr(e));
 end;
 
 operator := (net : Word2) host:word;
