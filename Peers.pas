@@ -9,9 +9,9 @@ uses NetAddr
 var Log:tEventLog;
 
 const cAkafukaCooldown = 5000{ms} /MSecsPerDay;
-const cMaxRetry = 3{times};
+const cMaxRetry = 0{times};
 const cMaxDelta = 600000{ms} /MSecsPerDay; {10 minutes to ping? Heh!}
-const cAkafukaPeriod = 5000{ms} /MSecsPerDay;
+const cAkafukaPeriod = 10000{ms} /MSecsPerDay;
 const cAkafukaUnknown  = 10;
 
 {Generic packet}
@@ -121,13 +121,15 @@ var PendingList:tPendingList;
 function tNodeWithAddress.Search(iaddr:netaddr.t):tNodeWithAddress;
  var cur:tNodeWithAddress;
  begin
- cur:=self;
+ cur:=tNodeWithAddress(self.next);
  if assigned(cur) then
  repeat
   if cur.addr=iaddr then begin
-   if cur<>self then cur.Swap(self); {DYNAMIC programming :)}
+   if cur=self then break;
+   cur.unlink;
+   self.Insert(cur); {DYNAMIC programming :)}
    result:=cur;
-   break;
+   exit;
   end;
   cur:=tNodeWithAddress(cur.Next);
  until cur=self; {becouse the list is circular}
@@ -175,7 +177,7 @@ procedure tPacket.Handle( const from:netaddr.t );
  SelectedAddr:=AkafukaDB.Addr;
  SelectedDelta:=AkafukaDB.Delta;
  *)
- log.debug('Received #'+IntToStr(pktype)+' From '+String(from));
+ (*log.debug('Received #'+IntToStr(pktype)+' From '+String(from));*)
 end;
 
 {****************************************
@@ -268,6 +270,20 @@ procedure SaveReportedAddr( const Addr: NetAddr.t );
 end;
 *)
 
+procedure DispatchStateEvent(new,deleted:boolean; peer:tPeersList);
+ var event:byte;
+ var info:tInfo;
+ begin
+ if not assigned(StateChangeProc) then exit;
+ info.addr:=peer.addr;
+ info.delta:=peer.delta;
+ info.since:=peer.since;
+ event:=0;
+ if new then event:=1;
+ if deleted then event:=2;
+ StateChangeProc(event,info);
+end;
+
 procedure tAkafuka.Handle( const from: NetAddr.t);
  { Send fundeluka. If not in roster then send akafuka. }
  var fundeluka:tFundeluka;
@@ -275,7 +291,7 @@ procedure tAkafuka.Handle( const from: NetAddr.t);
  var isNew: boolean;
  begin
  inherited;
- log.debug('Received '+cAkafukaN);
+ log.debug('Received '+cAkafukaN+' from '+string(from));
  fundeluka.Create;
  if {timesincelast>cAkafukaCooldown} true
   then fundeluka.Send(from);
@@ -292,16 +308,17 @@ procedure tFundeluka.Handle( const from: NetAddr.t);
  var pending:tPendingList;
  begin
  inherited;
- log.debug('Received '+cFundelukaN);
+ log.debug('Received '+cFundelukaN+' from '+string(from));
  pending:=tPendingList(PendingList.Search(from));
  if not assigned(pending) then assert(false);
  peer:=tPeersList(pending.ofpeer);
  isnew:= not assigned(peer);
- if isnew then begin peer:=tPeersList.Create ; PeerList.Insert(peer) end;
+ if isnew then begin peer:=tPeersList.Create ; peer.addr:=from; PeerList.Insert(peer) end;
  peer.delta:=now-pending.since;
  peer.since:=now;
  pending.free;
- log.info('Peer '+string(from)+': delta='+FloatToStr(peer.delta*MSecsPerDay)+' retry='+IntToStr(pending.retry));
+ log.debug('Peer '+string(from)+': delta='+FloatToStr(peer.delta*MSecsPerDay)+' retry='+IntToStr(pending.retry));
+ DispatchStateEvent(isnew,false,peer);
 end;
 
 procedure DoAkafuka;
@@ -316,8 +333,10 @@ procedure DoAkafuka;
  while pending<>PendingList do begin
   if (now-pending.since)>cAkafukaPeriod then begin
    if pending.retry>cMaxRetry then begin
-    log.info('Peer '+string(pending.addr)+' dropped, not responding');
+    if assigned(pending.ofpeer) then DispatchStateEvent(false,true,pending.ofpeer);
+    log.debug('Peer '+string(pending.addr)+' dropped, not responding');
     pending.freeselfandpeer;
+    pending:=tPendingList(PendingList.Next); continue; {because current is nil, so we cannot go to current.next}
    end else begin
     log.debug('Retry pending '+string(pending.addr));
     akafuka.create;
@@ -332,7 +351,7 @@ procedure DoAkafuka;
  peer:=tPeersList(PeerList.Next);
  while peer<>PeerList do begin
   if (now-peer.since)>cAkafukaPeriod then begin
-   log.debug('Peer '+string(peer.addr)+' is too old, akafuka');
+   log.debug('Peer '+string(peer.addr)+' is too old ('+FloatToStr((now-peer.since)*MsecsPerDay)+'), akafuka');
    Peers.Add(peer.addr,peer);
   end;
   peer:=tPeersList(peer.next);
@@ -345,16 +364,16 @@ procedure Add( addr :NetAddr.T; peer:tPeersList );
  var pending:tPendingList;
  var akafuka:tAkafuka;
  begin
- log.debug('Try to add peer '+string(addr));
  pending:=tPendingList(PendingList.Search(addr));
  if assigned(pending) then begin
-  log.debug('Already pending');
+  (*log.debug('Already pending');*)
  end else begin
   pending:=tPendingList.Create;
   pending.addr:=addr;
   pending.retry:=0;
   pending.since:=now;
   pending.ofpeer:=peer;
+  PendingList.Insert(pending);
   akafuka.create;
   akafuka.send(addr);
  end;
@@ -362,6 +381,7 @@ end;
 
 procedure Add( addr :NetAddr.T );
  begin
+ log.debug('Try to add peer '+string(addr));
  Add(addr,nil);
 end;
 
@@ -406,6 +426,7 @@ procedure LoadState;
  var c:word=0;
  begin
  log.debug('Begin reading list of peers');
+ {$I+}
  DataBase.dbAssign(f,'peers.dat');
  reset(f);
  while not eof(f) do begin
@@ -431,7 +452,7 @@ end;
 
 procedure tFundeluka.Send( const rcpt:NetAddr.t );
 begin
- log.info('Sending '+cFundelukaN);
+ log.debug('Sending '+cFundelukaN+' to '+string(rcpt));
  inherited Send( rcpt, sizeof(SELF) );
 end;
 
@@ -456,7 +477,7 @@ procedure tPacket.Send( const rcpt:netaddr.t; Len:LongInt);
  var saddr,sid :string;
  begin
  rcpt.ToString(saddr);
- log.debug('Sending #'+IntToStr(pktype)+' to '+saddr+'');
+ (*log.debug('Sending #'+IntToStr(pktype)+' to '+saddr+'');*)
  Assert( SendProc <> nil );
  SendProc( rcpt, self, Len );
 end;

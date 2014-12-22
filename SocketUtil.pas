@@ -9,6 +9,7 @@ uses Sockets
 type tDataGramSocket=object
  public
  handle: Sockets.tSocket;
+ local:netaddr.t;
  procedure Send( const Addr:NetAddr.t; var Data; Len:LongInt);
  procedure Recv( out Addr:NetAddr.t; var Data; var Len:LongInt);
  constructor Bind( const Addr:NetAddr.t; xtype:LongInt );
@@ -51,6 +52,7 @@ constructor tDataGramSocket.Bind( const Addr:NetAddr.t; xtype:LongInt );
  var SockAddr :tSockAddrL;
  var so:integer;
  begin
+ local:=addr;
  Addr.ToSocket(SockAddr);
  handle:= Sockets.fpsocket( SockAddr.sa_family, SOCK_DGRAM, xtype );
  if handle<0 then CheckSocket;

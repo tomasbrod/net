@@ -27,14 +27,14 @@ PROCEDURE Idle;
  Peers.DoAkafuka;
 
  took:=now-took;
- log.info('System idle tasks took: '+FloatToStr(took*MsecsPerDay)+'ms');
+ log.debug('System idle tasks took: '+FloatToStr(took*MsecsPerDay)+'ms');
 end;
 
 procedure PeerStateHook( event: byte; info:tInfo );
  var ids:string;
  begin
  info.addr.ToString(ids);
- log.info('Detected Peer state change: addr='+ids+' delta='+FloatToStr(info.delta*MsecsPerDay)+'ms since='+DateTimeToStr(info.since));
+ log.info('Detected Peer state change: event='+IntToStr(event)+' addr='+ids+' delta='+FloatToStr(info.delta*MsecsPerDay)+'ms since='+DateTimeToStr(info.since));
 end;
 
 PROCEDURE ProcessPacket( pk:Peers.tPacket; len:LongWord; const from:netaddr.t );
@@ -55,6 +55,7 @@ begin
   on e:Exception do begin
    Log.Error('Processing packet'); 
    Log.Error(e.ClassName+': '+e.message);
+   DumpExceptionBackTrace(stderr);
  end; end;
 end;
 
@@ -88,14 +89,15 @@ PROCEDURE Loop;
    end else begin
    (*
    for i:=1 to ctrl_socketc do if BaseUnix.fpfd_isset(ctrl_socketa[i].handle,FDS)=1 then begin
-    log.info('Received command on socket '+IntToStr(i));
+    log.info('Received command on socket #'+IntToStr(i));
     ProcessCommand(ctrl_socketa[i]);
    end;
    *)
    for i:=1 to socketc do if BaseUnix.fpfd_isset(socketa[i].handle,FDS)=1 then begin
-    log.info('Received packet on socket '+IntToStr(i));
+    log.debug('Received packet on socket #'+IntToStr(i));
     {Receive}
     socketa[i].Recv( from, InPk^, InPkLen );
+    ProcessPacket( InPk^, InPkLen, from );
    end;
    end;
   except
@@ -118,6 +120,20 @@ function TerminateHook2( ctrlbreak:boolean ):boolean;
  begin
  TerminateHook(0);
  result:=true;
+end;
+
+procedure PacketSendHook(const rcpt:netaddr.t; var Data; Len:LongInt);
+ var i:word;
+ begin
+ for i:=1 to socketc do with socketa[i] do begin
+  if local.data.family=rcpt.data.family then begin
+   log.debug('Sending to socket #'+IntToSTr(i));
+   send(rcpt,data,len);
+   exit;
+  end;
+ end;
+ log.error('No socket in domain for '+string(rcpt));
+ raise exception.create('No socket in domain for '+string(rcpt)); {todo}
 end;
 
 procedure StartListening(const config:tINIFile);
@@ -156,6 +172,15 @@ procedure StartListening(const config:tINIFile);
  log.info('Idle treshold set to: '+IntToStr(cRecvWait)+'ms');
 end;
 
+procedure TEST;
+ var addr:netaddr.t;
+ begin
+ addr:='//ip4/127.0.0.1/1030';
+ Peers.Add(addr);
+ addr:='//ip4/127.0.0.1/1031';
+ Peers.Add(addr);
+end;
+
 var Config:tINIFile;
 
 BEGIN
@@ -180,6 +205,7 @@ BEGIN
  fpSignal(SigTerm,@TerminateHook);
  SysSetCtrlBreakHandler(@TerminateHook2);
  Peers.StateChangeProc:=@PeerStateHook;
+ Peers.SendProc:=@PacketSendHook;
  
  {Setup server socket}
  StartListening(config);
@@ -189,6 +215,7 @@ BEGIN
  log.debug('Reading presistent storage');
  Peers.LoadState;
 
+ TEST;
  {Enter the main loop}
  log.debug('Entering main loop');
  try
