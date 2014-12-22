@@ -271,3 +271,22 @@ request is made with the current "interested in" tags.
 There is a list of share offers waiting acknowledgement. Theese are 
 retransmitted every once in a while. (Should also requests be 
 retransmitted?)
+
+Daemon Controll
+------------
+
+How commmands should be sent to daemon?
+
+1. Signal and file
+   - secure
+2. Unix domain socket
+   - Also secure
+3. Any connection-oriented socket
+   - Scalable
+   - Simple
+   - Have to stop main loop to handle connection.
+4. tRemote packet over main channel
+   - Hard to send reply
+
+There will definitly be better interface implemented on top of the former, 
+but running in separate process.

@@ -2,15 +2,18 @@ PROGRAM brodnetd;
  
 {$MODE OBJFPC}{$C+}
 USES SysUtils
+    ,StrUtils
 	,Sockets
 	,UnixType
 	,DataBase
 	,Peers
 	,IniFiles
+	,fpJSON
+	,fpjsonrtti
+	,jsonconf
 	,NetAddr
 	,SocketUtil
 	,BaseUnix
-	
 	,EventLog
 	;
 
@@ -60,7 +63,7 @@ end;
 var InPkMem: array [1..1024] of byte;
 var ReqQuit:boolean=false;
 
-PROCEDURE Loop(socket:tDataGramSocket);
+PROCEDURE Loop(socket: array of tDataGramSocket);
  var FDS : BaseUnix.tFDSet;
  var InPk: ^Peers.tPacket;
  var InPkLen: LongInt;
@@ -88,44 +91,52 @@ PROCEDURE Loop(socket:tDataGramSocket);
   end;
   ProcessPacket(InPk^,InPkLen,from);
  until (ReqQuit);
+ sleep(500);
 end;
 
 procedure TerminateHook (sig : cint); 
  cdecl;
  begin
- log.info('Receiving signal: '+IntToStr(sig));
- ReqQuit:=ReqQuit or true;
+ if ReqQuit then begin
+  log.warning('Shutdown enforced');
+  raise eControlC.Create('Forced shutdown');
+ end;
+ log.warning('Shutting down, please wait');
+ ReqQuit:=true;
 end;
 
 function TerminateHook2( ctrlbreak:boolean ):boolean;
  begin
- if ctrlbreak then log.info('Control Break') else log.info('Control Cancel');
  TerminateHook(0);
  result:=true;
 end;
 
 procedure StartListening(var socket:tDatagramSocket; const config:tINIFile);
  var addr:NetAddr.T;
+ var str:ansistring;
  begin
  log.debug('Initializing network');
- try addr.FromString( config.ReadString('PEER','inet4_bind','--') );
- except on eConvertError do begin
-   log.Error('Invalid inet4_bind config');
-   log.Info('example: inet4_bind=//ip4/0.0.0.0/1030');
-   raise {todo};
- end; end;
- try socket.Bind(addr,0);
- except on eSocket do begin
-   log.error('Failed to bind'{+todo});
-   raise {todo};
- end; end;
- log.info('Listening on: '+string(addr));
+ str:=config.ReadString('DAEMON','bind','');
+ {while (str<>'') do begin}
+  try addr.FromString( Copy2SpaceDel(str) );
+  except on eConvertError do begin
+    log.Error('Invalid bind config');
+    log.Info('example: bind=//ip4/0.0.0.0/1030');
+    raise {todo};
+  end; end;
+  try socket.Bind(addr,0);
+  except on eSocket do begin
+    log.error('Failed to bind to '+string(addr));
+    raise {todo};
+  end; end;
+  log.info('Listening on: '+string(addr));
+ {end;}
  log.info('Idle treshold set to: '+IntToStr(cRecvWait)+'ms');
 end;
 
 var Config:tINIFile;
-var socket:tDatagramSocket;
- 
+var socket: array of tDatagramSocket;
+
 BEGIN
  {Setup database}
  DataBase.Prefix:=GetEnvironmentVariable('BRODNETD_DATA');
@@ -134,6 +145,9 @@ BEGIN
  Config := TINIFile.Create(DataBase.Prefix+DirectorySeparator+'g.ini');
  {setup log}
  Log:=tEventLog.Create(nil);
+ Log.RaiseExceptionOnError:=True;
+ Log.Identification:=ApplicationName(*+':'+IntToStr(GetProcessID)*);
+ Log.TimeStampFormat:=(*'yyyy-mm-dd*) 'hh:nn:ss.zzz';
  Log.LogType:=ltFile;
  //Log.FileName:=Database.Prefix+DirectorySeparator+'g.log'; //temp
  Log.FileName:='/dev/stderr'; //even more temp
@@ -147,25 +161,25 @@ BEGIN
  Peers.StateChangeProc:=@PeerStateHook;
  
  {Setup server socket}
+ SetLength(socket,1);
  StartListening(socket, config);
+ config.Free;
  
  {Restore state}
  log.debug('Reading presistent storage');
  Peers.LoadState;
 
  {Enter the main loop}
- log.info('Entering main loop');
+ log.debug('Entering main loop');
  try
   Loop(socket);
-  if ReqQuit then Log.info('Requested shutdown!');
  finally
   
   {Save state}
   log.debug('Saving presistent data');
   Peers.SaveState;
- end;
  
- {
+ (*
  except
   on e : eSocket do begin
    Log.msg('Socket error '+IntToStr(e.code));
@@ -175,7 +189,8 @@ BEGIN
    Log.msg(e.ClassName+': '+e.message);
    DumpExceptionBackTrace(Log.F);
   end;
- }
- log.error('Failed to stop network, unimplemented');
- Log.info('STOP');
+ *)
+  log.error('Failed to stop network, unimplemented');
+  log.Free;
+ end;
 END.
