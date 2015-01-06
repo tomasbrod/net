@@ -4,16 +4,28 @@ unit Controll;
 INTERFACE
 
 uses  SocketUtil
-     ,sSockets{#fcl.net}
+     ,NetAddr
+     ,Classes
      ;
 
 type tDaemonController=class (tObject)
   public
-  Socket: tSocketStream;
+  Socket: tStream;
+  finished:boolean;
   procedure Run; unimplemented;
-  constructor Create;
+  constructor Create(asocket:tStream; from:NetAddr.t);
   destructor Destroy; override;
 end;
+
+{todo:
+- Aby sa upratal trochu loop v daemone:
+  - poskytne proceduru co modifikuje select-set
+  - ohandluje si callback z daemona z vysledkyu zo selectu
+  - Chceme abstrahovať socket, aby sa to dalo spustit aj bez daemona?
+    - naco, aj tak to bez neho nejde
+- manažuje si pripojenych sam
+- handluje peerstatechange, terminate, a vsetko
+}
 
 IMPLEMENTATION
 
@@ -22,14 +34,14 @@ procedure tDaemonController.Run;
  abstracterror;
 end;
 
-constructor tDaemonController.Create;
- begin
- abstracterror;
+constructor tDaemonController.Create(asocket:tStream; from:NetAddr.t);
+begin
+ finished:=false;
+ socket:=asocket;
 end;
 
 destructor tDaemonController.Destroy;
  begin
- abstracterror;
 end;
 
 END.

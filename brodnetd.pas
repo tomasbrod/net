@@ -60,10 +60,25 @@ begin
  end; end;
 end;
 
-procedure HandleCommanderConnect(const ls:tListeningSocket; var ctrla: array of tDaemonController; var ctrlc:word);
- unimplemented;
+procedure HandleCommanderConnect(const ls:tListeningSocket; var ctrl: array of tDaemonController);
+ experimental;
+ var stream:tSocketStream;
+ var consocket:Sockets.tSocket;
+ var si:word;
+ var addr:netaddr.t;
  begin
- AbstractError;
+ si:=0; while (si<=high(ctrl))and( assigned(ctrl[si]) ) do inc(si);
+ if si>high(ctrl) then begin
+  log.error('Too many clients on command port');
+  exit;
+ end;
+ ls.Accept(consocket,addr);
+ stream:=tSocketStream.Create(consocket);
+ try
+  ctrl[si]:=tDaemonController.Create(stream,addr);
+ except
+  freeandnil(ctrl[si]); raise;
+ end;
 end;
 
 var InPkMem: array [1..1024] of byte;
@@ -73,7 +88,6 @@ var socketa: array [1..8] of tDatagramSocket;
 var socketc:word=0;
 var ctrl_socketl: tListeningSocket;
 var ctrla: array [1..8] of tDaemonController;
-var ctrlc:word=0;
 
 PROCEDURE Loop;
  var FDS : BaseUnix.tFDSet;
@@ -88,7 +102,7 @@ PROCEDURE Loop;
   InPkLen:= sizeof(InPkMem);
   BaseUnix.fpfd_zero(FDS);
   for i:=1 to socketc do BaseUnix.fpfd_set(socketa[i].handle,FDS);
-  for i:=1 to ctrlc do BaseUnix.fpfd_set(ctrla[i].socket.handle,FDS);
+  for i:=1 to high(ctrla) do if assigned(ctrla[i]) then BaseUnix.fpfd_set((ctrla[i].socket as tSocketStream).Handle,FDS);
   BaseUnix.fpfd_set(ctrl_socketl.handle,FDS);
   {Wait for data}
   try
@@ -105,8 +119,15 @@ PROCEDURE Loop;
    end;
 
     {Check commanders}
-    if BaseUnix.fpfd_isset(ctrl_socketl.handle,FDS)=1 then HandleCommanderConnect(ctrl_socketl,ctrla,ctrlc);
-    for i:=1 to ctrlc do if BaseUnix.fpfd_isset(ctrla[i].socket.handle,FDS)=1 then ctrla[i].Run;
+    if BaseUnix.fpfd_isset(ctrl_socketl.handle,FDS)=1 then HandleCommanderConnect(ctrl_socketl,ctrla);
+    for i:=1 to high(ctrla) do if assigned(ctrla[i]) and (BaseUnix.fpfd_isset((ctrla[i].socket as tSocketStream).Handle,FDS)=1)
+     then begin
+      ctrla[i].Run;
+      if ctrla[i].Finished then begin
+       ctrla[i].socket.free;
+       freeandnil(ctrla[i]);
+      end
+    end;
 
    end;
   except
@@ -148,12 +169,13 @@ end;
 procedure StartListening(const config:tINIFile);
  var addr:NetAddr.T;
  var str:ansistring;
+ var i:word;
  procedure dostr;
   begin
   try addr.FromString( Copy2SpaceDel(str) );
   except on eConvertError do begin
-    log.Error('Invalid bind config');
-    log.Info('example: bind=//ip4/0.0.0.0/1030');
+    log.Error('Invalid bind config ('+str+')');
+    log.Info('example: *bind=//ip4/0.0.0.0/1030');
     raise {todo};
   end; end;
  end;
@@ -165,18 +187,25 @@ procedure StartListening(const config:tINIFile);
   dostr;
   try
    socketa[socketc].Bind(addr,0);
-   //if fpListen(socketa[socketc].handle, 0)<0 then CheckSocket; not working
   except on eSocket do begin
     log.error('Failed to bind to '+string(addr));
     raise {todo};
   end; end;
   log.info('Listening #'+IntToStr(socketc)+' on: '+string(addr));
  inc(socketc); end; dec(socketc);
- (*
+
  log.debug('Initializing ctrl');
+ for i:=1 to high(ctrla) do ctrla[i]:=nil;
  str:=config.ReadString('DAEMON','ctrl_bind','');
- ...
- *)
+ dostr;
+ try
+  ctrl_socketl:=tListeningSocket.Bind(addr,0);
+  ctrl_socketl.Listen;
+ except on eSocket do begin
+    log.error('Failed to bind to '+string(addr));
+    raise {todo};
+ end; end;
+ log.info('Listening CMD/#0 on: '+string(addr));
 
  log.info('Idle treshold set to: '+IntToStr(cRecvWait)+'ms');
  if not assigned(ctrl_socketl) then raise exception.Create('No controll socket listening');

@@ -4,7 +4,6 @@ INTERFACE
 uses Sockets
 	,SysUtils
     ,NetAddr
-    ,sSockets
     ;
 
 type tDataGramSocket=object
@@ -16,20 +15,20 @@ type tDataGramSocket=object
  constructor Bind( const Addr:NetAddr.t; xtype:LongInt );
  constructor Init( family: NetAddr.tFamily; xtype:LongInt );
  destructor Done;
+  unimplemented;
  end;
 
 type tListeningSocket=class (tObject)
  public
  handle: Sockets.tSocket;
- backlog:word;
  constructor Create(aSocket: Sockets.tSocket);
   unimplemented;
  destructor  Destroy; override;
-  unimplemented;
+  experimental;
  procedure Listen;
-  unimplemented;
- procedure Accept(out connected:Sockets.tSocket); {could be stream or seqpacket}
-  unimplemented;
+ procedure Accept(out connected:Sockets.tSocket; out addr:NetAddr.t);
+  experimental;
+ constructor Bind( const Addr:NetAddr.t; xtype:LongInt );
 end;
 
 type eSocket=class(Exception)
@@ -89,12 +88,35 @@ end;
 
 constructor tListeningSocket.Create(aSocket: Sockets.tSocket);
  begin AbstractError; end;
-destructor  tListeningSocket.Destroy;
- begin AbstractError; end;
+destructor tListeningSocket.Destroy;
+ begin
+ fpShutdown(handle,2);
+ FileClose(handle);
+end;
+
 procedure tListeningSocket.Listen;
- begin AbstractError; end;
-procedure tListeningSocket.Accept(out connected:Sockets.tSocket);
- begin AbstractError; end;
+ begin
+ if fpListen(handle, 0)<0 then CheckSocket;
+end;
+
+procedure tListeningSocket.Accept(out connected:Sockets.tSocket; out addr:NetAddr.t);
+ var sockaddr:tSockAddrL;
+ var addrlen : tSockLen;
+ begin
+ addrlen:=sizeof(sockaddr);
+ connected:=fpAccept(handle,@sockaddr,@addrlen);
+ if connected<0 then CheckSocket;
+ addr.FromSocket(sockaddr);
+end;
+
+constructor tListeningSocket.Bind( const Addr:NetAddr.t; xtype:LongInt );
+ var SockAddr :tSockAddrL;
+ begin
+ Addr.ToSocket(SockAddr);
+ handle:= Sockets.fpsocket( SockAddr.sa_family, SOCK_STREAM, xtype );
+ if handle<0 then CheckSocket;
+ if fpbind(handle, @SockAddr, sizeof(SockAddr))<0 then CheckSocket;
+end;
 
 constructor eSocket.Create( icode: integer; msg: string );
  begin
