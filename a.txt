@@ -285,6 +285,7 @@ How commmands should be sent to daemon?
    - Scalable
    - Simple
    - Have to stop main loop to handle connection.
+   - winner!
 4. tRemote packet over main channel
    - Hard to send reply
 

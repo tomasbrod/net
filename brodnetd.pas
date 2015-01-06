@@ -7,6 +7,7 @@ USES SysUtils
 	,UnixType
 	,DataBase
 	,Peers
+	,Controll
 	,IniFiles
 	,NetAddr
 	,SocketUtil
@@ -59,13 +60,20 @@ begin
  end; end;
 end;
 
+procedure HandleCommanderConnect(const ls:tListeningSocket; var ctrla: array of tDaemonController; var ctrlc:word);
+ unimplemented;
+ begin
+ AbstractError;
+end;
+
 var InPkMem: array [1..1024] of byte;
 var ReqQuit:boolean=false;
 
 var socketa: array [1..8] of tDatagramSocket;
 var socketc:word=0;
-var ctrl_socketa: array [1..8] of tDatagramSocket unimplemented;
-var ctrl_socketc:word=0;
+var ctrl_socketl: tListeningSocket;
+var ctrla: array [1..8] of tDaemonController;
+var ctrlc:word=0;
 
 PROCEDURE Loop;
  var FDS : BaseUnix.tFDSet;
@@ -80,25 +88,26 @@ PROCEDURE Loop;
   InPkLen:= sizeof(InPkMem);
   BaseUnix.fpfd_zero(FDS);
   for i:=1 to socketc do BaseUnix.fpfd_set(socketa[i].handle,FDS);
-  (*for i:=1 to ctrl_socketc do BaseUnix.fpfd_set(ctrl_socketa[i].handle,FDS);*)
+  for i:=1 to ctrlc do BaseUnix.fpfd_set(ctrla[i].socket.handle,FDS);
+  BaseUnix.fpfd_set(ctrl_socketl.handle,FDS);
   {Wait for data}
   try
   {fpSelect returns >0 if data is available}
    if BaseUnix.fpSelect( FDSM, @FDS, nil, nil, cRecvWait )<=0 then begin
     if not ReqQuit then Idle;
    end else begin
-   (*
-   for i:=1 to ctrl_socketc do if BaseUnix.fpfd_isset(ctrl_socketa[i].handle,FDS)=1 then begin
-    log.info('Received command on socket #'+IntToStr(i));
-    ProcessCommand(ctrl_socketa[i]);
-   end;
-   *)
+
    for i:=1 to socketc do if BaseUnix.fpfd_isset(socketa[i].handle,FDS)=1 then begin
     log.debug('Received packet on socket #'+IntToStr(i));
     {Receive}
     socketa[i].Recv( from, InPk^, InPkLen );
     ProcessPacket( InPk^, InPkLen, from );
    end;
+
+    {Check commanders}
+    if BaseUnix.fpfd_isset(ctrl_socketl.handle,FDS)=1 then HandleCommanderConnect(ctrl_socketl,ctrla,ctrlc);
+    for i:=1 to ctrlc do if BaseUnix.fpfd_isset(ctrla[i].socket.handle,FDS)=1 then ctrla[i].Run;
+
    end;
   except
    on Exception do raise; {putis}
@@ -170,6 +179,7 @@ procedure StartListening(const config:tINIFile);
  *)
 
  log.info('Idle treshold set to: '+IntToStr(cRecvWait)+'ms');
+ if not assigned(ctrl_socketl) then raise exception.Create('No controll socket listening');
 end;
 
 procedure TEST;

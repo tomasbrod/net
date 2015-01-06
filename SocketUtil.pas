@@ -4,6 +4,7 @@ INTERFACE
 uses Sockets
 	,SysUtils
     ,NetAddr
+    ,sSockets
     ;
 
 type tDataGramSocket=object
@@ -16,6 +17,20 @@ type tDataGramSocket=object
  constructor Init( family: NetAddr.tFamily; xtype:LongInt );
  destructor Done;
  end;
+
+type tListeningSocket=class (tObject)
+ public
+ handle: Sockets.tSocket;
+ backlog:word;
+ constructor Create(aSocket: Sockets.tSocket);
+  unimplemented;
+ destructor  Destroy; override;
+  unimplemented;
+ procedure Listen;
+  unimplemented;
+ procedure Accept(out connected:Sockets.tSocket); {could be stream or seqpacket}
+  unimplemented;
+end;
 
 type eSocket=class(Exception)
  code :integer;
@@ -71,6 +86,15 @@ destructor tDataGramSocket.Done;
  begin
  fpShutdown(handle,2);
 end;
+
+constructor tListeningSocket.Create(aSocket: Sockets.tSocket);
+ begin AbstractError; end;
+destructor  tListeningSocket.Destroy;
+ begin AbstractError; end;
+procedure tListeningSocket.Listen;
+ begin AbstractError; end;
+procedure tListeningSocket.Accept(out connected:Sockets.tSocket);
+ begin AbstractError; end;
 
 constructor eSocket.Create( icode: integer; msg: string );
  begin
