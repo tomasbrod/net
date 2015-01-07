@@ -36,6 +36,7 @@ procedure PeerStateHook( event: byte; info:tInfo );
  begin
  info.addr.ToString(ids);
  log.info('Detected Peer state change: event='+IntToStr(event)+' addr='+ids+' delta='+FloatToStr(info.delta*MsecsPerDay)+'ms since='+DateTimeToStr(info.since));
+ Controll.NotifyPeerStateChange(event,info);
 end;
 
 PROCEDURE ProcessPacket( pk:Peers.tPacket; len:LongWord; const from:netaddr.t );
@@ -60,34 +61,12 @@ begin
  end; end;
 end;
 
-procedure HandleCommanderConnect(const ls:tListeningSocket; var ctrl: array of tDaemonController);
- experimental;
- var stream:tSocketStream;
- var consocket:Sockets.tSocket;
- var si:word;
- var addr:netaddr.t;
- begin
- si:=0; while (si<=high(ctrl))and( assigned(ctrl[si]) ) do inc(si);
- if si>high(ctrl) then begin
-  log.error('Too many clients on command port');
-  exit;
- end;
- ls.Accept(consocket,addr);
- stream:=tSocketStream.Create(consocket);
- try
-  ctrl[si]:=tDaemonController.Create(stream,addr);
- except
-  freeandnil(ctrl[si]); raise;
- end;
-end;
-
 var InPkMem: array [1..1024] of byte;
 var ReqQuit:boolean=false;
 
 var socketa: array [1..8] of tDatagramSocket;
 var socketc:word=0;
 var ctrl_socketl: tListeningSocket;
-var ctrla: array [1..8] of tDaemonController;
 
 PROCEDURE Loop;
  var FDS : BaseUnix.tFDSet;
@@ -102,8 +81,8 @@ PROCEDURE Loop;
   InPkLen:= sizeof(InPkMem);
   BaseUnix.fpfd_zero(FDS);
   for i:=1 to socketc do BaseUnix.fpfd_set(socketa[i].handle,FDS);
-  for i:=1 to high(ctrla) do if assigned(ctrla[i]) then BaseUnix.fpfd_set((ctrla[i].socket as tSocketStream).Handle,FDS);
   BaseUnix.fpfd_set(ctrl_socketl.handle,FDS);
+  Controll.SetSelectFDs(FDS);
   {Wait for data}
   try
   {fpSelect returns >0 if data is available}
@@ -119,15 +98,8 @@ PROCEDURE Loop;
    end;
 
     {Check commanders}
-    if BaseUnix.fpfd_isset(ctrl_socketl.handle,FDS)=1 then HandleCommanderConnect(ctrl_socketl,ctrla);
-    for i:=1 to high(ctrla) do if assigned(ctrla[i]) and (BaseUnix.fpfd_isset((ctrla[i].socket as tSocketStream).Handle,FDS)=1)
-     then begin
-      ctrla[i].Run;
-      if ctrla[i].Finished then begin
-       ctrla[i].socket.free;
-       freeandnil(ctrla[i]);
-      end
-    end;
+    if BaseUnix.fpfd_isset(ctrl_socketl.handle,FDS)=1 then Controll.HandleConnect(ctrl_socketl);
+    Controll.Receive(FDS);
 
    end;
   except
@@ -135,8 +107,7 @@ PROCEDURE Loop;
   end;
 end;
 
-procedure TerminateHook (sig : cint); 
- cdecl;
+procedure DoTerminate;
  begin
  if ReqQuit then begin
   log.warning('Shutdown enforced');
@@ -146,9 +117,15 @@ procedure TerminateHook (sig : cint);
  ReqQuit:=true;
 end;
 
+procedure TerminateHook (sig : cint); 
+ cdecl;
+ begin
+ DoTerminate;
+end;
+
 function TerminateHook2( ctrlbreak:boolean ):boolean;
  begin
- TerminateHook(0);
+ DoTerminate;
  result:=true;
 end;
 
@@ -195,7 +172,6 @@ procedure StartListening(const config:tINIFile);
  inc(socketc); end; dec(socketc);
 
  log.debug('Initializing ctrl');
- for i:=1 to high(ctrla) do ctrla[i]:=nil;
  str:=config.ReadString('DAEMON','ctrl_bind','');
  dostr;
  try
@@ -239,12 +215,14 @@ BEGIN
  Log.Active:=True;
  Log.info('*** '+ApplicationName+', in '+Database.Prefix);
  Peers.Log:=Log;
+ Controll.Log:=Log;
  {Hook callbacks}
  fpSignal(SigInt,@TerminateHook);
  fpSignal(SigTerm,@TerminateHook);
  SysSetCtrlBreakHandler(@TerminateHook2);
  Peers.StateChangeProc:=@PeerStateHook;
  Peers.SendProc:=@PacketSendHook;
+ Controll.OnTerminateRequest:=@DoTerminate;
  
  {Setup server socket}
  StartListening(config);
@@ -264,6 +242,7 @@ BEGIN
   {Save state}
   log.debug('Saving presistent data');
   Peers.SaveState;
+  Controll.NotifyQuit(not ReqQuit);
  
  (*
  except
