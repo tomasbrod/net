@@ -27,7 +27,7 @@ type
  end;
 
 {Packet structures}
-const cAkafuka :tPkType = 1;
+const cAkafuka = 1;
 const cAkafukaN ='Akafuka';
 type tAkafuka =packed object(tPacket)
  {
@@ -39,7 +39,7 @@ type tAkafuka =packed object(tPacket)
   procedure Create; overload;
  end;
 
-const cFundeluka :tPkType = 2;
+const cFundeluka = 2;
 const cFundelukaN = 'Fundeluka';
 type tFundeluka= packed object(tPacket)
   procedure Handle( const from: NetAddr.t);

@@ -46,14 +46,16 @@ begin
  try
  p:=@Pk;
  from.ToString( addrstr );
- if Pk.pktype=Peers.cAkafuka then Peers.tAkafuka(p^).Handle(from) else
- if Pk.pktype=Peers.cFundeluka then Peers.tFundeluka(p^).Handle(from) else
- if Pk.pktype=StreamInit.cRequest then StreamInit.tRequest(p^).Handle(from) else
- if Pk.pktype=StreamInit.cReject then StreamInit.tReject(p^).Handle(from) else
- if Pk.pktype=StreamInit.cAccept then StreamInit.tAccept(p^).Handle(from) else
-  begin
-  log.error('Received Unknown #'+IntToStr(Pk.pktype)+' ('+IntToStr(SizeOf(Pk))+'B) From '+addrstr);
-  Abort;
+ case Pk.pktype of
+  Peers.cAkafuka: Peers.tAkafuka(p^).Handle(from);
+  Peers.cFundeluka: Peers.tFundeluka(p^).Handle(from);
+  StreamInit.cRequest: StreamInit.tRequest(p^).Handle(from);
+  StreamInit.cReject: StreamInit.tReject(p^).Handle(from);
+  StreamInit.cAccept: StreamInit.tAccept(p^).Handle(from);
+  else begin
+   log.error('Received Unknown #'+IntToStr(Pk.pktype)+' ('+IntToStr(SizeOf(Pk))+'B) From '+addrstr);
+   Abort;
+  end;
  end;
  Peers.tPacket(p^).AfterProcessing(from);
  except
