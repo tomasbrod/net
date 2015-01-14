@@ -12,15 +12,15 @@ USES Peers
     ,SysUtils
     ;
 
+const cChunkLength=512{b};
+const cMaxChunksPerRequest=16;
 CONST
- cDataLength=768;
  cGet:tpktype=4;
  cDat:tpktype=5;
  cPcs:tpktype=6;
 
 const cRetryPeriod = 2000{ms} /MSecsPerDay;
 const cRetryMax = 8;
-
 TYPE
 
  tFID=object(Keys.tHash)
@@ -28,60 +28,66 @@ TYPE
  
  tRequest=object(Peers.tPacket)
   procedure Create( id :tFID; part, count :Word );
-  procedure Handle;
-  procedure Send;
+  procedure Handle( const from: NetAddr.t);
+  procedure Send( const rcpt: NetAddr.t);
   private
-  id :tFID;
-  part :NetAddr.Word2;
-  count :NetAddr.Word2;
+  id     :tFID;
+  chunk  :NetAddr.Word4;
+  TrID   :byte;
+  count  :byte;
  end;
  
+ tInfoMetaType= packed (imtNone);
+ 
+ tInfo=object(tPacket)
+  procedure Create( var req:tRequest );
+  procedure Handle( const from: NetAddr.t);
+  procedure Send( const rcpt: NetAddr.t);
+  private
+  TrID  :byte;
+  count :NetAddr.Word.4; {count*cChunkLength = size of the file}
+  metadata:record
+   case metatype:tInfoMetaType of
+   imtNone:();
+  end;
+ 
  tData=object(Peers.tPacket)
-  procedure Create( id :tFID; part :Word );
-  procedure Handle;
-  procedure Send;
+  procedure Create( req:tRequest; part :byte );
+  procedure Handle( const from: NetAddr.t);
+  procedure Send( const rcpt: NetAddr.t);
   private
-  id :tFID;
-  part :NetAddr.Word2;
-  PayLoad: array [1..cDataLength] of byte;
+  TrID :byte;
+  part :byte;
+  PayLoad: array [1..cChunkLength] of byte;
  end;
-
- tPcs=object(Peers.tPacket)
-  procedure Create( id :tFID; part :Word );
-  procedure Handle;
-  procedure Send;
-  private
-  id :tFID;
-  part :NetAddr.Word2;
-  total :NetAddr.Word2;
-  PayLoad: array [1..(cDataLength div sizeof(tFID))] of tFID;
- end;
+ 
+ tError=object(Peers.tPacket) 
+ end unimplemented;
  
  eNoSource=class(Exception)
   fid: tFID;
   constructor Create( ifid: tFid );
  end;
 
-var OnNoSrc :procedure( id :tHash );
-var OnRecv  :procedure( id :tHash );
+var OnNoSrc :procedure( id :tFID );
+var OnRecv  :procedure( id :tFID );
+var OnProgress :procedure( id :tFID; done,total:longword );
 
 procedure SendFile( id: tFID );
+ experimental;
 
-procedure RecvFile( id :tFID );
+procedure RequestFile( id :tFID );
+ experimental;
+procedure RequestFile( id :tFID; by: byte );
+ unimplemented;
 
 procedure RecvFileAbort( id :tFID );
  unimplemented;
 
 procedure DoRetry;
 
-function  Retry( id :tFID ) :Integer;
-
 IMPLEMENTATION
 uses DataBase
-    ,db
-    ,Dbf_Common
-    ,Dbf
-    ,Log
     ;
 
 TYPE { database accessors }

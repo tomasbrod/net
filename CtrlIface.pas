@@ -11,6 +11,11 @@ const
  {peers by keys}
  ccGetPeersByMasterID=16; {masterkey >#PeerKeyIds}
  ccGetPeerInfoByID=17;    {subkey    >#PeerKeyInfo}
+ {transfer}
+ ccTransferRequest=19;  { ID, NetAddr }
+ ccTransferAbort=20;    { ID }
+ ccTransferProgress=21; { ID }
+ ccTransferListAll=22;
  {
  cc=;
  }
@@ -21,6 +26,7 @@ const
  cePeerState:byte=ord('p'); {event:byte, peers.tinfo}
  cePeerKeyIds:byte=17; {count, array count of subkey }
  cePeerKeyInfo:byte=18; { subkey, addr, ping_ms }
+ ceTransfer:byte=20; { ID, total, done }
  {
  ce:byte=;
  }
