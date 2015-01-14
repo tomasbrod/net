@@ -14,6 +14,7 @@ USES SysUtils
 	,sSockets
 	,BaseUnix
 	,EventLog
+	{,StreamInit}
 	;
 
 var Log: tEventLog;
@@ -49,9 +50,11 @@ begin
  case Pk.pktype of
   Peers.cAkafuka: Peers.tAkafuka(p^).Handle(from);
   Peers.cFundeluka: Peers.tFundeluka(p^).Handle(from);
+  {
   StreamInit.cRequest: StreamInit.tRequest(p^).Handle(from);
   StreamInit.cReject: StreamInit.tReject(p^).Handle(from);
   StreamInit.cAccept: StreamInit.tAccept(p^).Handle(from);
+  }
   else begin
    log.error('Received Unknown #'+IntToStr(Pk.pktype)+' ('+IntToStr(SizeOf(Pk))+'B) From '+addrstr);
    Abort;

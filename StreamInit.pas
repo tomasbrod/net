@@ -1,4 +1,4 @@
-unit StreamInit;
+unit StreamInit unimplemented;
 
 INTERFACE
 uses Peers,NetAddr;
