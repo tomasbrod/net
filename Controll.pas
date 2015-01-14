@@ -22,7 +22,7 @@ type tDaemonController=class (tObject)
   cmd:byte;
   flags:set of tDCFlag;
   finished:boolean;
-  procedure Run; unimplemented;
+  procedure Run;
   constructor Create(asocket:tStream; from:NetAddr.t);
   destructor Destroy; override;
   procedure NotifyPeerStateChange( event: byte; info:Peers.tInfo );

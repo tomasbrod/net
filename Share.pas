@@ -1,4 +1,4 @@
-unit Share;
+unit Share unimplemented;
 
 INTERFACE
 uses GeneralPacket

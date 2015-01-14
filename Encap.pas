@@ -1,4 +1,4 @@
-unit Encap;
+unit Encap deprecated;
 
 {
  Purpose of this unit is to allow bnctrl program to do actions that require 

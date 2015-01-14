@@ -1,5 +1,5 @@
 {$mode objfpc}
-program Test;
+program Test deprecated;
 
 uses Keys
     ,SysUtils

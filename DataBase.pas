@@ -1,7 +1,7 @@
 unit DataBase;
 
 INTERFACE
-uses Classes,SysUtils,Dbf;
+uses Classes,SysUtils;
 
 TYPE
 
@@ -9,12 +9,6 @@ tTable = string[15];
 tRow = string[63];
 tField = string[15];
 tRecord = Word;
-
-tDbDataSet=class ( tDbf )
- public
- {constructor Create(AOwner: TComponent); override;}
- procedure Open (const S: string );
-end;
 
 tFieldAccessor=object
  { To read and write fields in database }
@@ -43,7 +37,7 @@ tFieldAccessor=object
  private
  RecLen :word;
  dat :file;
-end;
+end deprecated;
 tAccess=tFieldAccessor;
 
 tRowList=object
@@ -64,8 +58,7 @@ eSearch = class ( Exception )
  constructor Create;
 end;
 
-var Prefix :string ='./data';
-{TODO: extract from parameters }
+var Prefix :string;
 
 const FieldExtension :string='dat';
 
@@ -247,25 +240,6 @@ procedure tFieldAccessor.BlockWrite( var Data; offset :Cardinal; count: Cardinal
  begin
  Seek( dat, (offset*RecLen) );
  System.BlockWrite( dat, Data, RecLen*count );
-end;
-
-{
-constructor tDbDataSet.Create(AOwner: TComponent);
- begin
- inherited Create(AOwner);
-end;
-}
-
-procedure tDbDataSet.Open (const S: string );
- begin
- FilePathFull := DataBase.Prefix;
- TableName:= S + '.dbf';
- OpenMode:=Dbf.omAutoCreate;
- TableLevel:=25;
- Exclusive:=True;
- Active:=True;
- PackTable;
- RegenerateIndexes;
 end;
 
 constructor eSearch.Create;

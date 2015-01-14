@@ -76,18 +76,7 @@ Operator := (aa :t ) r : pSockAddr;
 Operator := ( aa :pSockAddr ) r : t;
 }
 
-type eSocket=class(Exception)
- code :integer;
- constructor Create( icode: integer; msg: string );
-end;
-
-procedure CheckSocket; inline; deprecated;
-
 IMPLEMENTATION
-uses 
-     DataBase
-    ,Log
-     ;
 
 Operator = (aa, ab :Sockets.tInAddr) b : boolean;
 begin
@@ -244,20 +233,6 @@ operator := ( aString : string) at : t;
  at.FromString( aString );
 end;
 
-constructor eSocket.Create( icode: integer; msg: string );
- begin
- inherited Create(msg);
- code:=icode;
-end;
-
-procedure CheckSocket;
- inline;
-var e:cint;
-begin
- e:=SocketError;
- if e<>0 then raise eSocket.Create(e, '...'+IntToStr(e));
-end;
-
 operator := (net : Word2) host:word;
  var pnet:^word;
  begin
@@ -284,6 +259,4 @@ operator := (host : Dword) net:Word4;
  pnet^:=HostToNet( host );
 end;
 
-FINALIZATION
- writeln(stderr,'Fin');
 END.

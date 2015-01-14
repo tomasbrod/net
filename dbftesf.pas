@@ -1,3 +1,4 @@
+program dbftest deprecated;
 uses Dbf, db, Dbf_Common;
 
 var Dbf1:tDBF;

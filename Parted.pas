@@ -1,4 +1,4 @@
-unit Parted;
+unit Parted experimental;
 
 INTERFACE
 USES  SysUtils

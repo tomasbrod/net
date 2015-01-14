@@ -288,7 +288,6 @@ procedure tAkafuka.Handle( const from: NetAddr.t);
  { Send fundeluka. If not in roster then send akafuka. }
  var fundeluka:tFundeluka;
  var peer:tPeersList;
- var isNew: boolean;
  begin
  inherited;
  log.debug('Received '+cAkafukaN+' from '+string(from));
@@ -296,7 +295,6 @@ procedure tAkafuka.Handle( const from: NetAddr.t);
  if {timesincelast>cAkafukaCooldown} true
   then fundeluka.Send(from);
  peer:=tPeersList(PeerList.Search(from));
- isnew:= not assigned(peer);
  if not assigned(peer)
   then Peers.Add(from);
 end;

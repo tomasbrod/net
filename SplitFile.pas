@@ -1,4 +1,4 @@
-unit SplitFile;
+unit SplitFile experimental;
 
 (* Handles storage of splitfiles, storage and reassembly *)
 

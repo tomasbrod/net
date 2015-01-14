@@ -1,4 +1,4 @@
-unit Tag;
+unit Tag deprecated;
 
 INTERFACE
 uses Keys;

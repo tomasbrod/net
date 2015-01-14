@@ -1,7 +1,10 @@
-unit Store;
+unit Store unimplemented;
 
 (*
 
 
 
 *)
+INTERFACE
+IMPLEMENTATION
+END.

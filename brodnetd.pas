@@ -3,17 +3,18 @@ PROGRAM brodnetd;
 {$MODE OBJFPC}{$C+}
 USES SysUtils
     ,StrUtils
+
 	,Sockets
+	,sSockets
+	,SocketUtil
+	,NetAddr
 	,UnixType
+	,BaseUnix
+	,IniFiles
 	,DataBase
+	,EventLog
 	,Peers
 	,Controll
-	,IniFiles
-	,NetAddr
-	,SocketUtil
-	,sSockets
-	,BaseUnix
-	,EventLog
 	{,StreamInit}
 	;
 
@@ -154,7 +155,6 @@ end;
 procedure StartListening(const config:tINIFile);
  var addr:NetAddr.T;
  var str:ansistring;
- var i:word;
  procedure dostr;
   begin
   try addr.FromString( Copy2SpaceDel(str) );

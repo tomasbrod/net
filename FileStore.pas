@@ -1,4 +1,4 @@
-unit FileStore;
+unit FileStore experimental;
 
 (* Uniform interface to all kinds of chk files *)
 
