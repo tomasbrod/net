@@ -24,13 +24,14 @@ const cRecvWait=5000{ms};
 
 PROCEDURE Idle;
  var took:tdatetime;
+ const warn=5/MsecsPerDay;
  begin
  took:=now;
 
  Peers.DoAkafuka;
 
  took:=now-took;
- log.debug('System idle tasks took: '+FloatToStr(took*MsecsPerDay)+'ms');
+ if took>warn then log.warning('System idle tasks took: '+FloatToStr(took*MsecsPerDay)+'ms');
 end;
 
 procedure PeerStateHook( event: byte; info:tInfo );
@@ -100,7 +101,7 @@ PROCEDURE Loop;
    end else begin
 
    for i:=1 to socketc do if BaseUnix.fpfd_isset(socketa[i].handle,FDS)=1 then begin
-    log.debug('Received packet on socket #'+IntToStr(i));
+    (*log.debug('Received packet on socket #'+IntToStr(i));*)
     {Receive}
     socketa[i].Recv( from, InPk^, InPkLen );
     ProcessPacket( InPk^, InPkLen, from );
@@ -143,7 +144,7 @@ procedure PacketSendHook(const rcpt:netaddr.t; var Data; Len:LongInt);
  begin
  for i:=1 to socketc do with socketa[i] do begin
   if local.data.family=rcpt.data.family then begin
-   log.debug('Sending to socket #'+IntToSTr(i));
+   (*log.debug('Sending to socket #'+IntToSTr(i));*)
    send(rcpt,data,len);
    exit;
   end;
@@ -198,10 +199,12 @@ end;
 procedure TEST;
  var addr:netaddr.t;
  begin
+ {
  addr:='//ip4/127.0.0.1/1030';
  Peers.Add(addr);
  addr:='//ip4/127.0.0.1/1031';
  Peers.Add(addr);
+ }
 end;
 
 var Config:tINIFile;
@@ -247,6 +250,7 @@ BEGIN
   repeat Loop; until ReqQuit;
  finally
   
+  if not ReqQuit then log.warning('Shutdown enforced');
   {Save state}
   log.debug('Saving presistent data');
   Peers.SaveState;

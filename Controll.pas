@@ -28,6 +28,7 @@ type tDaemonController=class (tObject)
   procedure NotifyPeerStateChange( event: byte; info:Peers.tInfo );
   procedure NotifyQuit( unexcepted:boolean );
   procedure CmdAddPeer;
+  procedure CmdInvalid;
 end;
 
 {Hooks for main loop}
@@ -70,6 +71,7 @@ procedure tDaemonController.Run;
   ccTerminate: if assigned(OnTerminateRequest) then OnTerminateRequest;
   ccQuit: Finished:=true;
   ccAddPeer:CmdAddPeer;
+  else CmdInvalid;
  end;
  except on e:EReadError do begin
    log.debug('Command errored '+e.classname);
@@ -79,20 +81,31 @@ procedure tDaemonController.Run;
 end;
 
 procedure tDaemonController.NotifyPeerStateChange( event: byte; info:Peers.tInfo );
+ var w:netaddr.word2;
  begin
  if not (cfPeerStates in flags) then exit;
  //if (event=0) and ( not (cfPeerStates0 in flags)) then exit;
  io.WriteByte(cePeerState);
  io.WriteByte(event);
- io.WriteBuffer(info,sizeof(info));
+ io.WriteBuffer(info.addr,sizeof(info.addr));
+ w:=trunc(info.delta*MSecsPerDay);
+ io.WriteBuffer(w,2);
 end;
 
 procedure tDaemonController.CmdAddPeer;
  var addr:netaddr.t;
  begin
  io.ReadBuffer(addr,sizeof(addr));
- Peers.Add(addr);
+ if addr.IsNil then log.error('Addr is nil') else Peers.Add(addr);
 end;
+procedure tDaemonController.CmdInvalid;
+ begin
+ io.WriteByte(ceInvalid);
+ Finished:=true;
+ log.error('Invalid command');
+end;
+ 
+
 
 procedure tDaemonController.NotifyQuit( unexcepted:boolean );
  var exp:byte;

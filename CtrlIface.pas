@@ -8,9 +8,11 @@ const
  ccTerminate=ord('T');
  ccPeerStates=ord('p');
  ccAddPeer=14; {netaddr.t}
- {peers by keys}
+ {peers by keys (unimplemented)}
+ ccGetAllPeers=15;        {          >#PeerKeyIds}
  ccGetPeersByMasterID=16; {masterkey >#PeerKeyIds}
- ccGetPeerInfoByID=17;    {subkey    >#PeerKeyInfo}
+ ccGetPeerInfoByID=17;    {subkey    >#PeerInfo}
+ ccGetPeerInfoByAddr=17;  {netaddr   >#PeerInfo}
  {transfer}
  ccTransferRequest=19;  { ID, NetAddr }
  ccTransferAbort=20;    { ID }
@@ -22,11 +24,14 @@ const
 
 const
  {ctrl events:}
- ceQuit:byte=15;
- cePeerState:byte=ord('p'); {event:byte, peers.tinfo}
- cePeerKeyIds:byte=17; {count, array count of subkey }
- cePeerKeyInfo:byte=18; { subkey, addr, ping_ms }
- ceTransfer:byte=20; { ID, total, done }
+ ceQuit=15;
+ cePeerState=ord('p'); {event:byte, addr, ping_ms}
+ ceInvalid=ord('?');
+ {keys}
+ cePeerKeyIds=17; {count, array count of subkey }
+ cePeerInfo=18; { subkey, masterkey, addr, ping_ms }
+ {transfer}
+ ceTransfer=20; { ID, done, total }
  {
  ce:byte=;
  }
