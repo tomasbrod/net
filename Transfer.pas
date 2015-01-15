@@ -37,7 +37,7 @@ TYPE
   count  :byte;
  end;
  
- tInfoMetaType= packed (imtNone);
+ {$Z1}tInfoMetaType= (imtNone);
  
  tInfo=object(tPacket)
   procedure Create( var req:tRequest );
@@ -45,11 +45,12 @@ TYPE
   procedure Send( const rcpt: NetAddr.t);
   private
   TrID  :byte;
-  count :NetAddr.Word.4; {count*cChunkLength = size of the file}
+  count :NetAddr.Word4; {count*cChunkLength = size of the file}
   metadata:record
    case metatype:tInfoMetaType of
-   imtNone:();
+   imtNone:( b:byte; );
   end;
+ end;
  
  tData=object(Peers.tPacket)
   procedure Create( req:tRequest; part :byte );
@@ -71,7 +72,7 @@ TYPE
 
 var OnNoSrc :procedure( id :tFID );
 var OnRecv  :procedure( id :tFID );
-var OnProgress :procedure( id :tFID; done,total:longword );
+var OnProgress :procedure( id :tFID; done,total:longword; by: byte );
 
 procedure SendFile( id: tFID );
  experimental;
@@ -87,33 +88,47 @@ procedure RecvFileAbort( id :tFID );
 procedure DoRetry;
 
 IMPLEMENTATION
-uses DataBase
+uses 
+     DataBase
+    ,LinkedList
     ;
 
-TYPE { database accessors }
+{ Data storage }
 
-(*
- 
- ## Database:
- 
- - parts:
-  - holds info and data about not yet downloaded parts
-  - no fully downloaded
-  - state:
-    - passive: retry = 0
-    - waiting: retry > 0
-    - complete: ?
- - files:
-  - info and data of simple files
- - pices:
-  - reference of pieced files to simple files
+type tPendingList=class(tDLNode)
+ since:tDateTime;
+ part:byte;
+end;
 
- 
-*)
+type tTransfer=object
+ fid        :tFID;
+ requested  :word;
+ pending    :tPendingList;
+ completed  :longword;
+ total      :longword;
+ by         :byte;
+ last       :tDateTime;
+ flags      :set of (fInfoReceived);
+ private
+ procedure DoRun;
+ procedure HandleInf(count:longword);
+ procedure HandleDat(part:byte; var PayLoad; length:longword );
+ end;
+
+const cMaxTransfers=32;
+var TransferList:array [1..cMaxTransfers] of ^tTransfer;
+var TransferIdx:word;
+
+function TransferByFID(ifid:tFID):word; forward;
 
 type tPartsDB = class (DataBase.tDbDataSet)
  public
  constructor Create; {override;}overload;
+end;
+
+procedure tedst;
+begin
+ TransferList.DoRun;
 end;
 
 constructor tPartsDB.Create;
