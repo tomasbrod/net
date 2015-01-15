@@ -14,6 +14,7 @@ USES Peers
 
 const cChunkLength=512{b};
 const cMaxChunksPerRequest=16;
+const cChunksPerRequest=6;
 CONST
  cGet:tpktype=4;
  cDat:tpktype=5;
@@ -21,11 +22,12 @@ CONST
 
 const cRetryPeriod = 2000{ms} /MSecsPerDay;
 const cRetryMax = 8;
-TYPE
 
- tFID=object(Keys.tHash)
+type tFID=object(Keys.tHash)
  end;
  
+TYPE {--Packets--}
+
  tRequest=object(Peers.tPacket)
   procedure Create( id :tFID; part, count :Word );
   procedure Handle( const from: NetAddr.t);
@@ -40,7 +42,7 @@ TYPE
  {$Z1}tInfoMetaType= (imtNone);
  
  tInfo=object(tPacket)
-  procedure Create( var req:tRequest );
+  procedure Create( const aTrID:byte; const aFID:tFID );
   procedure Handle( const from: NetAddr.t);
   procedure Send( const rcpt: NetAddr.t);
   private
@@ -53,9 +55,8 @@ TYPE
  end;
  
  tData=object(Peers.tPacket)
-  procedure Create( req:tRequest; part :byte );
-  procedure Handle( const from: NetAddr.t);
-  procedure Send( const rcpt: NetAddr.t);
+  procedure Handle( const from: NetAddr.t; length:longword ); overload;
+  procedure CreateSend( const aTrID:byte; const aFID:tFID; aPart :byte; const rcpt: NetAddr.t);
   private
   TrID :byte;
   part :byte;
@@ -64,26 +65,22 @@ TYPE
  
  tError=object(Peers.tPacket) 
  end unimplemented;
- 
- eNoSource=class(Exception)
-  fid: tFID;
-  constructor Create( ifid: tFid );
- end;
 
-var OnNoSrc :procedure( id :tFID );
-var OnRecv  :procedure( id :tFID );
+var OnRecv  :procedure( id :tFID; by :byte );
 var OnProgress :procedure( id :tFID; done,total:longword; by: byte );
 
 procedure SendFile( id: tFID );
- experimental;
+ experimental; deprecated {all files must be requested};
 
-procedure RequestFile( id :tFID );
+procedure RequestFile( const source :netaddr.t; id :tFID );
  experimental;
-procedure RequestFile( id :tFID; by: byte );
- unimplemented;
+procedure RequestFile( const source :netaddr.t; id :tFID; by: byte );
 
 procedure RecvFileAbort( id :tFID );
  unimplemented;
+
+var OnNoSrc :procedure( id :tFID; by :byte );
+ {To update source, call RequestFile with valid source address.}
 
 procedure DoRetry;
 
@@ -95,21 +92,24 @@ uses
 
 { Data storage }
 
+type tSuspendedTransfer=object
+ fid        :tFID;
+ completed  :longword; {also marks the next chunk to be requested}
+ total      :longword;
+ by         :byte;
+ flags      :set of (fInfoReceived,fStarted,fSuspended,fAborted);
+ end;
+
 type tPendingList=class(tDLNode)
  since:tDateTime;
  part:byte;
 end;
 
-type tTransfer=object
- fid        :tFID;
+type tTransfer=object(tSuspendedTransfer)
+ source     :netaddr.t;
  requested  :word;
  pending    :tPendingList;
- completed  :longword;
- total      :longword;
- by         :byte;
  last       :tDateTime;
- flags      :set of (fInfoReceived);
- private
  procedure DoRun;
  procedure HandleInf(count:longword);
  procedure HandleDat(part:byte; var PayLoad; length:longword );
@@ -121,169 +121,150 @@ var TransferIdx:word;
 
 function TransferByFID(ifid:tFID):word; forward;
 
-type tPartsDB = class (DataBase.tDbDataSet)
- public
- constructor Create; {override;}overload;
-end;
+procedure Load( out tra: tSuspendedTransfer; const fid: tFID ); forward;
 
 procedure tedst;
 begin
- TransferList.DoRun;
+ TransferList[1]^.DoRun;
 end;
 
-constructor tPartsDB.Create;
+type tDataFile=file of byte;
+
+function TransferByFID(ifid:tFID):word;
  begin
- inherited Create( nil );
-   OpenMode:=omAutoCreate;
-   FieldDefs.Add( {0} 'id',    ftString,  40, True  );
-   FieldDefs.Add( {1} 'num', ftLargeInt, 0, True );
-   FieldDefs.Add( {2} 'done', ftBoolean, 0, True );
-   FieldDefs.Add( {3} 'since', ftFloat, 0, True );
-   FieldDefs.Add( {4} 'retry', ftSmallInt, 0, True );
-   FieldDefs.Add( {5} 'data', ftBlob, 0, True );
-   //with IndexDefs.Add do begin Name:='addr'; Expression:=Name; Options:=[ixCaseInsensitive]; end;
- Open ('parts');
+ result:=1;
+ while (result<=cMaxTransfers)and( (TransferList[result]<>nil)or(TransferList[result]^.fid=ifid)  ) do inc(result);
+ if result>cMaxTransfers then raise eSearch.Create;
 end;
 
-type tPartedDB = class (DataBase.tDbDataSet)
- public
- constructor Create; {override;}overload;
-end;
-
-constructor tPartedDB.Create;
- begin
- inherited Create( nil );
-   OpenMode:=omAutoCreate;
-   FieldDefs.Add( {0} 'id',    ftString,  40, True  );
-   FieldDefs.Add( {1} 'num', ftLargeInt, 0, True );
-   FieldDefs.Add( {2} 'done', ftBoolean, 0, True );
-   FieldDefs.Add( {3} 'since', ftFloat, 0, True );
-   FieldDefs.Add( {4} 'retry', ftSmallInt, 0, True );
-   FieldDefs.Add( {5} 'data', ftBlob, 0, True );
-   //with IndexDefs.Add do begin Name:='addr'; Expression:=Name; Options:=[ixCaseInsensitive]; end;
- Open ('parted');
-end;
-
- tPartInfo=object
-  state :( psUnknown, psPassive, psWaiting, psComplete );
-  since :tDateTime;
-  retry :word;
+procedure RequestFile( const source :netaddr.t; id :tFID ); inline;
+ begin RequestFile(source, id, 0 ); end;
+procedure RequestFile( const source :netaddr.t; id :tFID; by: byte );
+ var i:word;
+ procedure Create;
+  begin
+  i:=1;
+  while (i<=cMaxTransfers)and(not assigned(TransferList[i])) do inc(i);
+  if i>cMaxTransfers then raise Exception.Create('Too many transfers');
+  new(TransferList[i]);
  end;
- tPartAccess=object(DataBase.tAccess)
-  constructor Init( fid :tFID );
-  procedure SetRequested( part :Word );
-  function  isRequested( part :Word) :boolean;
-  procedure SetDone( part :Word );
-  function isComplete( part :Word ) :boolean;
-  procedure SetTotal( total :Word );
-  procedure Abort;
-  function isToRetry( part :Word ):boolean;
-  procedure FindToRetry( var part :Word );
-  { Finds first part to retry, starting at part, throws eRangeError on no more }
-  private
-  procedure getState( out state :tPartInfo; part :Word ); virtual;
-  procedure setState( part: word; state :tPartInfo ); virtual;
- end experimental;
-
- tDataAccess=object(DataBase.tAccess)
-  constructor Init( fid :tFID );
- end experimental;
-
- tPieceInfo=record
-  content :tFID;
+ procedure Resume;
+  var Tr:tSuspendedTransfer;
+  begin
+  Load(Tr,id);
+  Create;
+  with TransferList[i]^ do begin
+   fid        :=tr.fid;
+   completed  :=tr.completed;
+   total      :=tr.total;
+   by         :=tr.by;
+   flags      :=tr.flags;
+  end;
  end;
- tPieceAccess=object(DataBase.tAccess)
-  parts :tPartAccess;
-  constructor Init( fid :tFID );
-  destructor Done;
-  function IsPieced :boolean;
-  private
-  {
-  procedure getState( out state :tPartInfo; part :Word ); virtual;
-  procedure setState( part: word; state :tPartInfo ); virtual;
-  }
- end experimental;
 
- tSourceInfo=record
-  peer :Peers.tID;
-  pad  :array [1..64] of byte;
- end;
- tSourceAccess=object(DataBase.tAccess)
-  constructor Init( fid :tFID );
-  procedure Select;
- end experimental;
-
- tDownloadsAccess=object(DataBase.tAccess)
-  constructor Init;
-  procedure Find( var R: DataBase.tRecord; fid :tFID );
-  procedure Add( fid :tFID );
-  procedure Remove( fid :tFID );
- end unimplemented;
-
-function tPieceAccess.IsPieced:boolean;
- var R: tPieceInfo;
-// var status:tPartInfo;
  begin
  try
-  Read(R, 0);
-  IsPieced:=not R.content.isNil;
+  i:=TransferByFID(id);
+  AbstractError;
  except
-  on eRangeError do IsPieced:=false;
+  on eSearch do try Resume;
+  except
+   on eSearch do begin
+    Create;
+    with TransferList[i]^ do begin
+     fid        :=id;
+     completed  :=0;
+     total      :=0;
+     by         :=by;
+     flags      :=[];
+    end;
+   end;
+  end;
+ end;
+ with TransferList[i]^ do begin
+  source     :=source;
+  requested  :=0;
+  pending    :=tPendingList.CreateRoot;
+  last       :=0;
+  {maybe: DoRun;}
+ end;
+end;
+
+procedure RecvFileAbort( id :tFID );
+ var i:word;
+ begin
+ i:=TransferByFID(id);
+ with TransferList[i]^ do begin
+  Exclude(flags,fStarted);
+  Include(flags,fAborted);
+ end;
+end;
+
+procedure tInfo.Handle( const from: NetAddr.t);
+ begin
+ if 
+    (TrID<high(TransferList))
+    and assigned(TransferList[TrID])
+    and (fStarted in TransferList[TrID]^.flags)
+ then TransferList[TrID]^.HandleInf(count);
+end;
+
+procedure tData.Handle( const from: NetAddr.t; length:longword );
+ begin
+ if 
+    (TrID<high(TransferList))
+    and assigned(TransferList[TrID])
+    and (fStarted in TransferList[TrID]^.flags)
+ then TransferList[TrID]^.HandleDat(part,PayLoad,length);
+end;
+
+procedure DoRetry;
+ var i:word;
+ begin
+ for i:=1 to high(TransferList) 
+ do if assigned(TransferList[i])
+ then TransferList[i]^.DoRun;
+end;
+
+procedure Load( out tra: tSuspendedTransfer; const fid: tFID );
+ var f:file of tSuspendedTransfer;
+ begin
+ DataBase.dbAssign(f,'transfer.dat');
+ reset(f);
+ try
+  repeat
+   if eof(f) then raise eSearch.Create;
+   read(f,tra);
+  until tra.fid=fid;
+ finally
+  close(f);
  end;
 end;
 
 procedure SendFile( id: tFID );
- var dat :tDat;
- var pcs :tPcs;
- {No tak bude na stacku nepotrebna premenna, svet sa nezruti.}
- var pcsdb :tPieceAccess;
  begin
- pcsdb.init( id ); try
- if pcsdb.IsPieced then begin
-  pcs.Create( id, 0 );
-  pcs.Send;
- end else begin
-  dat.Create( id, 0 );
-  dat.Send;
- end;
- finally pcsdb.done; end;
+ AbstractError;
 end;
 
-procedure RecvFile( id:tFID );
- var dwndb :tDownloadsAccess;
- var srcdb :tSourceAccess;
- var pdb :tPartAccess;
- var get :tGet;
- begin
- dwndb.init; srcdb.init( id ); pdb.init( id ); try
-  srcdb.append( Peers.SelectedID ); {$HINT this should be 'add', but implementing find seems overkill}
-  pdb.SetRequested( 0 ); {this fails when already requested, but at least we have added the source}
-  dwndb.add( id );
- finally pdb.done; srcdb.done; dwndb.done; end;
- get.create( id, 0, 0 );
- get.send;
-end;
+(*
+pootis:
+tRequest.Create(tFID,Word,Word);
+tRequest.Handle(const t);
+tRequest.Send(const t);
+tInfo.Create(var tRequest);
+tInfo.Send(const t);
+procedure tData.CreateSend( const aTrID:byte; const aFID:tFID; aPart :byte; const rcpt: NetAddr.t);
 
-procedure RecvFileAbort( id :tFID );
- var db :tDownloadsAccess;
- {
- var srcdb :tSourceAccess;
- var pcsdb :tPieceAccess;
- var partdb :tPartAccess;
- }
- begin
- db.init; try
-  db.remove( id );
- finally db.done; end;
- {
- srcdb.init( id );
- srcdb.purge;
- pcsdb.init( id );
- pcsdb.purge;
- partdb.init( id );
- partdb.purge;
- }
-end;
+deprecate:
+SendFile(tFID);
+
+tTransfer.DoRun;
+tTransfer.HandleInf(LongWord);
+tTransfer.HandleDat(Byte,var <Formal type>,LongWord);
+
+*)
+
+{$IFDEF n}
 
 procedure tGet.Create( id :tFID; part, count :Word );
  var p:word;
@@ -575,15 +556,7 @@ procedure tPartAccess.FindToRetry( var part :Word );
   inc( part );
  until false;
 end;
- 
 
-{
-}
-
-{
-Retry(tFID);
-GlobalAddDownload(tFID);"
-AddSource(tFID,tID);"
-}
+{$ENDIF}
 
 END.
