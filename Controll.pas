@@ -12,6 +12,7 @@ uses  SocketUtil
      ,sSockets
      ,Eventlog
      ,Peers
+     ,Transfer
      ;
 
 type tDCFlag=(cfPeerStates,cfPeerStates0);
@@ -26,9 +27,11 @@ type tDaemonController=class (tObject)
   constructor Create(asocket:tStream; from:NetAddr.t);
   destructor Destroy; override;
   procedure NotifyPeerStateChange( event: byte; info:Peers.tInfo );
-  procedure NotifyQuit( unexcepted:boolean );
   procedure CmdAddPeer;
+  procedure NotifyQuit( unexcepted:boolean );
   procedure CmdInvalid;
+  procedure NotifyTransfer( id :tFID; done,total:longword; by: byte );
+  procedure CmdRequestTransfer;
 end;
 
 {Hooks for main loop}
@@ -38,11 +41,13 @@ procedure Receive(const FDS : BaseUnix.tFDSet);
 
 {hooks for hooks in daemon}
 procedure NotifyPeerStateChange( event: byte; info:Peers.tInfo );
+procedure NotifyTransfer( id :tFID; done,total:longword; by: byte );
 procedure NotifyQuit( unexcepted:boolean );
 
 var Clients : array [1..8] of tDaemonController;
 var Log:tEventLog;
 var OnTerminateRequest:procedure;
+const cTransferBy=82;
 
 type eFull=class(Exception) end;
 
@@ -71,6 +76,7 @@ procedure tDaemonController.Run;
   ccTerminate: if assigned(OnTerminateRequest) then OnTerminateRequest;
   ccQuit: Finished:=true;
   ccAddPeer:CmdAddPeer;
+  ccTransferRequest:CmdRequestTransfer;
   else CmdInvalid;
  end;
  except on e:EReadError do begin
@@ -80,6 +86,7 @@ procedure tDaemonController.Run;
  end; end;
 end;
 
+{peer controll}
 procedure tDaemonController.NotifyPeerStateChange( event: byte; info:Peers.tInfo );
  var w:netaddr.word2;
  begin
@@ -91,28 +98,45 @@ procedure tDaemonController.NotifyPeerStateChange( event: byte; info:Peers.tInfo
  w:=trunc(info.delta*MSecsPerDay);
  io.WriteBuffer(w,2);
 end;
-
 procedure tDaemonController.CmdAddPeer;
  var addr:netaddr.t;
  begin
  io.ReadBuffer(addr,sizeof(addr));
  if addr.IsNil then log.error('Addr is nil') else Peers.Add(addr);
 end;
+
+{daemon controll}
 procedure tDaemonController.CmdInvalid;
  begin
  io.WriteByte(ceInvalid);
  Finished:=true;
  log.error('Invalid command');
 end;
- 
-
-
 procedure tDaemonController.NotifyQuit( unexcepted:boolean );
  var exp:byte;
  begin
  io.WriteByte(ceQuit);
  if unexcepted then exp:=1 else exp:=0;
  io.WriteByte(exp);
+end;
+
+{Transfer controll}
+procedure tDaemonController.NotifyTransfer( id :tFID; done,total:longword; by: byte );
+ var w:netaddr.word4;
+ begin
+ io.WriteByte(ceTransfer);
+ io.WriteBuffer(id,sizeof(id));
+ w:=done; io.WriteBuffer(w,4);
+ w:=total; io.WriteBuffer(w,4);
+ (*io.WriteByte(by);*)
+end;
+procedure tDaemonController.CmdRequestTransfer;
+ var a:Transfer.tFID;
+ var addr:netaddr.t;
+ begin
+ io.ReadBuffer(a,sizeof(a));
+ io.ReadBuffer(addr,sizeof(addr));
+ Transfer.RequestFile( addr, a, cTransferBy );
 end;
 
 constructor tDaemonController.Create(asocket:tStream; from:NetAddr.t);
@@ -182,6 +206,12 @@ procedure NotifyQuit( unexcepted:boolean );
   Clients[i].io.free;
   freeandnil(Clients[i]);
  end;
+end;
+
+procedure NotifyTransfer( id :tFID; done,total:longword; by: byte );
+ var i:word;
+ begin
+ for i:=1 to high(Clients) do if assigned(Clients[i]) then Clients[i].NotifyTransfer(id,done,total,by);
 end;
 
 procedure Init;

@@ -11,7 +11,8 @@ USES CustApp
 	,UnixType
 	,BaseUnix
 	,CtrlIface
-	{,Transfer}
+	,Keys
+	,Transfer
 	;
 
 type tApp=class(tCustomApplication)
@@ -88,28 +89,33 @@ procedure tApp.DoRun;
 end;
 
 procedure tApp.EvCommand(command:AnsiString);
- var par:string;
+ var par:ansistring;
  procedure AddPeer;
   var a:netaddr.t; begin
   a.FromString(par);
   SendCommand(ccAddPeer);
   Sock.WriteBuffer(a,sizeof(a));
  end;
- procedure CmdTransferRequestProgress; unimplemented;
-  {var fid:Transfer.tFID;}
+ procedure CmdTransferRequestProgress(progress:boolean); unimplemented;
+  var fid:Transfer.tFID;
+  var a:netaddr.t;
   begin
-  {fid.FromString(par);
+  fid.FromString(Copy2SpaceDel(par));
+  a.FromString(par);
   SendCommand(ccTransferRequest);
   Sock.WriteBuffer(fid,sizeof(fid));
-  SendCommand(ccTransferProgress);
-  Sock.WriteBuffer(fid,sizeof(fid));}
+  Sock.WriteBuffer(a,sizeof(a));
+  if progress then begin
+   SendCommand(ccTransferProgress);
+   Sock.WriteBuffer(fid,sizeof(fid));
+  end;
  end;
  procedure CmdFID(cmd:byte); unimplemented;
-  {var fid:Transfer.tFID;}
+  var fid:Transfer.tFID;
   begin
-  {fid.FromString(par);
+  fid.FromString(par);
   SendCommand(cmd);
-  Sock.WriteBuffer(fid,sizeof(fid));}
+  Sock.WriteBuffer(fid,sizeof(fid));
  end;
  var sp:word;
  begin
@@ -121,8 +127,8 @@ procedure tApp.EvCommand(command:AnsiString);
   'stop': SendCommand(ccTerminate);
   'peerstates': SendCommand(ccPeerStates);
   'addpeer': AddPeer;
-  'TransReq': CmdTransferRequestProgress;
-  'TransReqq': CmdFID(ccTransferRequest);
+  'TransReq': CmdTransferRequestProgress(true);
+  'TransReqq': CmdTransferRequestProgress(false);
   'TransAbort': CmdFID(ccTransferAbort);
   'TransProgr': CmdFID(ccTransferProgress);
   'TransList': SendCommand(ccTransferListAll);
@@ -147,10 +153,10 @@ procedure tApp.EvEvent(event:byte);
   {write(string(a));}
  end;
  procedure DumpFID; unimplemented;
-  {var fid:Transfer.tFID;}
+  var fid:Transfer.tFID;
   begin
-  {Sock.ReadBuffer(fid,sizeof(fid));
-  write(string(fid));}
+  Sock.ReadBuffer(fid,sizeof(fid));
+  write(string(fid));
  end;
  begin
  case event of
@@ -178,7 +184,7 @@ procedure tApp.EvEvent(event:byte);
   end;
   ceTransfer: begin
    write('Transfer');write(' ');
-   DumpFID;
+   DumpFID;write(': ');
    Sock.ReadBuffer(tm4,4);
    write(longword(tm4));
    Sock.ReadBuffer(tm4,4);

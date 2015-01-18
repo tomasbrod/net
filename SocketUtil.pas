@@ -55,11 +55,13 @@ end;
 procedure tDataGramSocket.Recv( out Addr:NetAddr.t; var Data; var Len:LongInt);
  var SockAddr:tSockAddrL;
  var addrlen : tSockLen;
+ var rLen :LongInt;
  begin
  addrlen:= sizeof(SockAddr);
- Len:= fprecvfrom( handle, @Data, Len, 0, @SockAddr, @AddrLen );
- if Len<0 then CheckSocket;
+ rLen:= fprecvfrom( handle, @Data, Len, 0, @SockAddr, @AddrLen );
+ if rLen<0 then CheckSocket;
  Addr.FromSocket(SockAddr);
+ Len:=rLen;
 end;
 
 constructor tDataGramSocket.Bind( const Addr:NetAddr.t; xtype:LongInt );

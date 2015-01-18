@@ -16,6 +16,8 @@ USES SysUtils
 	,Peers
 	,Controll
 	{,StreamInit}
+	,Keys
+	,Transfer
 	;
 
 var Log: tEventLog;
@@ -29,12 +31,13 @@ PROCEDURE Idle;
  took:=now;
 
  Peers.DoAkafuka;
+ Transfer.DoRetry;
 
  took:=now-took;
  if took>warn then log.warning('System idle tasks took: '+FloatToStr(took*MsecsPerDay)+'ms');
 end;
 
-procedure PeerStateHook( event: byte; info:tInfo );
+procedure PeerStateHook( event: byte; info:Peers.tInfo );
  var ids:string;
  begin
  info.addr.ToString(ids);
@@ -42,13 +45,25 @@ procedure PeerStateHook( event: byte; info:tInfo );
  Controll.NotifyPeerStateChange(event,info);
 end;
 
-PROCEDURE ProcessPacket( pk:Peers.tPacket; len:LongWord; const from:netaddr.t );
+procedure TransferProgressHook( id :tFID; done,total:longword; by: byte );
+ begin
+ log.Info('Transfer state change: fid'+string(id)+' done='+IntToSTr(done)+' total='+IntToStr(total));
+ Controll.NotifyTransfer(id,done,total,by);
+end;
+
+{
+procedure TransferRecvHook( id :tFID; by :byte );
+procedure TransferNoSrcHook( id :tFID; by :byte );
+}
+
+PROCEDURE ProcessPacket( var pk:Peers.tPacket; len:LongWord; const from:netaddr.t );
  var p:pointer;
  var addrstr:string;
 begin
  try
  p:=@Pk;
  from.ToString( addrstr );
+ {log.debug('Received from '+addrstr+' sz='+IntToStr(len));}
  case Pk.pktype of
   Peers.cAkafuka: Peers.tAkafuka(p^).Handle(from);
   Peers.cFundeluka: Peers.tFundeluka(p^).Handle(from);
@@ -57,6 +72,9 @@ begin
   StreamInit.cReject: StreamInit.tReject(p^).Handle(from);
   StreamInit.cAccept: StreamInit.tAccept(p^).Handle(from);
   }
+  Transfer.cRequest: Transfer.tRequest(p^).Handle(from);
+  Transfer.cInfo: Transfer.tInfo(p^).Handle(from);
+  Transfer.cData: Transfer.tData(p^).Handle(from,len);
   else begin
    log.error('Received Unknown #'+IntToStr(Pk.pktype)+' ('+IntToStr(SizeOf(Pk))+'B) From '+addrstr);
    Abort;
@@ -103,7 +121,7 @@ PROCEDURE Loop;
    for i:=1 to socketc do if BaseUnix.fpfd_isset(socketa[i].handle,FDS)=1 then begin
     (*log.debug('Received packet on socket #'+IntToStr(i));*)
     {Receive}
-    socketa[i].Recv( from, InPk^, InPkLen );
+    socketa[i].Recv( from, InPkMem, InPkLen );
     ProcessPacket( InPk^, InPkLen, from );
    end;
 
@@ -234,6 +252,7 @@ BEGIN
  Peers.StateChangeProc:=@PeerStateHook;
  Peers.SendProc:=@PacketSendHook;
  Controll.OnTerminateRequest:=@DoTerminate;
+ Transfer.OnProgress:=@TransferProgressHook;
  
  {Setup server socket}
  StartListening(config);
