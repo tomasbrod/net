@@ -16,9 +16,9 @@ const cChunkLength=512{b};
 const cMaxChunksPerRequest=16;
 const cChunksPerRequest=6;
 CONST
- cGet:tpktype=4;
- cDat:tpktype=5;
- cPcs:tpktype=6;
+ cRequest:tpktype=4;
+ cInfo:tpktype=5;
+ cData:tpktype=6;
 
 const cRetryPeriod = 2000{ms} /MSecsPerDay;
 const cRetryMax = 8;
@@ -29,7 +29,7 @@ type tFID=object(Keys.tHash)
 TYPE {--Packets--}
 
  tRequest=object(Peers.tPacket)
-  procedure Create( id :tFID; part, count :Word );
+  procedure Create( iid :tFID; itrid: byte; ichunk, icount :Word );
   procedure Handle( const from: NetAddr.t);
   procedure Send( const rcpt: NetAddr.t);
   private
@@ -56,7 +56,7 @@ TYPE {--Packets--}
  
  tData=object(Peers.tPacket)
   procedure Handle( const from: NetAddr.t; length:longword ); overload;
-  procedure CreateSend( const aTrID:byte; const aFID:tFID; aPart :byte; const rcpt: NetAddr.t);
+  procedure CreateSend( const aTrID:byte; const aFID:tFID; aChunk:longword; aPart :byte; const rcpt: NetAddr.t);
   private
   TrID :byte;
   part :byte;
@@ -65,6 +65,8 @@ TYPE {--Packets--}
  
  tError=object(Peers.tPacket) 
  end unimplemented;
+
+type tDataFile=file of byte;
 
 var OnRecv  :procedure( id :tFID; by :byte );
 var OnProgress :procedure( id :tFID; done,total:longword; by: byte );
@@ -97,27 +99,31 @@ type tSuspendedTransfer=object
  completed  :longword; {also marks the next chunk to be requested}
  total      :longword;
  by         :byte;
- flags      :set of (fInfoReceived,fStarted,fSuspended,fAborted);
+ flags: set of (fInfoReceived,fStarted,fSuspended,fAborted);
  end;
 
-type tPendingList=class(tDLNode)
+type tPendingInfo=object
  since:tDateTime;
- part:byte;
+ part:byte deprecated;
+ retry:byte;
 end;
 
 type tTransfer=object(tSuspendedTransfer)
+ storage    :tDataFile;
  source     :netaddr.t;
  requested  :word;
- pending    :tPendingList;
+ received   :word;
+ pending    :array [0..cChunksPerRequest-1] of ^tPendingInfo;
  last       :tDateTime;
- procedure DoRun;
+ procedure DoRun(trid:byte);
  procedure HandleInf(count:longword);
  procedure HandleDat(part:byte; var PayLoad; length:longword );
+ procedure DispatchEvent;
+ procedure SetPending(i,c:word);
  end;
 
 const cMaxTransfers=32;
 var TransferList:array [1..cMaxTransfers] of ^tTransfer;
-var TransferIdx:word;
 
 function TransferByFID(ifid:tFID):word; forward;
 
@@ -125,10 +131,8 @@ procedure Load( out tra: tSuspendedTransfer; const fid: tFID ); forward;
 
 procedure tedst;
 begin
- TransferList[1]^.DoRun;
+ TransferList[1]^.DoRun(0);
 end;
-
-type tDataFile=file of byte;
 
 function TransferByFID(ifid:tFID):word;
  begin
@@ -184,9 +188,10 @@ procedure RequestFile( const source :netaddr.t; id :tFID; by: byte );
  with TransferList[i]^ do begin
   source     :=source;
   requested  :=0;
-  pending    :=tPendingList.CreateRoot;
+  received   :=0;
+  SetPending(0,0);
   last       :=0;
-  {maybe: DoRun;}
+  {maybe DoRun;}
  end;
 end;
 
@@ -197,6 +202,7 @@ procedure RecvFileAbort( id :tFID );
  with TransferList[i]^ do begin
   Exclude(flags,fStarted);
   Include(flags,fAborted);
+  SetPending(0,0);
  end;
 end;
 
@@ -210,20 +216,30 @@ procedure tInfo.Handle( const from: NetAddr.t);
 end;
 
 procedure tData.Handle( const from: NetAddr.t; length:longword );
+ var pl:longword;
  begin
+ pl:=length-(sizeof(self)-sizeof(PayLoad));
  if 
     (TrID<high(TransferList))
     and assigned(TransferList[TrID])
     and (fStarted in TransferList[TrID]^.flags)
- then TransferList[TrID]^.HandleDat(part,PayLoad,length);
+ then TransferList[TrID]^.HandleDat(part,PayLoad,pl);
 end;
 
 procedure DoRetry;
  var i:word;
+ var fid:tFID;
+ var by:byte;
  begin
- for i:=1 to high(TransferList) 
- do if assigned(TransferList[i])
- then TransferList[i]^.DoRun;
+ for i:=1 to high(TransferList) do if assigned(TransferList[i]) then begin
+  if fAborted in TransferList[i]^.flags then dispose(TransferList[i])
+  else if fSuspended in TransferList[i]^.flags then begin
+   by:=TransferList[i]^.by;
+   fid:=TransferList[i]^.fid;
+   dispose(TransferList[i]);
+   if assigned(OnNoSrc) then OnNoSrc(fid,by);
+  end else TransferList[i]^.DoRun(i);
+ end;
 end;
 
 procedure Load( out tra: tSuspendedTransfer; const fid: tFID );
@@ -241,322 +257,207 @@ procedure Load( out tra: tSuspendedTransfer; const fid: tFID );
  end;
 end;
 
+procedure tTransfer.HandleInf(count:longword);
+ begin
+ if flags=[fStarted] then begin
+  total:=count;
+  flags:=flags+[fInfoReceived];
+ end {else log.error('protocol desync: info received in invalid state')};
+end;
+
+procedure tTransfer.HandleDat(part:byte; var PayLoad; length:longword );
+ var islast:boolean;
+ begin
+ if (fStarted in flags)and([fSuspended,fAborted]*flags=[]) then begin
+  if assigned(pending[part]) then begin
+   Seek(storage,completed+part);
+   assert(length<=cChunkLength);
+   isLast:=(requested=part+1)and(completed+requested=total);
+   if (length<cChunkLength)and(not islast) then raise Exception.Create('Incomplete datapabket in middle of file');
+   BlockWrite(storage,PayLoad,length);
+   if islast then flags:=(flags-[fStarted])+[fCompleted];
+   inc(received);
+   dispose(pending[part]);
+   pending[part]:=nil; //for sure
+  end {else error};
+ end {else log.error('protocol desync: data received in invalid state')};
+end;
+
+procedure tTransfer.DispatchEvent;
+ unimplemented;
+ begin
+ log.info('Transfer '+string(fid)+': '+IntToStr(completed)+'/'+IntToStr(total));
+end;
+
+(*
+ fid        :tFID;
+ completed  :longword; {also marks the next chunk to be requested}
+ total      :longword;
+ by         :byte;
+ flags: set of (fInfoReceived,fStarted,fSuspended,fAborted);
+ storage    :tDataFile;
+ source     :netaddr.t;
+ requested  :word;
+ received   :word;
+ pending    :array [0..cChunksPerRequest-1] of ^tPendingInfo;
+ last       :tDateTime;
+*)
+procedure tTransfer.SetPending(i,c:word);
+ var z:word;
+ begin
+ for z:=low(pending) to high(pending) do begin
+  if (z>=i)and(z<i+c) then begin
+   if not assigned(pending[z]) then new(pending[z]);
+   pending[z]^.since:=now;
+   pending[z]^.retry:=0;
+  end else dispose(pending[z]);
+ end;
+end;
+
+procedure tTransfer.DoRun(trid:byte);
+ procedure Save;
+  var f:file of tSuspendedTransfer; begin
+  DataBase.dbAssign(f,'transfer.dat'); reset(f);
+  try write(f,tSuspendedTransfer(self));
+  finally close(f); end;
+ end;
+ var req:tRequest;
+ var rqc:word;
+ var i:word;
+ begin
+ log.debug('DoRun on '+string(fid));
+ if ((completed=total)and(fInfoReceived in flags))or(fCompleted in flags) then
+  SetPending(0,0);
+  flags:=flags+fCompleted;
+ end;
+ if (flags*[fStarted,fAborted,fSuspended]=[]) then begin
+  {- start not started }
+  log.debug('Starting not started');
+  req.Create( fid, trid, 0, cChunksPerRequest );
+  SetPending( 0, cChunksPerRequest );
+  req.Send(source);
+  requested:=cChunksPerRequest;
+ end else
+ if flags*[fStarted,fInfoReceived]=[fStarted] then begin
+  log.debug('Re-requesting info');
+  req.Create( fid, trid, 0, 0 );
+  req.Send(source);
+ end else
+ if now-last>cMaxRetry then begin
+  log.debug('Timeout => suspend');
+  Save;
+  SetPending( 0, 0 );
+  flags:=flags+[fSuspended];
+ end else
+ if (received=requested) then begin
+  rqc:=total-completed;
+  if rqc>cChunksPerRequest then rqc:=cChunksPerRequest;
+  log.debug('reqest next '+IntToStr(rqc));
+  req.Create( fid, trid, completed-1, rqc );
+  req.Send(source);
+  requested:=rqc;
+  received:=0;
+  SetPending( 0, rqc );
+ end else begin
+  log.debug('Retry pending');
+  i:=0;
+  while (i<=high(pending)) and (not assigned(pending[i])) do inc(i); //find first assigned
+  rqc:=1;
+  while (i+rqc<=high(pending)) and assigned(pending[i+rqc]) do inc(rqc); //find last assigned
+  if i<=high(pending) then begin
+   log.debug('req retry '+intToStr(rqc)+' of '+inttostr(requested-received)+' pending');
+   assert(rqc<=(requested-received));
+   req.Create( fid, trid, completed+i, rqc );
+   req.Send(source);
+   while rqc>0 do with pending[i+rqc-1]^ do begin
+    since:=now;
+    inc(retry);
+    dec(rqc);
+   end;
+  end;
+ end;
+end;
+ {if now-last>cRetryTimeout}
+ {todo:
+  - retry pending		IMPL
+  - dispose aborted and suspended	UP
+  - suspend				IMPL
+  - save	IMPL
+  - OnNoSrc	UP
+  - start not started	IMPL
+  - request info		IMPL
+  - request next		IMPL
+ }
+
+
 procedure SendFile( id: tFID );
  begin
  AbstractError;
 end;
 
-(*
-pootis:
-tRequest.Create(tFID,Word,Word);
-tRequest.Handle(const t);
-tRequest.Send(const t);
-tInfo.Create(var tRequest);
-tInfo.Send(const t);
-procedure tData.CreateSend( const aTrID:byte; const aFID:tFID; aPart :byte; const rcpt: NetAddr.t);
+procedure tRequest.Send(const rcpt:netaddr.t);
+ begin inherited Send(rcpt,sizeof(self)); end;
+procedure tInfo.Send(const rcpt:netaddr.t);
+ begin inherited Send(rcpt,sizeof(self)); end;
 
-deprecate:
-SendFile(tFID);
-
-tTransfer.DoRun;
-tTransfer.HandleInf(LongWord);
-tTransfer.HandleDat(Byte,var <Formal type>,LongWord);
-
-*)
-
-{$IFDEF n}
-
-procedure tGet.Create( id :tFID; part, count :Word );
- var p:word;
- var pdb :tPartAccess;
+procedure tRequest.Create( iid :tFID; itrid: byte; ichunk, icount :Word );
  begin
- inherited Create( cGet );
- self.id:=id;
- self.part:=part;
- self.count:=count;
- pdb.init( id );
+ inherited Create(cRequest);
+ id:=iid;
+ trid:=itrid;
+ chunk:=ichunk;
+ count:=icount;
+end;
+
+procedure tRequest.Handle( const from: NetAddr.t);
+ procedure sendinfo;
+  var inf:tInfo;
+  begin
+  inf.Create(TrID,ID);
+  inf.Send(from);
+ end;
+ var part:longword;
+ var dat:tData;
+ begin
+ log.debug('Request for '+String(id)+':'+IntToStr(longword(chunk))+'+'+IntToStr(longword(count))+' from '+string(from));
+ if longword(chunk)=0 then SendInfo;
+ for part:=chunk to longword(chunk)+count do
+  dat.CreateSend( TrID, ID, chunk, part, from );
+end;
+
+procedure tData.CreateSend( const aTrID:byte; const aFID:tFID; aChunk:longword; aPart :byte; const rcpt: NetAddr.t);
+ var f:tDataFile;
+ var br:longword;
+ begin
+ inherited Create(cData);
+ DataBase.dbAssign(f,'chk'+DirectorySeparator+string(afid)); reset(f);
  try
-  for p:=part to part+count
-   do pdb.SetRequested( p );
+  seek(f,cChunkLength*(aChunk+aPart));
+  blockread(f,PayLoad,cChunkLength,br);
  finally
-  pdb.done;
+  close(f);
  end;
+ part:=aPart;
+ TrID:=aTrID;
+ inherited Send(rcpt,(sizeof(self)-sizeof(PayLoad))+br);
 end;
-
-procedure tGet.Send;
+ 
+procedure tInfo.Create( const aTrID:byte; const aFID:tFID );
+ var f:tDataFile;
+ var br:longword;
  begin
- Peers.tPacket.Send( sizeof(self) );
-end;
-
-procedure tDat.Create( id :tFID; part :Word );
- var db:tDataAccess;
- var cLen:LongInt;
- var Len :word;
- var Ofs:LongWord;
- begin
- inherited Create( cDat );
- self.id:= id;
- self.part:= part;
- db.init( id );
+ inherited Create(cInfo);
+ DataBase.dbAssign(f,'chk'+DirectorySeparator+string(afid)); reset(f);
  try
-  Ofs:= part * high(self.PayLoad);
-  cLen:= db.TotalCount - Ofs;
-  if cLen<1 then raise eRangeError.Create('');
-  if cLen>high(self.PayLoad) then cLen:=high(self.PayLoad);
-  Len:=cLen;
-  if (db.TotalCount mod high(self.PayLoad))=0
-   then self.total:= (db.TotalCount div high(self.PayLoad))
-   else self.total:= (db.TotalCount div high(self.PayLoad)) +1
-  ;
-  db.BlockRead( self.PayLoad, Ofs, cLen );
- finally db.done; end;
-end;
-
-procedure tDat.Send;
- begin
- Peers.tPacket.Send( sizeof(self) );
-end;
-
-procedure tPcs.Create( id:tFID; part:Word );
- var db:tPieceAccess;
- var cLen:LongInt;
- var Len :word;
- var Ofs:LongWord;
- begin
- inherited Create( cPcs );
- self.id:= id;
- self.part:= part;
- db.init( id );
- try
-  Ofs:= part * high(self.PayLoad);
-  cLen:= db.TotalCount - Ofs;
-  if cLen<1 then raise eRangeError.Create('');
-  if cLen>high(self.PayLoad) then cLen:=high(self.PayLoad);
-  Len:=cLen;
-  if (db.TotalCount mod high(self.PayLoad))=0
-   then self.total:= (db.TotalCount div high(self.PayLoad))
-   else self.total:= (db.TotalCount div high(self.PayLoad)) +1
-  ;
-  db.BlockRead( self.PayLoad, Ofs, cLen );
- finally db.done; end;
-end;
-
-procedure tPcs.Send;
- begin
- Peers.tPacket.Send( sizeof(self) );
-end;
-
-procedure tDat.Handle;
- var pdb :tPartAccess;
- var db :tDataAccess;
- var Ofs:LongWord;
- begin
- Ofs:= word(part) * high(self.PayLoad);
- //if GetSource( id )<>Sender then raise exception.create('auth');
- db.init( id );
- pdb.init( id );
- if not pdb.isRequested( part ) then raise exception.create('Recieved an not requested part');
- {the above line also prevents overwrites of completed data}
- db.BlockWrite( self.PayLoad, Ofs, high(self.PayLoad));
- pdb.SetDone( part );
- pdb.SetTotal( total );
- pdb.done;
- db.done;
-end;
-
-procedure tPcs.Handle;
- var db :tPieceAccess;
- var Ofs:LongWord;
- begin
- Ofs:= word(part) * high(self.PayLoad);
- //if GetSource( id )<>Sender then raise exception.create('auth');
- db.init( id ); try
-  //db.parts.init( id );
-  if not db.parts.isRequested( part ) then raise exception.create('Recieved an not requested part of pieces');
-  db.BlockWrite( self.PayLoad, Ofs, high(self.PayLoad));
-  db.parts.SetDone( part );
-  db.parts.SetTotal( total );
- finally db.done; end;
-end;
-
-procedure tGet.Handle;
- var c :word;
- var pcs:tPcs;
- var dat:tDat;
- var pieced:boolean;
- var lpart, lcount :word;
- var pcsdb :tPieceAccess;
- begin
- pcsdb.init( id ); try
-  pieced:=pcsdb.IsPieced;
- lpart:=self.part;
- lcount:=self.count;
- for c:=lpart to lpart+lcount do begin
-  if not pcsdb.parts.isComplete( c ) then continue;
-  if pieced then begin
-   pcs.Create( id, c );
-   pcs.Send;
-  end else begin
-   dat.Create( id, c );
-   dat.Send;
-  end;
- end;
- finally pcsdb.done; end;
-end;
-
-function Retry( id :tFID ) :Integer;
- const cMaxGetCount=42;
- const cMaxGet=4;
- var db :tPartAccess;
- var part :word;
- var top  :word;
- var get :tGet;
- begin
- db.init( id );
- part:=0;
- Result:=0;
- while Result < cMaxGet do begin
-  try db.FindToRetry( part );
-  except on eRangeError do break; end;
-  top:=part+1;
-  while ((top-part)<=cMaxGetCount) and db.isToRetry( top ) do top:=top+1;
-  get.create( id, part, top-part-1 );
-  get.send;
-  inc(Result);
- end;
-end;
-
-procedure DoRetry;
- var gdb: tDownloadsAccess;
- var cur: tFID;
- var R: tRecord;
- var src :tSourceAccess;
- begin
- R:=0;
- gdb.init;
- try
-  repeat
-   gdb.read(cur, R);
-   src.init( cur ); try
-    try src.select;
-    except on eNoSource do begin
-      if assigned(onNoSrc) then onNoSrc( cur );
-      inc( R );
-      continue;
-    end; end;
-    if Transfer.Retry( cur ) = 0
-       then gdb.delete( R )
-       else inc( R )
-    ;
-   finally src.done; end;
-  until false;
+  br:=FileSize(f);
  finally
-  gdb.done;
+  close(f);
  end;
+ if (br mod cChunkLength)>0 then count:=(br div cChunkLength)+1 else count:=(br div cChunkLength);
 end;
 
-{*********** DataBase *********}
-
-constructor tPartAccess.Init( fid :tFID );
- var row: DataBase.tRow;
-begin
- fid.ToString(Row);
- tAccess.Init( sizeof(tPartInfo), 'object', Row, 'part' );
-end;
-
-procedure tPartAccess.getState( out state :tPartInfo; part :Word );
- begin
- Read(state, part);
-end;
-
-procedure tPartAccess.setState( part: word; state :tPartInfo );
- begin
- OverWrite(part, state);
-end;
-
-procedure tPartAccess.SetRequested( part :Word );
- var state: tPartInfo;
- begin
- try getState( state, part );
- except on eRangeError do state.state:=psUnknown; end;
- if state.state>=psComplete then raise exception.create('Trying to request complete piece');
- state.state:=psWaiting;
- state.retry:= state.retry+1;
- state.since:=Now;
- setState( part, state);
-end;
-
-function tPartAccess.isRequested( part :Word) :boolean;
- var state: tPartInfo;
- begin
- getState( state, part );
- isRequested:=(state.state=psWaiting);
-end;
-
-function tPartAccess.isComplete( part :Word ) :boolean;
- var state: tPartInfo;
- begin
- getState( state, part );
- isComplete:=(state.state=psComplete);
-end;
-
-procedure tPartAccess.SetDone( part :Word );
- var state: tPartInfo;
- begin
- getState( state, part );
- assert(state.state=psWaiting);
- state.state:=psComplete;
- state.since:=Now;
- setState( part, state);
-end;
-
-procedure tPartAccess.SetTotal( total :Word );
- var r:tRecord;
- var c:tPartInfo;
- begin
- for r:=0 to total do begin
-  try
-   getState(c,r);
-  except
-   on eRangeError do begin
-    c.state:=psPassive;
-    c.since:=Now;
-    c.retry:=0;
-   end;
-  end;
-  setState(r,c);
- end;
-end;
-
-procedure tPartAccess.Abort;
- begin
- Purge;
-end;
-
-function tPartAccess.isToRetry( part :Word ):boolean;
- var state: tPartInfo;
- begin
- getState( state, part );
- isToRetry:= 
-             (state.state in [psUnknown,psPassive]) or
-             (
-               (state.state=psWaiting)and
-               ((Now-state.since)>cRetryPeriod)
-             )
- ;
-end;
-
-procedure tPartAccess.FindToRetry( var part :Word );
- begin
- repeat
-  try if isToRetry( part ) then break;
-  except
-   on eRangeError do raise eRangeError.Create('No more parts to retry @Transfer.');
-  end;
-  inc( part );
- until false;
-end;
-
-{$ENDIF}
-
+INITIALIZATION
+ OnRecv:=nil;
+ OnProgress:=nil;
+ OnRecv:=nil;
 END.
