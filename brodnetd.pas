@@ -23,31 +23,35 @@ USES SysUtils
 var Log: tEventLog;
 
 const cRecvWait=5000{ms};
+const cWarnTime=1/MsecsPerDay;
+const cForceRest=6000/MSecsPerDay;
+
+var LastIdle:tDateTime;
 
 PROCEDURE Idle;
  var took:tdatetime;
- const warn=5/MsecsPerDay;
  begin
  took:=now;
+ lastidle:=now;
 
  Peers.DoAkafuka;
  Transfer.DoRetry;
 
  took:=now-took;
- if took>warn then log.warning('System idle tasks took: '+FloatToStr(took*MsecsPerDay)+'ms');
+ if took>cwarntime then log.warning('System idle tasks took: '+FloatToStr(took*MsecsPerDay)+'ms');
 end;
 
 procedure PeerStateHook( event: byte; info:Peers.tInfo );
  var ids:string;
  begin
  info.addr.ToString(ids);
- log.info('Detected Peer state change: event='+IntToStr(event)+' addr='+ids+' delta='+FloatToStr(info.delta*MsecsPerDay)+'ms since='+DateTimeToStr(info.since));
+ if event>0 then log.info('Detected Peer state change: event='+IntToStr(event)+' addr='+ids+' delta='+FloatToStr(info.delta*MsecsPerDay)+'ms since='+DateTimeToStr(info.since));
  Controll.NotifyPeerStateChange(event,info);
 end;
 
 procedure TransferProgressHook( id :tFID; done,total:longword; by: byte );
  begin
- log.Info('Transfer state change: fid'+string(id)+' done='+IntToSTr(done)+' total='+IntToStr(total));
+ log.Info('Transfer state change: fid='+string(id)+' done='+IntToSTr(done)+' total='+IntToStr(total));
  Controll.NotifyTransfer(id,done,total,by);
 end;
 
@@ -59,7 +63,9 @@ procedure TransferNoSrcHook( id :tFID; by :byte );
 PROCEDURE ProcessPacket( var pk:Peers.tPacket; len:LongWord; const from:netaddr.t );
  var p:pointer;
  var addrstr:string;
+ var took:tdatetime;
 begin
+ took:=now;
  try
  p:=@Pk;
  from.ToString( addrstr );
@@ -87,6 +93,8 @@ begin
    Log.Error(e.ClassName+': '+e.message);
    DumpExceptionBackTrace(stderr);
  end; end;
+ took:=now-took;
+ if took>cwarntime then log.warning('Processing took: '+FloatToStr(took*MsecsPerDay)+'ms');
 end;
 
 var InPkMem: array [1..1024] of byte;
@@ -129,6 +137,10 @@ PROCEDURE Loop;
     if BaseUnix.fpfd_isset(ctrl_socketl.handle,FDS)=1 then Controll.HandleConnect(ctrl_socketl);
     Controll.Receive(FDS);
 
+   end;
+   if now-LastIdle>cForceRest then begin
+    log.info('Rest forced ('+FloatToStr((now-LastIdle)*SecsPerDay)+'sec)');
+    Idle;
    end;
   except
    on Exception do raise; {putis}
@@ -211,6 +223,7 @@ procedure StartListening(const config:tINIFile);
  log.info('Listening CMD/#0 on: '+string(addr));
 
  log.info('Idle treshold set to: '+IntToStr(cRecvWait)+'ms');
+ log.info('Rest treshold set to: '+FloatToStr(cForceRest*MsecsPerDay)+'ms');
  if not assigned(ctrl_socketl) then raise exception.Create('No controll socket listening');
 end;
 

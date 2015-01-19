@@ -97,6 +97,7 @@ uses
 type tSuspendedTransfer=object
  fid        :tFID;
  completed  :longword; {also marks the next chunk to be requested}
+                       { should be in tTransfer, becouse is computed from filesize...}
  total      :longword;
  by         :byte;
  InfoReceived:Boolean;
@@ -148,6 +149,7 @@ procedure RequestFile( const source :netaddr.t; id :tFID ); inline;
  begin RequestFile(source, id, 0 ); end;
 procedure RequestFile( const src :netaddr.t; id :tFID; by: byte );
  var i:word;
+ var f:file of byte;
  procedure Create;
   begin
   i:=1;
@@ -199,9 +201,14 @@ procedure RequestFile( const src :netaddr.t; id :tFID; by: byte );
   Terminated :=false;
   timeouted  :=false;
   trid       :=i;
-  DataBase.dbAssign(storage,'chk'+DirectorySeparator+string(fid)); reset(storage);
-  {maybe DoRun;}
+  DataBase.dbAssign(storage,'chk'+DirectorySeparator+string(id)); reset(storage);
+  {check for presence of downloaded}
+  if FileSize(storage)>0 then begin
+   log.info('File already downloaded');
+   InfoReceived:=true; Total:=(FileSize(storage) div cChunkLength)+1; Completed:=Total;
+  end;
   log.debug('Transfer '+IntToStr(trid)+' set source='+string(source)+' fid='+string(fid));
+  DoRun; {TEST}
  end;
 end;
 
@@ -244,15 +251,17 @@ procedure DoRetry;
  var tr:^tTransfer;
  begin
  for i:=1 to high(TransferList) do if assigned(TransferList[i]) then begin
-  log.debug('DoRetry on transfer '+IntToStr(i));
   if TransferList[i]^.Terminated then begin
    tr:=TransferList[i];
    tr^.SetPending(0,0);
    TransferList[i]:=nil;
    if (tr^.timeouted)and assigned(OnNoSrc) then OnNoSrc(tr^.fid,tr^.by);
+   log.debug('Transfer disposed '+string(tr^.fid));
    dispose(tr);
-   log.debug('disposed');
-  end else TransferList[i]^.DoRun;
+  end else begin
+   log.debug('Transfer.DoRun '+string(TransferList[i]^.fid));
+   TransferList[i]^.DoRun;
+  end;
  end;
 end;
 
@@ -320,7 +329,7 @@ end;
 procedure tTransfer.DispatchEvent;
  unimplemented;
  begin
- log.info('Transfer '+string(fid)+': '+IntToStr(completed)+'/'+IntToStr(total));
+ (*log.info('Transfer '+string(fid)+': '+IntToStr(completed)+'/'+IntToStr(total));*)
  if assigned(OnProgress) then OnProgress(fid,completed,total,by);
  if (completed=total)and assigned(OnRecv) then OnRecv(fid,by);
  {   if assigned(OnNoSrc) then OnNoSrc(fid,by);}
@@ -362,7 +371,6 @@ procedure tTransfer.DoRun;
  var rqc:word;
  var i:word;
  begin
- log.debug('DoRun on '+string(fid));
  if (completed=total)and(InfoReceived) then begin
   DispatchEvent;
   close(storage);
@@ -456,7 +464,7 @@ procedure tRequest.Handle( const from: NetAddr.t);
  begin
  log.debug('Request for '+String(id)+':'+IntToStr(longword(chunk))+'+'+IntToStr(longword(count))+' from '+string(from)+' #'+IntToStr(TrID));
  if longword(chunk)=0 then SendInfo;
- for part:=0 to count-1 do 
+ if count>0 then for part:=0 to count-1 do 
   dat.CreateSend( TrID, ID, chunk, part, from );
 end;
 
@@ -482,16 +490,24 @@ end;
 procedure tInfo.Create( const aTrID:byte; const aFID:tFID );
  var f:tDataFile;
  var br:longword;
+ var Tr:tSuspendedTransfer;
  begin
- inherited Create(cInfo);
- DataBase.dbAssign(f,'chk'+DirectorySeparator+string(afid)); reset(f);
- try
-  br:=FileSize(f);
- finally
-  close(f);
+ try {Get size from live transfer}
+  Tr:=TransferList[TransferByFID(aFID)]^;
+ except on eSearch do try {Get size from suspended transfer}
+   Load(Tr,aFID);
+  except on eSearch do begin {Get size from finished file}
+    DataBase.dbAssign(f,'chk'+DirectorySeparator+string(afid)); reset(f);
+    try br:=FileSize(f); 
+    tr.InfoReceived:=(br>0);
+    if (br mod cChunkLength)>0 then Tr.total:=(br div cChunkLength)+1 else Tr.total:=(br div cChunkLength);
+    finally close(f); end;
+  end; end;
  end;
- TrID:=aTrID;
- if (br mod cChunkLength)>0 then count:=(br div cChunkLength)+1 else count:=(br div cChunkLength);
+ inherited Create(cInfo);
+ if not Tr.InfoReceived then raise eXception.Create('Transfer: No info for file');
+ count := Tr.Total;
+ TrID  :=    aTrID;
 end;
 
 procedure INIT;
