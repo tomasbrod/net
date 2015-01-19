@@ -3,6 +3,12 @@ UNIT Transfer;
 {
  To send and recieve CHK files over brodnet.
  Also to assemble pieced and parted files.
+ 
+ TODO: dispose parts completly, tData should have complete index!
+       - we request 4 chunks, reply will be delayed, we request the chunks 
+       again, reply will come, we request another chunk but reply to prev 
+       will come, corrupting the transfer.
+ 
 }
 
 INTERFACE
@@ -85,6 +91,7 @@ var OnNoSrc :procedure( id :tFID; by :byte );
  {To update source, call RequestFile with valid source address.}
 
 procedure DoRetry;
+procedure NotifyQuit;
 
 IMPLEMENTATION
 uses 
@@ -132,6 +139,7 @@ var TransferList:array [1..cMaxTransfers] of ^tTransfer;
 function TransferByFID(ifid:tFID):word; forward;
 
 procedure Load( out tra: tSuspendedTransfer; const fid: tFID ); forward;
+procedure UnSave( const fid: tFID ); forward;
 
 procedure tedst;
 begin
@@ -188,6 +196,12 @@ procedure RequestFile( const src :netaddr.t; id :tFID; by: byte );
      total      :=0;
      by         :=by;
      InfoReceived:=false;
+     {check for presence of downloaded}
+     DataBase.dbAssign(storage,'chk'+DirectorySeparator+string(id)); reset(storage); try
+     if FileSize(storage)>0 then begin
+      log.info('File already downloaded');
+      InfoReceived:=true; Total:=(FileSize(storage) div cChunkLength)+1; Completed:=Total;
+     end; finally close(storage); end;
     end;
    end;
   end;
@@ -197,16 +211,11 @@ procedure RequestFile( const src :netaddr.t; id :tFID; by: byte );
   requested  :=0;
   received   :=0;
   FillChar(pending,sizeof(pending),0);
-  last       :=0;
+  last       :=now;
   Terminated :=false;
   timeouted  :=false;
   trid       :=i;
   DataBase.dbAssign(storage,'chk'+DirectorySeparator+string(id)); reset(storage);
-  {check for presence of downloaded}
-  if FileSize(storage)>0 then begin
-   log.info('File already downloaded');
-   InfoReceived:=true; Total:=(FileSize(storage) div cChunkLength)+1; Completed:=Total;
-  end;
   log.debug('Transfer '+IntToStr(trid)+' set source='+string(source)+' fid='+string(fid));
   DoRun; {TEST}
  end;
@@ -228,7 +237,6 @@ procedure tInfo.Handle( const from: NetAddr.t);
     (TrID<high(TransferList))
     and assigned(TransferList[TrID])
  then begin
-  log.debug('Info for: '+IntToStr(TrID));
   TransferList[TrID]^.HandleInf(count);
  end;
 end;
@@ -241,7 +249,6 @@ procedure tData.Handle( const from: NetAddr.t; length:longword );
     (TrID<high(TransferList))
     and assigned(TransferList[TrID])
  then begin
-  log.debug('Data for: '+IntToStr(TrID));
   TransferList[TrID]^.HandleDat(part,PayLoad,pl);
  end;
 end;
@@ -274,10 +281,33 @@ procedure Load( out tra: tSuspendedTransfer; const fid: tFID );
   repeat
    if eof(f) then raise eSearch.Create;
    read(f,tra);
+   log.debug('s '+string(tra.fid));
   until tra.fid=fid;
  finally
   close(f);
  end;
+end;
+
+procedure UnSave( const fid: tFID );
+ var f:file of tSuspendedTransfer;
+ var Tr:tSuspendedTransfer;
+ begin
+ DataBase.dbAssign(f,'transfer.dat'); reset(f);
+ try 
+  while not eof(f) do begin
+   read(f,tr);
+   if tr.fid=fid then DataBase.UnInsert(f{,tr});
+  end;
+ finally close(f); end;
+end;
+
+procedure Save(var tr:tSuspendedTransfer);
+ var f:file of tSuspendedTransfer; begin
+ log.debug('save');
+ UnSave(tr.fid);
+ DataBase.dbAssign(f,'transfer.dat'); reset(f);
+ try write(f,tr);
+ finally close(f); end;
 end;
 
 procedure tTransfer.HandleInf(count:longword);
@@ -287,6 +317,7 @@ procedure tTransfer.HandleInf(count:longword);
   total:=count;
   InfoReceived:=true;
   log.debug(string(fid)+' info received, total='+IntToStr(total));
+  Save(self);
  end else log.error('protocol desync: info received in invalid state for '+string(fid));
 end;
 
@@ -297,7 +328,7 @@ procedure tTransfer.HandleDat(part:byte; var PayLoad; length:longword );
   requested:=cChunksPerRequest;
   received:=0;
   if requested>(total-completed) then requested:=total-completed;
-  log.debug('requesting '+IntToStr(requested)+' more chunks');
+  (*log.debug('requesting '+IntToStr(requested)+' more chunks');*)
   SetPending(0,requested);
   req.Create(fid,TrID,completed,requested);
   req.Send(source);
@@ -315,12 +346,13 @@ procedure tTransfer.HandleDat(part:byte; var PayLoad; length:longword );
    Inc(received);
    dispose(pending[part]);
    pending[part]:=nil; //for sure
-   log.debug(string(fid)+' data received, total='+IntToStr(total)+' compl='+IntToStr(completed)+' req='+IntToStr(requested)+' rec='+IntToStr(received));
+   (*log.debug(string(fid)+' data received, total='+IntToStr(total)+' compl='+IntToStr(completed)+' req='+IntToStr(requested)+' rec='+IntToStr(received));*)
    if (requested=received)or IsLast then begin
-    log.debug('batch complete');
+    (*log.debug('batch complete');*)
     completed:=completed+received;
     if InfoReceived then begin
-     if IsLast then log.debug('file completed') else NextBatch;
+     (*if IsLast then log.debug('file completed');*)
+     if not IsLast then NextBatch;
     end {else wait info};
    end {else wait more};
   end {else error};
@@ -362,12 +394,6 @@ procedure tTransfer.SetPending(i,c:word);
 end;
 
 procedure tTransfer.DoRun;
- procedure Save;
-  var f:file of tSuspendedTransfer; begin
-  DataBase.dbAssign(f,'transfer.dat'); reset(f);
-  try write(f,tSuspendedTransfer(self));
-  finally close(f); end;
- end;
  var req:tRequest;
  var rqc:word;
  var i:word;
@@ -375,14 +401,16 @@ procedure tTransfer.DoRun;
  if (completed=total)and(InfoReceived) then begin
   DispatchEvent;
   close(storage);
+  UnSave(fid);
   Terminated:=true;
  end else
  if requested=0 then begin
   log.debug('Starting not started');
-  req.Create( fid, trid, 0, cChunksPerRequest );
+  req.Create( fid, trid, completed, cChunksPerRequest );
   SetPending( 0, cChunksPerRequest );
   req.Send(source);
   requested:=cChunksPerRequest;
+  Save(self);
   DispatchEvent;
  end else
  if not InfoReceived then begin
@@ -392,7 +420,7 @@ procedure tTransfer.DoRun;
  end else
  if (now-last)>cMaxDelta then begin
   log.debug('Timeout => suspend');
-  Save;
+  Save(self);
   Timeouted:=true;
   close(storage);
   Terminated:=true;
@@ -417,6 +445,7 @@ procedure tTransfer.DoRun;
  end else begin
   log.debug('nothing special');
   DispatchEvent;
+  Save(self);
  end;
 end;
  {if now-last>cRetryTimeout}
@@ -431,6 +460,17 @@ end;
   - request next		IMPL
  }
 
+procedure NotifyQuit;
+ var i:word;
+ begin
+ for i:=1 to high(TransferList) do if assigned(TransferList[i]) then with TransferList[i]^ do begin
+  close(storage);
+  Terminated:=true;
+  Save(TransferList[i]^);
+  log.warning('Suspend transport: '+string(fid));
+  dispose(TransferList[i]);
+ end;
+end;
 
 procedure SendFile( id: tFID );
  begin

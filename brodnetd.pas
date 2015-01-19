@@ -287,6 +287,7 @@ BEGIN
   log.debug('Saving presistent data');
   Peers.SaveState;
   Controll.NotifyQuit(not ReqQuit);
+  Transfer.NotifyQuit;
  
  (*
  except
