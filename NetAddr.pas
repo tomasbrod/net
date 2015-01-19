@@ -243,7 +243,7 @@ operator := (net : Word4) host:Dword;
  var pnet:^DWord;
  begin
  pnet:=@net;
- host:=NetToHost( pnet^ );
+ host:=LEtoN( pnet^ );
 end;
 
 operator := (host : word) net:Word2;
@@ -256,7 +256,7 @@ operator := (host : Dword) net:Word4;
  var pnet:^DWord;
  begin
  pnet:=@net;
- pnet^:=HostToNet( host );
+ pnet^:=NtoLE( host );
 end;
 
 END.

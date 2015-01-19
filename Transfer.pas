@@ -29,7 +29,7 @@ type tFID=object(Keys.tHash)
 TYPE {--Packets--}
 
  tRequest=object(Peers.tPacket)
-  procedure Create( iid :tFID; itrid: byte; ichunk, icount :Word );
+  procedure Create( iid :tFID; itrid: byte; ichunk: longword; icount :Word );
   procedure Handle( const from: NetAddr.t);
   procedure Send( const rcpt: NetAddr.t);
   private
@@ -295,6 +295,7 @@ procedure tTransfer.HandleDat(part:byte; var PayLoad; length:longword );
   var req:tRequest;
   begin
   requested:=cChunksPerRequest;
+  received:=0;
   if requested>(total-completed) then requested:=total-completed;
   log.debug('requesting '+IntToStr(requested)+' more chunks');
   SetPending(0,requested);
@@ -443,7 +444,7 @@ procedure tInfo.Send(const rcpt:netaddr.t);
  begin inherited Send(rcpt,sizeof(self));
  end;
 
-procedure tRequest.Create( iid :tFID; itrid: byte; ichunk, icount :Word );
+procedure tRequest.Create( iid :tFID; itrid: byte; ichunk: longword; icount :Word );
  begin
  inherited Create(cRequest);
  id:=iid;
