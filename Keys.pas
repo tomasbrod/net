@@ -16,6 +16,7 @@ TYPE{s}
    deprecated;
   procedure FromString( s :string );
   procedure Compute ( s: tStream ); overload;
+  procedure Compute ( var s: file; count:longword ); overload;
   procedure Compute ( s: string ); overload;
   private
   data :array [1..20] of byte;
@@ -74,6 +75,24 @@ procedure tHash.Compute ( s: tStream ); overload;
  SHA1Init( ctx );
  while true do begin
   bl:= s.Read( buf, sizeof(buf) );
+  if bl=0 then break;
+  SHA1Update( ctx, buf, bl );
+ end;
+ SHA1Final( ctx, digest );
+ for bl:=0 to 19 do data[bl+1]:=digest[bl];
+end;
+
+procedure tHash.Compute ( var s: file; count:longword );
+ var ctx:tSHA1Context;
+ var digest:tSHA1Digest;
+ var buf: array [1..512] of byte;
+ var bl: longword;
+ begin
+ SHA1Init( ctx );
+ while count>0 do begin
+  bl:=count; if bl>sizeof(buf) then bl:=sizeof(buf);
+  BlockRead( s, buf, bl, bl );
+  Dec(count,bl);
   if bl=0 then break;
   SHA1Update( ctx, buf, bl );
  end;

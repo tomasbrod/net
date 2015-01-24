@@ -404,18 +404,36 @@ procedure tTransfer.SetPending(i,c:word);
 end;
 
 procedure tTransfer.DoRun;
+ function Verify:boolean;
+  var hash:tHash;
+  begin
+  seek(storage,0);
+  hash.Compute(storage,filesize(storage));
+  if hash<>fid then begin
+   log.error('Transfer Hash Mismatch  in '+string(fid)+' from '+string(source));
+   log.debug('Hash of file='+string(hash));
+   Completed:=0;
+   InfoReceived:=false;
+   pending:=[];
+   result:=false;
+   AbstractError;
+ end else begin
+  log.debug('Transfer hash matched :)');
+  result:=true;
+ end; end;
  var req:tRequest;
  var rqc:word;
  var i:word;
  begin
  if (completed=total)and(InfoReceived) then begin
-  UnSave(fid);
-  Done;
+  if Verify then begin
+   UnSave(fid);
+   Done; end;
  end else
  if pending=[] then begin
   log.debug('Starting not started');
   req.Create( fid, trid, completed, cChunksPerRequest );
-  SetPending( 0, cChunksPerRequest );
+  SetPending( 0, cChunksPerRequest ); received:=0;
   req.Send(source);
   Save(self);
  end else
