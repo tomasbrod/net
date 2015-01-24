@@ -23,6 +23,7 @@ const cMaxChunksPerRequest=16; {limit to chunks that we serve for single request
 const cChunksPerRequest=6;     {limit to chunks that we request in single request}
 const cRetryPeriod = 2000{ms} /MSecsPerDay; {if reply not arrive under this, we send another request}
 const cMaxDelta = Peers.cMaxDelta {10/MinutesPerDay}; {if nothing is received under this, transfer is aborted}
+const cTimeWait = 5000 /MSecsPerDay;
 
 CONST
  cRequest=4;
@@ -62,12 +63,22 @@ TYPE {--Packets--}
  
  tData=object(Peers.tPacket)
   procedure Handle( const from: NetAddr.t; length:longword );
-  procedure CreateSend( const aTrID:byte; const aFID:tFID; aChunk:longword; aPart :byte; const rcpt: NetAddr.t);
+  procedure CreateSend( const aTrID:byte; const aFID:tFID; aChunk:longword; const rcpt: NetAddr.t);
+  private
+  TrID :byte;
+  part :Word4;
+  PayLoad: array [1..cChunkLength] of byte;
+ end;
+
+ {
+ tDataShort=object(Peers.tPacket)
+  procedure Handle( const from: NetAddr.t; length:longword );
   private
   TrID :byte;
   part :byte;
   PayLoad: array [1..cChunkLength] of byte;
  end;
+ }
  
  tError=object(Peers.tPacket) 
  end unimplemented;
@@ -120,15 +131,16 @@ type tTransfer=object(tSuspendedTransfer)
  storage    :tDataFile;
  source     :netaddr.t;
  trid       :byte;
- requested  :word;
- received   :word;
- pending    :array [0..cChunksPerRequest-1] of ^tPendingInfo;
+ received   :byte;
+ pending    :set of 0..cChunksPerRequest-1;
  last       :tDateTime;
  Terminated :boolean;
- timeouted  :boolean;
+ Timeouted  :boolean;
  procedure DoRun;
  procedure HandleInf(count:longword);
- procedure HandleDat(part:byte; var PayLoad; length:longword );
+ procedure HandleDat(part:longword; var PayLoad; length:longword );
+ procedure Done;
+ private
  procedure DispatchEvent;
  procedure SetPending(i,c:word);
  end;
@@ -141,11 +153,6 @@ function TransferByFID(ifid:tFID):word; forward;
 procedure Load( out tra: tSuspendedTransfer; const fid: tFID ); forward;
 procedure UnSave( const fid: tFID ); forward;
 
-procedure tedst;
-begin
- TransferList[1]^.DoRun;
-end;
-
 function TransferByFID(ifid:tFID):word;
  begin
  result:=1;
@@ -155,9 +162,9 @@ end;
 
 procedure RequestFile( const source :netaddr.t; id :tFID ); inline;
  begin RequestFile(source, id, 0 ); end;
+
 procedure RequestFile( const src :netaddr.t; id :tFID; by: byte );
  var i:word;
- var f:file of byte;
  procedure Create;
   begin
   i:=1;
@@ -208,7 +215,6 @@ procedure RequestFile( const src :netaddr.t; id :tFID; by: byte );
  end;
  with TransferList[i]^ do begin
   source     :=src;
-  requested  :=0;
   received   :=0;
   FillChar(pending,sizeof(pending),0);
   last       :=now;
@@ -226,8 +232,7 @@ procedure RecvFileAbort( id :tFID );
  begin
  i:=TransferByFID(id);
  with TransferList[i]^ do begin
-  close(storage);
-  Terminated:=true;
+  Done;
  end;
 end;
 
@@ -260,7 +265,6 @@ procedure DoRetry;
  for i:=1 to high(TransferList) do if assigned(TransferList[i]) then begin
   if TransferList[i]^.Terminated then begin
    tr:=TransferList[i];
-   tr^.SetPending(0,0);
    TransferList[i]:=nil;
    if (tr^.timeouted)and assigned(OnNoSrc) then OnNoSrc(tr^.fid,tr^.by);
    log.debug('Transfer disposed '+string(tr^.fid));
@@ -270,6 +274,13 @@ procedure DoRetry;
    TransferList[i]^.DoRun;
   end;
  end;
+end;
+
+procedure tTransfer.Done;
+ begin
+ SetPending(0,0);
+ Close(storage);
+ Terminated:=true;
 end;
 
 procedure Load( out tra: tSuspendedTransfer; const fid: tFID );
@@ -318,15 +329,17 @@ procedure tTransfer.HandleInf(count:longword);
   InfoReceived:=true;
   log.debug(string(fid)+' info received, total='+IntToStr(total));
   Save(self);
+  DispatchEvent;
  end else log.error('protocol desync: info received in invalid state for '+string(fid));
 end;
 
-procedure tTransfer.HandleDat(part:byte; var PayLoad; length:longword );
+procedure tTransfer.HandleDat(part:longword; var PayLoad; length:longword );
  procedure NextBatch;
   var req:tRequest;
+  var requested:byte;
   begin
-  requested:=cChunksPerRequest;
   received:=0;
+  requested:=cChunksPerRequest;
   if requested>(total-completed) then requested:=total-completed;
   (*log.debug('requesting '+IntToStr(requested)+' more chunks');*)
   SetPending(0,requested);
@@ -337,22 +350,21 @@ procedure tTransfer.HandleDat(part:byte; var PayLoad; length:longword );
  begin
  last:=now;
  if (not Terminated) then begin
-  if assigned(pending[part]) then begin
+  assert(((part-completed)>=0)and((part-completed)<cChunksPerRequest));
+  if (part-completed) in pending then begin
    assert(length<=cChunkLength);
    isLast:=InfoReceived and (completed+received+1=total);
    if (length<cChunkLength)and(not islast) then raise Exception.Create('Incomplete datapacket in middle of file');
-   Seek(storage,(completed+part)*cChunkLength);
+   Seek(storage,part*cChunkLength);
    BlockWrite(storage,PayLoad,length);
+   Exclude(pending,part-completed);
    Inc(received);
-   dispose(pending[part]);
-   pending[part]:=nil; //for sure
    (*log.debug(string(fid)+' data received, total='+IntToStr(total)+' compl='+IntToStr(completed)+' req='+IntToStr(requested)+' rec='+IntToStr(received));*)
-   if (requested=received)or IsLast then begin
+   if (pending=[])or IsLast then begin
     (*log.debug('batch complete');*)
     completed:=completed+received;
     if InfoReceived then begin
-     (*if IsLast then log.debug('file completed');*)
-     if not IsLast then NextBatch;
+     if not IsLast then NextBatch; (*else log.debug('file completed');*)
     end {else wait info};
    end {else wait more};
   end {else error};
@@ -386,10 +398,8 @@ procedure tTransfer.SetPending(i,c:word);
  begin
  for z:=low(pending) to high(pending) do begin
   if (z>=i)and(z<i+c) then begin
-   if not assigned(pending[z]) then new(pending[z]);
-   pending[z]^.since:=now;
-   pending[z]^.retry:=0;
-  end else dispose(pending[z]);
+   Include(pending,z);
+  end else Exclude(pending,z);
  end;
 end;
 
@@ -399,19 +409,15 @@ procedure tTransfer.DoRun;
  var i:word;
  begin
  if (completed=total)and(InfoReceived) then begin
-  DispatchEvent;
-  close(storage);
   UnSave(fid);
-  Terminated:=true;
+  Done;
  end else
- if requested=0 then begin
+ if pending=[] then begin
   log.debug('Starting not started');
   req.Create( fid, trid, completed, cChunksPerRequest );
   SetPending( 0, cChunksPerRequest );
   req.Send(source);
-  requested:=cChunksPerRequest;
   Save(self);
-  DispatchEvent;
  end else
  if not InfoReceived then begin
   log.debug('Re-requesting info');
@@ -422,31 +428,25 @@ procedure tTransfer.DoRun;
   log.debug('Timeout => suspend');
   Save(self);
   Timeouted:=true;
-  close(storage);
-  Terminated:=true;
+  Done;
  end else
  if (now-last)>cRetryPeriod then begin
-  log.debug('Retry pending '+IntToStr(requested-received));
+  log.debug('Retry pending ');
   i:=0;
-  while (i<=high(pending)) and (not assigned(pending[i])) do inc(i); //find first assigned
+  while (i<=high(pending)) and (pending*[i]=[]) do inc(i); //find first assigned
   rqc:=1;
-  while (i+rqc<=high(pending)) and assigned(pending[i+rqc]) do inc(rqc); //find last assigned
+  while (i+rqc<=high(pending)) and (i+rqc in pending) do inc(rqc); //find last assigned
   if i<=high(pending) then begin
    log.debug('req retry '+intToStr(rqc));
-   assert(rqc<=(requested-received));
    req.Create( fid, trid, completed+i, rqc );
    req.Send(source);
-   while rqc>0 do with pending[i+rqc-1]^ do begin
-    since:=now;
-    inc(retry);
-    dec(rqc);
-   end;
   end;
+  Save(self);
  end else begin
   log.debug('nothing special');
-  DispatchEvent;
   Save(self);
  end;
+ DispatchEvent;
 end;
  {if now-last>cRetryTimeout}
  {todo:
@@ -462,14 +462,16 @@ end;
 
 procedure NotifyQuit;
  var i:word;
+ var c:word=0;
  begin
  for i:=1 to high(TransferList) do if assigned(TransferList[i]) then with TransferList[i]^ do begin
-  close(storage);
-  Terminated:=true;
+  Done;
   Save(TransferList[i]^);
   log.warning('Suspend transport: '+string(fid));
   dispose(TransferList[i]);
+  Inc(c);
  end;
+ log.info('Suspended '+IntToStr(c)+' transfers.');
 end;
 
 procedure SendFile( id: tFID );
@@ -506,24 +508,24 @@ procedure tRequest.Handle( const from: NetAddr.t);
  log.debug('Request for '+String(id)+':'+IntToStr(longword(chunk))+'+'+IntToStr(longword(count))+' from '+string(from)+' #'+IntToStr(TrID));
  if longword(chunk)=0 then SendInfo;
  if count>0 then for part:=0 to count-1 do 
-  dat.CreateSend( TrID, ID, chunk, part, from );
+  dat.CreateSend( TrID, ID, longword(chunk)+part, from );
 end;
 
-procedure tData.CreateSend( const aTrID:byte; const aFID:tFID; aChunk:longword; aPart :byte; const rcpt: NetAddr.t);
+procedure tData.CreateSend( const aTrID:byte; const aFID:tFID; aChunk:longword; const rcpt: NetAddr.t);
  var f:tDataFile;
  var br:longword;
  begin
  inherited Create(cData);
  DataBase.dbAssign(f,'chk'+DirectorySeparator+string(afid)); reset(f);
  try
-  br:=cChunkLength*(aChunk+aPart);
+  br:=cChunkLength*(aChunk);
   if br>FileSize(f) then raise eRangeError.Create('Reading past EOF');
   seek(f,br);
   blockread(f,PayLoad,cChunkLength,br);
  finally
   close(f);
  end;
- part:=aPart;
+ part:=aChunk;
  TrID:=aTrID;
  inherited Send(rcpt,(sizeof(self)-sizeof(PayLoad))+br);
 end;

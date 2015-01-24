@@ -71,7 +71,7 @@ procedure tDaemonController.Run;
  log.debug('Command: #'+IntToStr(cmd));
  case cmd of
   13,10:;
-  ccPeerStates: include(flags,cfPeerStates);
+  ccPeerStates: flags:=flags><[cfPeerStates];
   //ccPeerStatesOff: flags:= flags -[cfPeerStates,ccPeerStates];
   ccTerminate: if assigned(OnTerminateRequest) then OnTerminateRequest;
   ccQuit: Finished:=true;
@@ -91,7 +91,7 @@ procedure tDaemonController.NotifyPeerStateChange( event: byte; info:Peers.tInfo
  var w:netaddr.word2;
  begin
  if not (cfPeerStates in flags) then exit;
- //if (event=0) and ( not (cfPeerStates0 in flags)) then exit;
+ if (event=0) and ( not (cfPeerStates0 in flags)) then exit;
  io.WriteByte(cePeerState);
  io.WriteByte(event);
  io.WriteBuffer(info.addr,sizeof(info.addr));
@@ -143,7 +143,7 @@ constructor tDaemonController.Create(asocket:tStream; from:NetAddr.t);
 begin
  finished:=false;
  io:=asocket;
- flags:=[];
+ flags:=[cfPeerStates];
 end;
 
 destructor tDaemonController.Destroy;
