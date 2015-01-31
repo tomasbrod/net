@@ -18,6 +18,7 @@ USES SysUtils
 	{,StreamInit}
 	,Keys
 	,Transfer
+	,Neighb
 	;
 
 var Log: tEventLog;
@@ -36,6 +37,7 @@ PROCEDURE Idle;
 
  Peers.DoAkafuka;
  Transfer.DoRetry;
+ Neighb.NotifyIdle;
 
  took:=now-took;
  if took>cwarntime then log.warning('System idle tasks took: '+FloatToStr(took*MsecsPerDay)+'ms');
@@ -47,6 +49,7 @@ procedure PeerStateHook( event: byte; info:Peers.tInfo );
  info.addr.ToString(ids);
  if event>0 then log.info('Detected Peer state change: event='+IntToStr(event)+' addr='+ids+' delta='+FloatToStr(info.delta*MsecsPerDay)+'ms since='+DateTimeToStr(info.since));
  Controll.NotifyPeerStateChange(event,info);
+ Neighb.NotifyPeerState(event,info);
 end;
 
 procedure TransferProgressHook( id :tFID; done,total:longword; by: byte );
@@ -81,6 +84,8 @@ begin
   Transfer.cRequest: Transfer.tRequest(p^).Handle(from);
   Transfer.cInfo: Transfer.tInfo(p^).Handle(from);
   Transfer.cData: Transfer.tData(p^).Handle(from,len);
+  Neighb.cNeighb: Neighb.tNeighb(p^).handle(from);
+  Neighb.cNeighbAck: Neighb.tNeighbAck(p^).handle(from);
   else begin
    log.error('Received Unknown #'+IntToStr(Pk.pktype)+' ('+IntToStr(SizeOf(Pk))+'B) From '+addrstr);
    Abort;
@@ -183,6 +188,14 @@ procedure PacketSendHook(const rcpt:netaddr.t; var Data; Len:LongInt);
  raise exception.create('No socket in domain for '+string(rcpt)); {todo}
 end;
 
+procedure ConfNeighb(const config:tINIFile);
+ var str:ansistring;
+ begin
+ Neighb.AddPerson(Neighb.tPID(config.ReadString('PEER','pid','')));
+ str:=config.ReadString('PEER','localusers','');
+ while str<>'' do Neighb.AddPerson(Neighb.tPID( Copy2SpaceDel(str) ));
+end;
+ 
 procedure StartListening(const config:tINIFile);
  var addr:NetAddr.T;
  var str:ansistring;
@@ -266,8 +279,10 @@ BEGIN
  Peers.SendProc:=@PacketSendHook;
  Controll.OnTerminateRequest:=@DoTerminate;
  Transfer.OnProgress:=@TransferProgressHook;
+ //Neighb.OnChange:=@Controll.NotifyNeighbState;
  
- {Setup server socket}
+ {Configure}
+ ConfNeighb(config);
  StartListening(config);
  config.Free;
  

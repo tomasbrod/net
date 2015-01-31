@@ -13,26 +13,8 @@ uses  SocketUtil
      ,Eventlog
      ,Peers
      ,Transfer
+     ,Neighb
      ;
-
-type tDCFlag=(cfPeerStates,cfPeerStates0);
-
-type tDaemonController=class (tObject)
-  public
-  io: tStream;
-  cmd:byte;
-  flags:set of tDCFlag;
-  finished:boolean;
-  procedure Run;
-  constructor Create(asocket:tStream; from:NetAddr.t);
-  destructor Destroy; override;
-  procedure NotifyPeerStateChange( event: byte; info:Peers.tInfo );
-  procedure CmdAddPeer;
-  procedure NotifyQuit( unexcepted:boolean );
-  procedure CmdInvalid;
-  procedure NotifyTransfer( id :tFID; done,total:longword; by: byte );
-  procedure CmdRequestTransfer;
-end;
 
 {Hooks for main loop}
 procedure SetSelectFDS(var FDS : BaseUnix.tFDSet);
@@ -43,8 +25,8 @@ procedure Receive(const FDS : BaseUnix.tFDSet);
 procedure NotifyPeerStateChange( event: byte; info:Peers.tInfo );
 procedure NotifyTransfer( id :tFID; done,total:longword; by: byte );
 procedure NotifyQuit( unexcepted:boolean );
+procedure NotifyNeighbState( pid:tPID; addr:netaddr.t; hop:word );
 
-var Clients : array [1..8] of tDaemonController;
 var Log:tEventLog;
 var OnTerminateRequest:procedure;
 const cTransferBy=82;
@@ -64,6 +46,30 @@ type eFull=class(Exception) end;
 IMPLEMENTATION
 uses CtrlIface;
 
+type tDCFlag=(cfPeerStates,cfPeerStates0);
+
+type tDaemonController=class (tObject)
+  public
+  io: tStream;
+  cmd:byte;
+  flags:set of tDCFlag;
+  finished:boolean;
+  procedure Run;
+  constructor Create(asocket:tStream; from:NetAddr.t);
+  destructor Destroy; override;
+  procedure NotifyPeerStateChange( event: byte; info:Peers.tInfo );
+  procedure CmdAddPeer;
+  procedure NotifyQuit( unexcepted:boolean );
+  procedure CmdInvalid;
+  procedure NotifyTransfer( id :tFID; done,total:longword; by: byte );
+  procedure CmdRequestTransfer;
+  procedure NotifyNeighb( pid:Neighb.tPID; addr: netaddr.t; hopcount: word );
+  procedure CmdGetNeighb;
+  procedure CmdGetNeighbPID;
+end;
+
+var Clients : array [1..8] of tDaemonController;
+
 procedure tDaemonController.Run;
  begin
  try
@@ -77,6 +83,9 @@ procedure tDaemonController.Run;
   ccQuit: Finished:=true;
   ccAddPeer:CmdAddPeer;
   ccTransferRequest:CmdRequestTransfer;
+  ccGetNeighb:CmdGetNeighb;
+  ccGetNeighbPID:CmdGetNeighbPID;
+  //ccGetNeighbAddr:CmdGetNeighbAddr;
   else CmdInvalid;
  end;
  except on e:EReadError do begin
@@ -139,11 +148,59 @@ procedure tDaemonController.CmdRequestTransfer;
  Transfer.RequestFile( addr, a, cTransferBy );
 end;
 
+procedure tDaemonController.NotifyNeighb( pid:Neighb.tPID; addr: netaddr.t; hopcount: word );
+ var n:tNeighbInfo;
+ begin
+ if not (cfPeerStates in flags) then exit;
+ n.pid:=pid;
+ n.addr:=addr;
+ n.hop:=hopcount;
+ io.WriteByte(ceNeighbState);
+ io.WriteBuffer(n,sizeof(n));
+end;
+procedure NotifyNeighbState( pid:tPID; addr:netaddr.t; hop:word );
+ var i:word;
+ begin
+ for i:=1 to high(Clients) do if assigned(Clients[i]) then Clients[i].NotifyNeighb(pid,addr,hop);
+end;
+
+procedure tDaemonController.CmdGetNeighb;
+ var n:tNeighbInfo;
+ var i:Neighb.tInfo;
+ begin
+ i.GoNearest;
+ while i.Next do begin
+  n.pid:=i.pid;
+  n.addr:=i.addr;
+  n.hop:=i.hop;
+  io.WriteByte(ceNeighbs);
+  io.WriteBuffer(n,sizeof(n));
+ end;
+ io.WriteByte(0);
+end;
+
+procedure tDaemonController.CmdGetNeighbPID;
+ var n:tNeighbInfo;
+ var i:Neighb.tInfo;
+ var pid:Neighb.tPID;
+ begin
+ io.ReadBuffer(pid,sizeof(pid));
+ i.GoPID(pid);
+ while i.Next do begin
+  n.pid:=i.pid;
+  n.addr:=i.addr;
+  n.hop:=i.hop;
+  io.WriteByte(ceNeighbs);
+  io.WriteBuffer(n,sizeof(n));
+ end;
+ io.WriteByte(0);
+end;
+
 constructor tDaemonController.Create(asocket:tStream; from:NetAddr.t);
 begin
  finished:=false;
  io:=asocket;
- flags:=[cfPeerStates];
+ flags:=[];
 end;
 
 destructor tDaemonController.Destroy;

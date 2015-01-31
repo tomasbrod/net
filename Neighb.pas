@@ -13,7 +13,7 @@ uses
     ,SysUtils
     ;
 
-type tPID=object(Keys.tHash) end;
+type tPID=Keys.tHash;
 
 type tInfo=object
  procedure GoAll; (*sorted by key*) unimplemented;
@@ -133,27 +133,35 @@ procedure tNeighbTable.Insert(var n:tNeighbRecord);
   buckn:=data[i];
   new(data[i]);
   data[i]^.next:=buckn;
+  data[i]^.data:=nil;
   buckn:=data[i];
  end;
  nn:=buckn^.data;
- {TODO: scan the chain for same address and update that record instead}
  while assigned(nn) do begin
-  if nn^.addr=n.addr then break;
+  if nn^.addr=n.addr then break; {update the record if same address}
+  if nn^.hopcount=0 then log.warning('add route to self!');
   nn:=nn^.next;
  end;
  if nn=nil then begin
   new(nn);{node}
   buckn^.data:=nn;
   nn^.IdxNearest:=nil;
+  nn^.next:=nil;
+  log.debug('create new neighb record');
  end else begin
-  if nn^.hopcount<n.hopcount then exit; {do not update if prev was better}
-  dispose(nn^.IdxNearest,Unlink); {do not create dupl in nearestlist}
+  {if nn^.hopcount<n.hopcount then begin
+   log.debug('no update record with smaller hop count');
+   exit;
+  end;}
+  dispose(nn^.IdxNearest,Unlink);nn^.IdxNearest:=nil; {do not create dupl in nearestlist}
+  log.debug('update neighb record');
  end;
  with nn^ do begin
   addr:=n.addr;
   pid:=n.pid;
   hopcount:=n.hopcount;
   IdxNearest:=Nearest.InsertSort(nn);
+  log.info('Neighbour: '+string(pid)+' @ '+string(addr)+' +'+IntToStr(hopcount));
  end;
 end;
 
@@ -223,20 +231,36 @@ procedure tNeighbTable.DelByAddr( const addr:netaddr.t );
  var i:byte;
  var deleted:word;
  var pbuck,buck:^tBucket;
+ var nn:^tNeighbNode;
  begin
  deleted:=0;
  for i:=low(data) to high(data) do begin
   pbuck:=nil;
   buck:=data[i];
   while assigned(buck) do begin
-   if buck^.data^.addr=addr then begin
-    dispose(buck^.data^.IdxNearest,Unlink);
-    if assigned(pbuck) then pbuck^.next:=buck^.next else data[i]:=buck^.next;
-    dispose(buck);
-    inc(deleted);
+   nn:=buck^.data;
+   {FIXME!}
+   while assigned(nn) do begin
+    if nn^.addr=addr then begin
+     dispose(nn^.IdxNearest,Unlink);nn^.IdxNearest:=nil;
+     if assigned(nn^.prev) then begin
+      {just remove the record}
+      nn^.prev^.next:=nn^.next;
+      if assigned(nn^.next) then nn^.next^.prev:=pnn;
+      dispose(nn);nn:=nil;
+     end else begin
+      {remove the whole bucket}
+      if assigned(nn^.next) then nn^.next^.prev:=nil;
+      dispose(nn);nn:=nil;
+      if assigned(pbuck) then pbuck^.next:=buck^.next else data[i]:=buck^.next;
+      dispose(buck);buck:=data[i];
+     end;
+     inc(deleted);
+    end;
+   end else begin
+    pbuck:=buck;
+    buck:=buck^.next;
    end;
-   pbuck:=buck;
-   buck:=buck^.next;
   end;
  end;
 end;
@@ -310,6 +334,7 @@ procedure NotifyPeerState( event: byte; info:Peers.tInfo );
  begin
  case event of
   1{new}: begin
+   log.debug('Send neighb nodes');
    ni:=ByID.Nearest.Next;
    sent:=0;
    while assigned(ni) and (sent<cPropagateCount) and (ni^.data^.hopcount<=cPropagateTTL) do begin
@@ -319,8 +344,9 @@ procedure NotifyPeerState( event: byte; info:Peers.tInfo );
      rcpt:=info.addr;
      retry:=0;
      since:=Now;
-     pk.Create( Slot, ni^.data^.pid, ni^.data^.hopcount+1 );
+     pk.Create( Slot, ni^.data^.pid, ni^.data^.hopcount );
      pk.Send(rcpt);
+     log.debug('send neighb '+string(ni^.data^.pid)+' +'+inttostr(ni^.data^.hopcount)+' slot='+inttostr(slot));
     end;
     ni:=ni^.next;
    end;
@@ -334,8 +360,14 @@ procedure NotifyIdle;
  var i:word;
  begin
  for i:=low(UnAcked) to high(UnAcked) do if assigned(UnAcked[i]) then with UnAcked[i]^ do begin
-  if now-since<=cRetryPeriod then continue else
-  if retry>cMaxRetry then Dispose(UnAcked[i]) else begin
+  log.debug('rs '+IntToStr(Qword(UnAcked[i])));
+  if now-since<=cRetryPeriod then continue;
+  if retry>cMaxRetry then begin
+   log.debug('rsd ');
+   Dispose(UnAcked[i]);
+   UnAcked[i]:=nil;
+  end else begin
+   log.debug('retry send neighb slot='+IntToStr(i));
    pk.Send(rcpt);
    Inc(retry);
    Since:=Now;
@@ -347,18 +379,22 @@ end;
 
 procedure tNeighb.Handle( const from: NetAddr.t);
  var nr:tNeighbRecord;
+ var ack:tNeighbAck;
  begin
  nr.addr:=from;
- nr.hopcount:=hop;
+ nr.hopcount:=word(hop)+1;
  nr.pid:=pid;
  ByID.Insert(nr);
+ ack.Create(self);
+ ack.Send(from);
 end;
 
 procedure tNeighbAck.Handle( const from: NetAddr.t);
  var i:word;
  begin
  i:=TrID;
- Dispose(UnAcked[i]);
+ log.debug('ack send neighb slot='+IntToStr(i));
+ Dispose(UnAcked[i]);UnAcked[i]:=nil;
 end;
 
 (*** Packet constructors, senders and bullshit ***)
@@ -402,6 +438,7 @@ end;
 procedure AddPerson(const person:tPID);
  var nr:tNeighbRecord;
  begin
+ log.debug('Add person '+string(person));
  nr.addr.Clear;
  nr.hopcount:=0;
  nr.pid:=person;

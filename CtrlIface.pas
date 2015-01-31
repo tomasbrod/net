@@ -1,23 +1,23 @@
 unit CtrlIface;
 
 INTERFACE
+uses NetAddr,Neighb;
 
 const
  {ctrl commands:}
  ccQuit=ord('q');
  ccTerminate=ord('T');
  ccPeerStates=ord('p');
- ccAddPeer=14; {netaddr.t}
- {peers by keys (unimplemented)}
- ccGetAllPeers=15;        {          >#PeerKeyIds}
- ccGetPeersByMasterID=16; {masterkey >#PeerKeyIds}
- ccGetPeerInfoByID=17;    {subkey    >#PeerInfo}
- ccGetPeerInfoByAddr=17;  {netaddr   >#PeerInfo}
+ ccAddPeer=14;          { netaddr.t }
  {transfer}
  ccTransferRequest=19;  { ID, NetAddr }
  ccTransferAbort=20;    { ID }
  ccTransferProgress=21; { ID }
  ccTransferListAll=22;
+ {neighbours}
+ ccGetNeighb=15;        {          >#Neighbs}
+ ccGetNeighbPID=16;     {key       >#Neighbs}
+ ccGetNeighbAddr=17;    {netaddr   >#Neighbs}
  {
  cc=;
  }
@@ -27,11 +27,17 @@ const
  ceQuit=15;
  cePeerState=ord('p'); {event:byte, addr, ping_ms}
  ceInvalid=ord('?');
- {keys}
- cePeerKeyIds=17; {count, array count of subkey }
- cePeerInfo=18; { subkey, masterkey, addr, ping_ms }
  {transfer}
  ceTransfer=20; { ID, done, total }
+ {neighbours}
+ ceNeighbs=17; { [tNeighbInfo], byte(0) }
+ ceNeighbState=18; { tNeighbInfo }
+type
+ tNeighbInfo=record
+  pid:neighb.tpid;
+  addr:netaddr.t;
+  hop:word2;
+ end;
  {
  ce:byte=;
  }
