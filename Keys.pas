@@ -18,6 +18,7 @@ TYPE{s}
   procedure Compute ( s: tStream ); overload;
   procedure Compute ( var s: file; count:longword ); overload;
   procedure Compute ( s: string ); overload;
+  function LastLongWord:LongWord;
   private
   data :array [1..20] of byte;
  end;
@@ -26,6 +27,7 @@ Operator = (aa, ab :tHash) b : boolean;
 
 operator := ( ahash: tHash ) astring : string;
 operator := ( astring: string ) ahash : tHash;
+Operator := (aa :tHash) bb:LongWord;
 
 IMPLEMENTATION
 uses SysUtils, sha1;
@@ -106,6 +108,16 @@ procedure tHash.Compute ( s: string ); overload;
  begin
  digest:=SHA1String( s );
  for bl:=0 to 19 do data[bl+1]:=digest[bl];
+end;
+
+function tHash.LastLongWord:LongWord;
+ begin
+ result:=data[20] or (data[19]<<8) or (data[18]<<16) or (data[15]<<24);
+end;
+
+Operator := (aa :tHash) bb:LongWord;
+ begin
+ bb:=aa.LastLongWord;
 end;
 
 Operator = (aa, ab :tHash) b : boolean;
