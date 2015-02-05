@@ -26,7 +26,10 @@ type tInfo=object
  hop:word;
  addr:netaddr.t;
  procedure PeerInfo(out info:Peers.tInfo);
- private neighbnode:pointer; hti:byte; htb:pointer; nearestnode:pointer;
+ private hti:byte;
+ private nn:pointer;
+ private maxhc:Word;
+ private bypid,byaddr:boolean;
 end;
 
 procedure NotifyPeerState( event: byte; info:Peers.tInfo );
@@ -61,41 +64,24 @@ uses DataBase;
 
 (*** Data storage ***)
 type
- tNearestList_ptr=^tNearestList;
  tNeighbNode_ptr=^tNeighbNode;
  tNeighbRecord_ptr=^tNeighbRecord;
- tBucket_ptr=^tBucket;
  tNeighbRecord=object
   addr:netaddr.t;
   pid:tPID;
   hopcount:word;
  end;
  tNeighbNode=object(tNeighbRecord)
-  IdxNearest:tNearestList_ptr;
   next:tNeighbNode_Ptr;
  end;
- tBucket=object
-  data:^tNeighbNode;
-  next:tBucket_ptr;
- end;
- tNearestList=object
-  function InsertSort(n:tNeighbNode_ptr):tNearestList_ptr;
-  constructor Init;
-  destructor Unlink;
-  public
-  next,prev:tNearestList_ptr;
-  data:^tNeighbRecord;
- end;
  tNeighbTable=object
-  procedure Insert(var n:tNeighbRecord);
-  procedure SearchBuck(const id:tPID; out i:byte; out pbuck: tBucket_ptr; out buck:tBucket_ptr);
-  function  Search(const id:tPID ):tNeighbRecord_ptr;
+  procedure Insert(const addr:netaddr.t; const pid:tPID; const hop:Word);
+  {procedure SearchBuck(const id:tPID; out i:byte; out pbuck: tBucket_ptr; out buck:tBucket_ptr);
+  function  Search(const id:tPID ):tNeighbRecord_ptr;}
   procedure DelByAddr( const addr:netaddr.t );
   procedure Init;
-  private
-  data:array [0..31] of ^tBucket;
   public
-  nearest:tNearestList;
+  slots:array [0..127] of ^tNeighbNode;
  end;
  tUnAckedPackets=array [1..512] of ^tUnAckedPacketMeta;
  tUnAckedPacketMeta=object
@@ -105,67 +91,56 @@ type
   since:tDateTime;
  end;
 
-var ByID :tNeighbTable;
+var Table   :tNeighbTable;
 var UnAcked :tUnAckedPackets;
 
 procedure tNeighbTable.Init;
  var i:byte;
  begin
- nearest.data:=nil;
- nearest.prev:=nil;
- nearest.next:=nil;
- for i:=low(data) to high(data) do data[i]:=nil;
+ for i:=low(slots) to high(slots) do slots[i]:=nil;
 end;
 
-procedure tNeighbTable.Insert(var n:tNeighbRecord);
+procedure tNeighbTable.Insert(const addr:netaddr.t; const pid:tPID; const hop:Word);
  var i,ni:byte;
- var buckn:^tBucket;
- var nn:^tNeighbNode;
+ var nn,pnn:^tNeighbNode;
  begin
- i:=LongWord(n.pid) and 31;
- buckn:=data[i];
- {search the pid in the bucket}
- while assigned(buckn) do begin
-  if buckn^.data^.pid=n.pid then break;
-  buckn:=buckn^.next;
- end;
- if buckn=nil then begin {and add it if no exist}
-  buckn:=data[i];
-  new(data[i]);
-  data[i]^.next:=buckn;
-  data[i]^.data:=nil;
-  buckn:=data[i];
- end;
- nn:=buckn^.data;
+ i:=LongWord(pid) and high(slots);
+ nn:=slots[i]; pnn:=nil;
+ {search the pid/addr in the bucket}
  while assigned(nn) do begin
-  if nn^.addr=n.addr then break; {update the record if same address}
-  if nn^.hopcount=0 then log.warning('add route to self!');
+  if (nn^.pid=pid)and(nn^.addr=addr) then break;
+  pnn:=nn;
   nn:=nn^.next;
  end;
- if nn=nil then begin
-  new(nn);{node}
-  buckn^.data:=nn;
-  nn^.IdxNearest:=nil;
-  nn^.next:=nil;
-  log.debug('create new neighb record');
+ if assigned(nn) then begin
+  log.debug('remove record to update neighb record');
+  if (nn^.addr=addr)and(nn^.hopcount<hop) then begin
+   log.warning('Neighb: increase route hopcount');
+  end;	
+  if assigned(pnn) then pnn^.next:=nn^.next else slots[i]:=nn^.next; dispose(nn); nn:=nil;
+ end;
+ log.debug('create new neighb record');
+ {insertsort}
+ nn:=slots[i]; pnn:=nil;
+ while assigned(nn) and (nn^.hopcount<hop) do begin
+  pnn:=nn;
+  nn:=nn^.next;
+  log.debug('ins next');
+ end;
+ if assigned(pnn) then begin
+  new(nn); nn^.next:=pnn^.next; pnn^.next:=nn;
  end else begin
-  {if nn^.hopcount<n.hopcount then begin
-   log.debug('no update record with smaller hop count');
-   exit;
-  end;}
-  dispose(nn^.IdxNearest,Unlink);nn^.IdxNearest:=nil; {do not create dupl in nearestlist}
-  log.debug('update neighb record');
+  new(nn); nn^.next:=slots[i]; slots[i]:=nn;
  end;
- with nn^ do begin
-  addr:=n.addr;
-  pid:=n.pid;
-  hopcount:=n.hopcount;
-  IdxNearest:=Nearest.InsertSort(nn);
-  log.info('Neighbour: '+string(pid)+' @ '+string(addr)+' +'+IntToStr(hopcount));
- end;
+ {insertsort end}
+ if nn^.hopcount=0 then log.warning('Neighb: add route to self!');
+ nn^.addr:=addr;
+ nn^.pid:=pid;
+ nn^.hopcount:=hop;
+ log.info('Neighbour: '+string(pid)+' @ '+string(addr)+' +'+IntToStr(hop));
 end;
 
-procedure tNeighbTable.SearchBuck(const id:tPID; out i:byte; out pbuck: tBucket_ptr; out buck:tBucket_ptr);
+{procedure tNeighbTable.SearchBuck(const id:tPID; out i:byte; out pbuck: tBucket_ptr; out buck:tBucket_ptr);
  begin
  i:=LongWord(id) and 31;
  buck:=data[i];
@@ -177,8 +152,8 @@ procedure tNeighbTable.SearchBuck(const id:tPID; out i:byte; out pbuck: tBucket_
   pbuck:=buck;
   buck:=buck^.next;
  end;
-end;
- 
+end;}
+
 {procedure tNeighbTable.Pop(const id:tPID; out n:tNeighbRecord);
  var i:byte;
  var pbuck,buck:tNeighbNode_ptr;
@@ -192,74 +167,34 @@ end;
  dispose(buck);
 end;}
 
-function tNeighbTable.Search(const id:tPID ):tNeighbRecord_ptr;
+{function tNeighbTable.Search(const id:tPID ):tNeighbRecord_ptr;
  var i:byte;
  var pbuck,buck:tBucket_ptr;
  begin
  SearchBuck(id,i,pbuck,buck);
  if not assigned(buck) then raise DataBase.eSearch.Create;
  result:=buck^.data;
-end;
-
-function tNearestList.InsertSort(n:tNeighbNode_ptr):tNearestList_ptr;
- var p,c,e:^tNearestList;
- begin
- p:=@self;
- c:=self.next;
- while assigned(c) do begin
-  if c^.data^.hopcount>n^.hopcount then break;
-  p:=c;
-  c:=c^.next;
- end;
- new(e,init);
- e^.next:=c;
- e^.prev:=p;
- p^.next:=e;
- if assigned(c) then c^.prev:=e;
- e^.data:=n;
- result:=e;
-end;
- 
-destructor tNearestList.Unlink;
- begin
- if assigned(next) then next^.prev:=prev;
- prev^.next:=next;
- prev:=nil; next:=nil;
-end;
+end;}
 
 procedure tNeighbTable.DelByAddr( const addr:netaddr.t );
  var i:byte;
  var deleted:word;
- var pbuck,buck:^tBucket;
- var nn:^tNeighbNode;
+ var pnn,nn:^tNeighbNode;
  begin
  deleted:=0;
- for i:=low(data) to high(data) do begin
-  pbuck:=nil;
-  buck:=data[i];
-  while assigned(buck) do begin
-   nn:=buck^.data;
-   {FIXME!}
-   while assigned(nn) do begin
-    if nn^.addr=addr then begin
-     dispose(nn^.IdxNearest,Unlink);nn^.IdxNearest:=nil;
-     if assigned(nn^.prev) then begin
-      {just remove the record}
-      nn^.prev^.next:=nn^.next;
-      if assigned(nn^.next) then nn^.next^.prev:=pnn;
-      dispose(nn);nn:=nil;
-     end else begin
-      {remove the whole bucket}
-      if assigned(nn^.next) then nn^.next^.prev:=nil;
-      dispose(nn);nn:=nil;
-      if assigned(pbuck) then pbuck^.next:=buck^.next else data[i]:=buck^.next;
-      dispose(buck);buck:=data[i];
-     end;
-     inc(deleted);
-    end;
+ for i:=low(slots) to high(slots) do begin
+  pnn:=nil;
+  nn:=slots[i];
+  while assigned(nn) do begin
+   if nn^.addr=addr then begin
+    log.debug('Neighb: del route to '+string(nn^.pid)+' via '+string(nn^.addr)+' +'+inttostr(nn^.hopcount));
+    if assigned(pnn) then pnn^.next:=nn else slots[i]:=nn^.next;
+    nn:=nn^.next;
+    (*pnn:=pnn;*)
+    inc(deleted);
    end else begin
-    pbuck:=buck;
-    buck:=buck^.next;
+    pnn:=nn;
+    nn:=nn^.next;
    end;
   end;
  end;
@@ -275,13 +210,14 @@ procedure tInfo.GoAddr(aaddr: netaddr.t);
 procedure tInfo.GoPID(apid:tPID);
  var pi:tPID;
  begin
- pid.Clear;
+ pid:=apid;
  hop:=0;
  addr.clear;
  hti:=0;
- htb:=nil;
- neighbnode:=ByID.Search(apid);
- nearestnode:=nil;
+ nn:=Table.slots[0];
+ maxhc:=65535;
+ bypid:=true;
+ byaddr:=false;
 end;
 
 procedure tInfo.GoNearest;
@@ -290,30 +226,20 @@ procedure tInfo.GoNearest;
  hop:=0;
  addr.clear;
  hti:=0;
- htb:=nil;
- neighbnode:=nil;
- nearestnode:=ByID.Nearest.Next;
+ nn:=Table.slots[0];
+ maxhc:=1;
+ bypid:=false;
+ byaddr:=false;
 end;
 
 function tInfo.Next:boolean;
  begin
- if assigned(neighbnode) then begin
-  pid:=tNeighbRecord_ptr(neighbnode)^.pid;
-  hop:=tNeighbRecord_ptr(neighbnode)^.hopcount;
-  addr:=tNeighbRecord_ptr(neighbnode)^.addr;
-  neighbnode:=tNeighbNode_ptr(neighbnode)^.next;
-  Next:=true;
- end else if assigned(nearestnode) then begin
-  pid:=tNearestList_ptr(nearestnode)^.data^.pid;
-  hop:=tNearestList_ptr(nearestnode)^.data^.hopcount;
-  addr:=tNearestList_ptr(nearestnode)^.data^.addr;
-  nearestnode:=tNearestList_ptr(nearestnode)^.Next;
-  Next:=true;
- end {else if hti>0 then begin
-  if assigned(htb) then
-   inc(hti);
-   htb:=?;
- end} else Next:=false;
+ result:=false;
+ while not assigned(nn) do begin
+  inc(hti); if hti>high(Table.slots) then exit;
+  nn:=Table.slots[hti];
+ end;
+ Next:=false;
 end;
 
 procedure tInfo.PeerInfo(out info:Peers.tInfo);
@@ -329,15 +255,16 @@ procedure NotifyPeerState( event: byte; info:Peers.tInfo );
   begin
   slot:=low(UnAcked); while (slot<=high(UnAcked)) and assigned(UnAcked[slot]) do inc(slot);
  end;
- var NI:^tNearestList;
  var Sent:word;
+ var inf:tInfo;
  begin
  case event of
   1{new}: begin
    log.debug('Send neighb nodes');
-   ni:=ByID.Nearest.Next;
+   inf.GoNearest;
+   ni:=Table.Nearest.Next;
    sent:=0;
-   while assigned(ni) and (sent<cPropagateCount) and (ni^.data^.hopcount<=cPropagateTTL) do begin
+   while assigned(ni) and (sent<cPropagateCount) and (ni^.slots^.hopcount<=cPropagateTTL) do begin
     GetSlot;
     New( UnAcked[Slot] );
     with UnAcked[Slot]^ do begin
@@ -351,7 +278,7 @@ procedure NotifyPeerState( event: byte; info:Peers.tInfo );
     ni:=ni^.next;
    end;
   end;
-  2{deleted}: ByID.DelByAddr(info.addr);
+  2{deleted}: Table.DelByAddr(info.addr);
   0{ping}:{do nothing};
  end;
 end;
@@ -384,7 +311,7 @@ procedure tNeighb.Handle( const from: NetAddr.t);
  nr.addr:=from;
  nr.hopcount:=word(hop)+1;
  nr.pid:=pid;
- ByID.Insert(nr);
+ Table.Insert(nr);
  ack.Create(self);
  ack.Send(from);
 end;
@@ -432,7 +359,7 @@ procedure INIT;
  var i:word;
  begin;
  for i:=low(UnAcked) to high(UnAcked) do UnAcked[i]:=nil;
- ByID.Init;
+ Table.Init;
 end;
 
 procedure AddPerson(const person:tPID);
@@ -442,7 +369,7 @@ procedure AddPerson(const person:tPID);
  nr.addr.Clear;
  nr.hopcount:=0;
  nr.pid:=person;
- ByID.Insert(nr);
+ Table.Insert(nr);
 end;
 
 INITIALIZATION
