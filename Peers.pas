@@ -54,6 +54,7 @@ type tInfo= record
   Since: tDateTime;
  end;
 procedure Get( out info:tInfo; const addr:netaddr.t ); overload;
+procedure Get( out info:tInfo; var p:pointer ); overload;
 procedure Add( addr :NetAddr.T );
 {procedure GetList; unimplemented;}
  
@@ -298,6 +299,15 @@ procedure Get( out info:tInfo; const addr:netaddr.t);
  info.addr:=peer.addr;
  info.delta:=peer.delta;
  info.since:=peer.since;
+end;
+
+procedure Get( out info:tInfo; var p:pointer ); overload;
+ begin
+ if not assigned(p) then p:=PeerList.Next else p:=tPeersList(p).Next;
+ if p=pointer(PeerList) then begin p:=nil; exit; end;
+ info.addr:=tPeersList(p).addr;
+ info.delta:=tPeersList(p).delta;
+ info.since:=tPeersList(p).since;
 end;
 
 { *** Saving And Loading *** }
