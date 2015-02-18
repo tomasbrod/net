@@ -182,16 +182,18 @@ end;
 procedure tDaemonController.CmdGetNeighbPID;
  var n:tNeighbInfo;
  var i:pointer=nil;
+ var wo:word;
  var pid:Neighb.tPID;
  begin
  io.ReadBuffer(pid,sizeof(pid));
  n.pid:=pid;
- n.hop:=65535;
- Neighb.GetRoute(pid,n.addr,i);
+ Neighb.GetRoute(pid,n.addr,wo,i);
+ n.hop:=wo;
  while assigned(i) do begin
   io.WriteByte(ceNeighbs);
   io.WriteBuffer(n,sizeof(n));
-  Neighb.GetRoute(pid,n.addr,i);
+  Neighb.GetRoute(pid,n.addr,wo,i);
+  n.hop:=wo;
  end;
  io.WriteByte(ceNeighbsEnd);
 end;

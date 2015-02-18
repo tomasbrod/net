@@ -40,6 +40,7 @@ procedure NotifyIdle;
 procedure AddPerson(const person:tPID);
 
 procedure GetRoute(const dst:tPID; out via:netaddr.t; var cur:pointer);
+procedure GetRoute(const dst:tPID; out via:netaddr.t; out hop:word; var cur:pointer);
 function GetRoute(const dst:tPID; out via:netaddr.t):boolean;
 
 const cNeighb=7;
@@ -271,12 +272,19 @@ function tInfo.Next:boolean;
 end;
 
 procedure GetRoute(const dst:tPID; out via:netaddr.t; var cur:pointer);
+ var dud:word;
+ begin
+ GetRoute(dst,via,dud,cur);
+end;
+
+procedure GetRoute(const dst:tPID; out via:netaddr.t; out hop:word; var cur:pointer);
  begin
  via.Clear;
  if cur=nil then cur:=Table.slots[LongWord(dst) and high(Table.slots)] else cur:=tNeighbNode(cur^).next;
  if cur=nil then exit;
  while assigned(cur)and(tNeighbNode(cur^).pid<>dst) do cur:=tNeighbNode(cur^).next;
  via:=tNeighbNode(cur^).addr;
+ hop:=tNeighbNode(cur^).hop;
 end;
 
 function GetRoute(const dst:tPID; out via:netaddr.t):boolean;

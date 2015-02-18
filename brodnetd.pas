@@ -23,7 +23,7 @@ USES SysUtils
 
 var Log: tEventLog;
 
-const cRecvWait=5000{ms};
+const cRecvWait=3000{ms};
 const cWarnTime=3/MsecsPerDay;
 const cForceRest=6000/MSecsPerDay;
 

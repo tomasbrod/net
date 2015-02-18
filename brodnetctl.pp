@@ -13,6 +13,7 @@ USES CustApp
 	,CtrlIface
 	,Keys
 	,Transfer
+	,Neighb
 	;
 
 type tApp=class(tCustomApplication)
@@ -110,12 +111,19 @@ procedure tApp.EvCommand(command:AnsiString);
    Sock.WriteBuffer(fid,sizeof(fid));
   end;
  end;
- procedure CmdFID(cmd:byte); unimplemented;
+ procedure CmdFID(cmd:byte);
   var fid:Transfer.tFID;
   begin
   fid.FromString(par);
   SendCommand(cmd);
   Sock.WriteBuffer(fid,sizeof(fid));
+ end;
+ procedure CmdPID(cmd:byte);
+  var pid:Neighb.tPID;
+  begin
+  pid.FromString(par);
+  SendCommand(cmd);
+  Sock.WriteBuffer(pid,sizeof(pid));
  end;
  var sp:word;
  begin
@@ -132,6 +140,9 @@ procedure tApp.EvCommand(command:AnsiString);
   'TransAbort': CmdFID(ccTransferAbort);
   'TransProgr': CmdFID(ccTransferProgress);
   'TransList': SendCommand(ccTransferListAll);
+  'NeighbList': SendCommand(ccGetNeighb);
+  'Route','NeighbPID': CmdPID(ccGetNeighbPid);
+  //'NeighbAddr': CmdAddr(ccGetNeighbAddr);
   else writeln('Invalid command');
  end;
 end;
@@ -157,6 +168,17 @@ procedure tApp.EvEvent(event:byte);
   begin
   Sock.ReadBuffer(fid,sizeof(fid));
   write(string(fid));
+ end;
+ procedure ReceiveNeighbs;
+  var i:tNeighbInfo;
+  var a:byte;
+  begin
+  writeln('Neighbours:');
+  repeat
+   Sock.ReadBuffer(i,sizeof(i));
+   writeln(String(i.pid)+' via '+String(i.addr)+' +'+IntToStr(word(i.hop)));
+   a:=Sock.ReadByte;
+  until (a=ceNeighbsEnd)or(a<>ceNeighbs);
  end;
  begin
  case event of
@@ -190,6 +212,8 @@ procedure tApp.EvEvent(event:byte);
    Sock.ReadBuffer(tm4,4);
    write('/',longword(tm4),'b');
   end;
+  ceNeighbs: ReceiveNeighbs;
+  ceNeighbsEnd: write('No matching neighb records');
   255: begin write('Disconnected!'); Terminate; end;
   else write('?'+IntToStr(event));
  end;
