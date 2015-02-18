@@ -84,21 +84,26 @@ TYPE {--Packets--}
  end unimplemented;
 
 type tDataFile=file of byte;
+type tBy=0..31;
+type tBys=set of tBy;
 
-var OnRecv  :procedure( id :tFID; by :byte );
-var OnProgress :procedure( id :tFID; done,total:longword; by: byte );
+var OnRecv  :procedure( id :tFID; by :tBys );
+var OnProgress :procedure( id :tFID; done,total:longword; by: tBys );
 
 procedure SendFile( id: tFID );
  experimental; deprecated {all files must be requested};
 
 procedure RequestFile( const source :netaddr.t; id :tFID );
  experimental;
-procedure RequestFile( const src :netaddr.t; id :tFID; by: byte );
+procedure RequestFile( const src :netaddr.t; id :tFID; by: tBy );
 
 procedure RecvFileAbort( id :tFID );
  unimplemented;
 
-var OnNoSrc :procedure( id :tFID; by :byte );
+procedure Query( id :tFID; out done,total:longword );
+ experimental;
+
+var OnNoSrc :procedure( id :tFID; by :tBys );
  {To update source, call RequestFile with valid source address.}
 
 procedure DoRetry;
@@ -117,7 +122,7 @@ type tSuspendedTransfer=object
  completed  :longword; {also marks the next chunk to be requested}
                        { should be in tTransfer, becouse is computed from filesize...}
  total      :longword;
- by         :byte;
+ by         :tBys;
  InfoReceived:Boolean;
  end;
 
@@ -163,7 +168,7 @@ end;
 procedure RequestFile( const source :netaddr.t; id :tFID ); inline;
  begin RequestFile(source, id, 0 ); end;
 
-procedure RequestFile( const src :netaddr.t; id :tFID; by: byte );
+procedure RequestFile( const src :netaddr.t; id :tFID; by: tBy );
  var i:word;
  procedure Create;
   begin
@@ -189,6 +194,7 @@ procedure RequestFile( const src :netaddr.t; id :tFID; by: byte );
  begin
  try
   i:=TransferByFID(id);
+  Include(TransferList[i]^.by,by);
   log.error('Try to add duplicate transfer by '+inttostr(by));
   exit;
   AbstractError;
@@ -230,10 +236,26 @@ end;
 procedure RecvFileAbort( id :tFID );
  var i:word;
  begin
- i:=TransferByFID(id);
+ try
+  i:=TransferByFID(id);
+ except exit; end;
  with TransferList[i]^ do begin
   Done;
  end;
+end;
+
+procedure Query( id :tFID; out done,total:longword );
+ var i:word;
+ begin
+ try
+  i:=TransferByFID(id);
+  done:=TransferList[i]^.completed;
+  total:=TransferList[i]^.total;
+ except on eSearch do begin
+  {todo: check for downloaded file and get size}
+  done:=0;
+  total:=0;
+ end; end;
 end;
 
 procedure tInfo.Handle( const from: NetAddr.t);

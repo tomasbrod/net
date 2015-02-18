@@ -138,7 +138,7 @@ procedure tApp.EvCommand(command:AnsiString);
   'TransReq': CmdTransferRequestProgress(true);
   'TransReqq': CmdTransferRequestProgress(false);
   'TransAbort': CmdFID(ccTransferAbort);
-  'TransProgr': CmdFID(ccTransferProgress);
+  'TransStat': CmdFID(ccTransferProgress);
   'TransList': SendCommand(ccTransferListAll);
   'NeighbList': SendCommand(ccGetNeighb);
   'Route','NeighbPID': CmdPID(ccGetNeighbPid);

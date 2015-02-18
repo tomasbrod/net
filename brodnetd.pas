@@ -52,7 +52,7 @@ procedure PeerStateHook( event: byte; info:Peers.tInfo );
  Neighb.NotifyPeerState(event,info);
 end;
 
-procedure TransferProgressHook( id :tFID; done,total:longword; by: byte );
+procedure TransferProgressHook( id :tFID; done,total:longword; by: tBys );
  begin
  log.Info('Transfer state change: fid='+string(id)+' done='+IntToSTr(done)+' total='+IntToStr(total));
  Controll.NotifyTransfer(id,done,total,by);

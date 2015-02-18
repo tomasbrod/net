@@ -23,13 +23,13 @@ procedure Receive(const FDS : BaseUnix.tFDSet);
 
 {hooks for hooks in daemon}
 procedure NotifyPeerStateChange( event: byte; info:Peers.tInfo );
-procedure NotifyTransfer( id :tFID; done,total:longword; by: byte );
+procedure NotifyTransfer( id :tFID; done,total:longword; by: tBys );
 procedure NotifyQuit( unexcepted:boolean );
 procedure NotifyNeighbState( pid:tPID; addr:netaddr.t; hop:word );
 
 var Log:tEventLog;
 var OnTerminateRequest:procedure;
-const cTransferBy=82;
+const cTransferBy:Transfer.tBy=24;
 
 type eFull=class(Exception) end;
 
@@ -61,8 +61,9 @@ type tDaemonController=class (tObject)
   procedure CmdAddPeer;
   procedure NotifyQuit( unexcepted:boolean );
   procedure CmdInvalid;
-  procedure NotifyTransfer( id :tFID; done,total:longword; by: byte );
+  procedure NotifyTransfer( id :tFID; done,total:longword; by: tBys );
   procedure CmdRequestTransfer;
+  procedure CmdQueryTransfer(op:byte);
   procedure NotifyNeighb( pid:Neighb.tPID; addr: netaddr.t; hopcount: word );
   procedure CmdGetNeighb;
   procedure CmdGetNeighbPID;
@@ -83,6 +84,8 @@ procedure tDaemonController.Run;
   ccQuit: Finished:=true;
   ccAddPeer:CmdAddPeer;
   ccTransferRequest:CmdRequestTransfer;
+  ccTransferProgress:CmdQueryTransfer(0);
+  ccTransferAbort:CmdQueryTransfer(1);
   ccGetNeighb:CmdGetNeighb;
   ccGetNeighbPID:CmdGetNeighbPID;
   //ccGetNeighbAddr:CmdGetNeighbAddr;
@@ -130,9 +133,10 @@ procedure tDaemonController.NotifyQuit( unexcepted:boolean );
 end;
 
 {Transfer controll}
-procedure tDaemonController.NotifyTransfer( id :tFID; done,total:longword; by: byte );
+procedure tDaemonController.NotifyTransfer( id :tFID; done,total:longword; by: tBys );
  var w:netaddr.word4;
  begin
+ if not (cTransferBy in by) then exit;
  io.WriteByte(ceTransfer);
  io.WriteBuffer(id,sizeof(id));
  w:=done; io.WriteBuffer(w,4);
@@ -146,6 +150,19 @@ procedure tDaemonController.CmdRequestTransfer;
  io.ReadBuffer(a,sizeof(a));
  io.ReadBuffer(addr,sizeof(addr));
  Transfer.RequestFile( addr, a, cTransferBy );
+end;
+procedure tDaemonController.CmdQueryTransfer(op:byte);
+ var done,total:longword;
+ var fid:Transfer.tFID;
+ begin
+ io.ReadBuffer(fid,sizeof(fid));
+ case op of
+  0: begin
+   Transfer.Query(fid,done,total);
+   NotifyTransfer(fid,done,total,[cTransferBy]);
+   end;
+  1: Transfer.RecvFileAbort(fid);
+ end;
 end;
 
 procedure tDaemonController.NotifyNeighb( pid:Neighb.tPID; addr: netaddr.t; hopcount: word );
@@ -267,7 +284,7 @@ procedure NotifyQuit( unexcepted:boolean );
  end;
 end;
 
-procedure NotifyTransfer( id :tFID; done,total:longword; by: byte );
+procedure NotifyTransfer( id :tFID; done,total:longword; by: tBys );
  var i:word;
  begin
  for i:=1 to high(Clients) do if assigned(Clients[i]) then Clients[i].NotifyTransfer(id,done,total,by);
