@@ -162,74 +162,8 @@ procedure Add( addr :NetAddr.T; peer:tPeersList ); forward;
 procedure tPacket.Handle( const from:netaddr.t );
  { do nothing }
  begin
- (*
- { addr shouldbe selected by Daemon }
- assert( not SelectedAddr.isNil );
- {Lookup sender ID from database}
- try
-  AkafukaDB.FindAddr( SelectedAddr );
- except
-  on DataBase.eSearch do raise eUnknownSender.Create(SelectedAddr);
-  on Exception do begin log.msg('While identifiing sender'); raise; end;
- end;
- {Initialize state}
- SelectedID:=AkafukaDB.ID;
- SelectedAddr:=AkafukaDB.Addr;
- SelectedDelta:=AkafukaDB.Delta;
- *)
  (*log.debug('Received #'+IntToStr(pktype)+' From '+String(from));*)
 end;
-
-{****************************************
- *********** Last Packet time *********** 
- ****************************************}
-
-(*
-const cLastField :DataBase.tField = 'last';
-
-type tLastAccessor=object(DataBase.tFieldAccessor)
- constructor Init( id: tID );
- procedure Store( const pktype :tPkType; const Time: System.tTime );
- procedure Load( pktype :tPkType; out Time: System.tTime );
-end;
-
-constructor tLastAccessor.Init( id: tID );
- var row: tRow;
- begin
- id.ToString(row);
- inherited Init( sizeof(System.tDateTime), cTable, row, cLastField );
-end;
-
-procedure tLastAccessor.Store( const pktype :tPkType; const Time: System.tTime );
- begin
- OverWrite( pktype, Time );
-end;
- 
-procedure tLastAccessor.Load( pktype :tPkType; out Time: System.tTime );
- begin
- try
-  Read( Time, pktype );
- except
-  on eRangeError do Time:=0;
- end;
-end;
-
-function tPacket.TimeSince: System.tTime;
-begin
- db.Init( Sender );
- try
-  db.Load( pktype, cur );
-  result := now - cur;
- finally
-  db.Done;
- end;
- result := high(tTime);
-end;
-
-procedure tPacket.ResetTimeSince;
- begin
-end;
- *)
 
 {*********************************
  *********** Akafuka   ***********
@@ -241,34 +175,6 @@ procedure tAkafuka.Send( const rcpt: NetAddr.t);
  (*log.debug('Sending Akafuka to '+string(rcpt));*)
  inherited Send( rcpt, sizeof(SELF) );
 end;
-
-(*
-procedure SaveReportedAddr( const Addr: NetAddr.t );
- var oldrecno:integer;
- begin
- log.msg('Sender reported our address to be '+String(Addr));
- OldRecNo:=AkafukaDB.RecNo;
- try
-  try
-   AkafukaDB.FindAddr(Addr);
-   //if AkafukaDB.ID<>ThisID then raise eInvalidInsert.Create('Attempt to assingn same address to multiple peers');
-   AkafukaDB.ID:=ThisID;
-   AkafukaDB.Edit;
-  except on DataBase.eSearch do begin
-   AkafukaDB.Append;
-   AkafukaDB.Addr:=Addr;
-   AkafukaDB.ID:=ThisID;
-   AkafukaDB.Delta:=cAkafukaUnknown;
-   AkafukaDB.Retry:=0;
-  end; on Exception do begin log.msg('While saving reported address'); raise;
-  end; end;
-  AkafukaDB.Since:=Now;
-  AkafukaDB.Post;
- finally
-  AkafukaDB.RecNo:=OldRecNo;
- end;
-end;
-*)
 
 procedure DispatchStateEvent(new,deleted:boolean; peer:tPeersList);
  var event:byte;
@@ -455,14 +361,6 @@ begin
  (*log.debug('Sending '+cFundelukaN+' to '+string(rcpt));*)
  inherited Send( rcpt, sizeof(SELF) );
 end;
-
-{
-procedure NetAddr.T.Selected;
-begin
- if (not IsSelectedAddr) then raise eInvalidInsert.Create('Not selected');
- self:=SelectedAddr;
-end;
-}
 
 procedure tPacket.Create ( const itp :tPktype );
  begin
