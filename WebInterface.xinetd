@@ -1,0 +1,12 @@
+service BrodNetWebInterface
+{
+       type                = UNLISTED
+       socket_type         = stream
+       protocol            = tcp
+       wait                = no
+       server              = /home/tomas/project/brdnet/WebInterface
+       server_args         = -s
+       env                 = BRODNETWEB_DATA=/home/tomas/project/brdnet/assets/
+       port                = 1033
+       user                = tomas
+}
