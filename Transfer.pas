@@ -22,7 +22,7 @@ const cChunkLength=512{b}; {should not be changed}
 const cMaxChunksPerRequest=16; {limit to chunks that we serve for single request}
 const cChunksPerRequest=6;     {limit to chunks that we request in single request}
 const cRetryPeriod = 2000{ms} /MSecsPerDay; {if reply not arrive under this, we send another request}
-const cMaxDelta = Peers.cMaxDelta {10/MinutesPerDay}; {if nothing is received under this, transfer is aborted}
+const cMaxDelta = 30 /SecsPerDay; {if nothing is received under this, transfer is aborted}
 const cTimeWait = 5000 /MSecsPerDay;
 
 CONST
@@ -459,16 +459,16 @@ procedure tTransfer.DoRun;
   req.Send(source);
   Save(self);
  end else
- if not InfoReceived then begin
-  log.debug('Re-requesting info');
-  req.Create( fid, trid, 0, 0 );
-  req.Send(source);
- end else
  if (now-last)>cMaxDelta then begin
   log.debug('Timeout => suspend');
   Save(self);
   Timeouted:=true;
   Done;
+ end else
+ if not InfoReceived then begin
+  log.debug('Re-requesting info');
+  req.Create( fid, trid, 0, 0 );
+  req.Send(source);
  end else
  if (now-last)>cRetryPeriod then begin
   log.debug('Retry pending ');
