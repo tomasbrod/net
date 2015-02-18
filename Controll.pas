@@ -168,7 +168,7 @@ procedure tDaemonController.CmdGetNeighb;
  var n:tNeighbInfo;
  var i:Neighb.tInfo;
  begin
- i.GoNearest;
+ i.Init(65535);
  while i.Next do begin
   n.pid:=i.pid;
   n.addr:=i.addr;
@@ -176,24 +176,24 @@ procedure tDaemonController.CmdGetNeighb;
   io.WriteByte(ceNeighbs);
   io.WriteBuffer(n,sizeof(n));
  end;
- io.WriteByte(0);
+ io.WriteByte(ceNeighbsEnd);
 end;
 
 procedure tDaemonController.CmdGetNeighbPID;
  var n:tNeighbInfo;
- var i:Neighb.tInfo;
+ var i:pointer=nil;
  var pid:Neighb.tPID;
  begin
  io.ReadBuffer(pid,sizeof(pid));
- i.GoPID(pid);
- while i.Next do begin
-  n.pid:=i.pid;
-  n.addr:=i.addr;
-  n.hop:=i.hop;
+ n.pid:=pid;
+ n.hop:=65535;
+ Neighb.GetRoute(pid,n.addr,i);
+ while assigned(i) do begin
   io.WriteByte(ceNeighbs);
   io.WriteBuffer(n,sizeof(n));
+  Neighb.GetRoute(pid,n.addr,i);
  end;
- io.WriteByte(0);
+ io.WriteByte(ceNeighbsEnd);
 end;
 
 constructor tDaemonController.Create(asocket:tStream; from:NetAddr.t);

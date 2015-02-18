@@ -85,7 +85,6 @@ begin
   Transfer.cInfo: Transfer.tInfo(p^).Handle(from);
   Transfer.cData: Transfer.tData(p^).Handle(from,len);
   Neighb.cNeighb: Neighb.tNeighb(p^).handle(from);
-  Neighb.cNeighbAck: Neighb.tNeighbAck(p^).handle(from);
   else begin
    log.error('Received Unknown #'+IntToStr(Pk.pktype)+' ('+IntToStr(SizeOf(Pk))+'B) From '+addrstr);
    Abort;

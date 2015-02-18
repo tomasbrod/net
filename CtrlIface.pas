@@ -15,9 +15,9 @@ const
  ccTransferProgress=21; { ID }
  ccTransferListAll=22;
  {neighbours}
- ccGetNeighb=15;        {          >#Neighbs}
- ccGetNeighbPID=16;     {key       >#Neighbs}
- ccGetNeighbAddr=17;    {netaddr   >#Neighbs}
+ ccGetNeighb=15;        {          >[#Neighbs]}
+ ccGetNeighbPID=16;     {key       >[#Neighbs]}
+ ccGetNeighbAddr=17;    {netaddr   >[#Neighbs]}
  {
  cc=;
  }
@@ -30,7 +30,8 @@ const
  {transfer}
  ceTransfer=20; { ID, done, total }
  {neighbours}
- ceNeighbs=17; { [tNeighbInfo], byte(0) }
+ ceNeighbs=17; { tNeighbInfo }
+ ceNeighbsEnd=18;
  ceNeighbState=18; { tNeighbInfo }
 type
  tNeighbInfo=record
