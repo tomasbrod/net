@@ -4,10 +4,9 @@ UNIT Transfer;
  To send and recieve CHK files over brodnet.
  Also to assemble pieced and parted files.
  
- TODO: dispose parts completly, tData should have complete index!
-       - we request 4 chunks, reply will be delayed, we request the chunks 
-       again, reply will come, we request another chunk but reply to prev 
-       will come, corrupting the transfer.
+ TODO: Do not save and load from statefile too often. Use different 
+ filename for incomplete files. Trunctate the incomplete file when a 
+ download is started (and not running already), to be sure.
  
 }
 
@@ -141,6 +140,7 @@ type tTransfer=object(tSuspendedTransfer)
  last       :tDateTime;
  Terminated :boolean;
  Timeouted  :boolean;
+ saved      :boolean;
  procedure DoRun;
  procedure HandleInf(count:longword);
  procedure HandleDat(part:longword; var PayLoad; length:longword );
@@ -151,6 +151,7 @@ type tTransfer=object(tSuspendedTransfer)
  end;
 
 const cMaxTransfers=32;
+const cPartExt:string[5]='.part';
 var TransferList:array [1..cMaxTransfers] of ^tTransfer;
 
 function TransferByFID(ifid:tFID):word; forward;
@@ -210,11 +211,17 @@ procedure RequestFile( const src :netaddr.t; id :tFID; by: tBy );
      by         :=by;
      InfoReceived:=false;
      {check for presence of downloaded}
-     DataBase.dbAssign(storage,'chk'+DirectorySeparator+string(id)); reset(storage); try
+     DataBase.dbAssign(storage,'chk'+DirectorySeparator+string(id)); reset(storage);
      if FileSize(storage)>0 then begin
       log.info('File already downloaded');
       InfoReceived:=true; Total:=(FileSize(storage) div cChunkLength)+1; Completed:=Total;
-     end; finally close(storage); end;
+      Terminated :=false;
+      timeouted  :=false;
+      trid       :=i;
+      saved:=false;
+      exit;
+      {OMFG FIXME This is so ugly as fuck!}
+     end else close(storage);
     end;
    end;
   end;
@@ -227,7 +234,8 @@ procedure RequestFile( const src :netaddr.t; id :tFID; by: tBy );
   Terminated :=false;
   timeouted  :=false;
   trid       :=i;
-  DataBase.dbAssign(storage,'chk'+DirectorySeparator+string(id)); reset(storage);
+  saved:=false;
+  DataBase.dbAssign(storage,'chk'+DirectorySeparator+string(id)+cPartExt); reset(storage);
   log.debug('Transfer '+IntToStr(trid)+' set source='+string(source)+' fid='+string(fid));
   DoRun; {TEST}
  end;
@@ -301,7 +309,7 @@ end;
 procedure tTransfer.Done;
  begin
  SetPending(0,0);
- Close(storage);
+ try Close(storage); except end;
  Terminated:=true;
 end;
 
@@ -325,6 +333,7 @@ procedure UnSave( const fid: tFID );
  var f:file of tSuspendedTransfer;
  var Tr:tSuspendedTransfer;
  begin
+ log.debug('unsave');
  DataBase.dbAssign(f,'transfer.dat'); reset(f);
  try 
   while not eof(f) do begin
@@ -350,7 +359,7 @@ procedure tTransfer.HandleInf(count:longword);
   total:=count;
   InfoReceived:=true;
   log.debug(string(fid)+' info received, total='+IntToStr(total));
-  Save(self);
+  //Save(self);
   DispatchEvent;
  end else log.error('protocol desync: info received in invalid state for '+string(fid));
 end;
@@ -449,7 +458,9 @@ procedure tTransfer.DoRun;
  begin
  if (completed=total)and(InfoReceived) then begin
   if Verify then begin
-   UnSave(fid);
+   Close(Storage);
+   Rename(storage,DataBase.Prefix+DirectorySeparator+'chk'+DirectorySeparator+string(fid));
+   if saved then UnSave(fid);
    Done; end;
  end else
  if pending=[] then begin
@@ -457,11 +468,11 @@ procedure tTransfer.DoRun;
   req.Create( fid, trid, completed, cChunksPerRequest );
   SetPending( 0, cChunksPerRequest ); received:=0;
   req.Send(source);
-  Save(self);
+  //Save(self);
  end else
  if (now-last)>cMaxDelta then begin
   log.debug('Timeout => suspend');
-  Save(self);
+  Save(self); saved:=true;
   Timeouted:=true;
   Done;
  end else
@@ -481,10 +492,10 @@ procedure tTransfer.DoRun;
    req.Create( fid, trid, completed+i, rqc );
    req.Send(source);
   end;
-  Save(self);
+  Save(self); saved:=true;
  end else begin
   log.debug('nothing special');
-  Save(self);
+  Save(self); saved:=true;
  end;
  DispatchEvent;
 end;
