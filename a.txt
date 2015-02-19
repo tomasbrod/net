@@ -21,16 +21,18 @@ The source code is divided into following units.
  File       | Description 
 -----------:|-------------
 [Peers]		| Client evidence. Akafukas.
+[Neighb] 	| Evidence of neighbours and hop-based routing.
 [Share]		| Searching. Delivery of results.
 [Tag]		| Tags hashing. Tags of files and peers. Matching tags.
 [Transfer]	| CHK file transfer.
 [DataBase]	| Generic 4-dimensional file database.
 [NetAddr]	| Network address abstraction.
 [Keys]		| Cryptographic operations and data structures.
-[Log]		| Centralized logging.
 [Test]		| Unit Tests.
-[bncommon]	| Routines shared between both programs.
-[bnd]		| The Daemon.
+[brodnetd] 	| The Daemon.
+[Controll] 	| Controll interface and controll command processing.
+[brodnetctl] 	| Command-line interface to daemon.
+[WebInterface] 	| Web-based interface to daemon.
 [bnctl]		| Managment tool.
 
 [Peers]: Peers.pas
@@ -49,46 +51,58 @@ The source code is divided into following units.
 Daemons and Services
 --------------------
 
-Xinetd is going to listen for all connections. Including connections to web 
-interface. For protocols incompatible with xinetd, new network daemon is 
-going to be written.
+Main daemon is always resident in memory, and listens for connections from 
+other peers as well as for connections to the controll interface. 
+Currently, multiple bind addresses, of both IPv4 and IPv6 protocol, are 
+supported. Currently only one listen address is supported for controll 
+interface.
 
-Daemon is started by netd with stdin/stdout connected to socket. A packet 
-is recieved (rcvmsg) from the socket and parsed. Depending on the type and 
-contents of the packet, approportiate action is taken. If reply should be 
-sent, new datagram socket is created and the socaddr is used as 
-destination. Then the daemon listens for another packet with configurable 
-timeout. If no packet was received in time, daemon exits. And netd listens 
-again.
+Daemon is running in a infinite loop. There is a Select system call, to 
+wait for data on lisenning sockets. Timeout is configured for the select 
+call and if nothing arrives in the time, tasks sheduled for idle time are 
+run. When data is available on one of the sockets, it is processed and 
+acted uppon.
 
-There can be possibly multiple instances of brodnetd running, so 
-approportiate database locking should be implemented.
-And is still not.
+### BrodnetCtrl
 
-### BnCtl
+Local node can be controlled by brodnetctl program. This program is 
+interactive, it connects to daemon and waits for user input or event from 
+daemon. All events are printed to output in sqare brackets. If nothing 
+happens in 5 seconds a single dot is written to output. This program takes 
+one optional argument:
 
-Local node can be controlled by bnctl program.
+	Usage: brodnetctl [-s <address>] [--daemon-address=<address>]
 
-Usage: bnctl [%1] [%2] [%3] [-stderr] [%switches%]
+	-s <addr> --daemon-address=<addr> : Specify an TCP/IP address of daemon controll interface to connect to.
 
-switch| meaning   | %1 | %2 | %3
-------|-----------|----|----|----
--p	| Peer controll
--pa	| add	| netaddr
--pi	| info	| id
--pl	| list
--pakafuka	| do Akafuka now
+Availeble commands in the program are:
+
+command | descr | %1 | %2
+--------|-------|----|----
+(empty)	| Stop receiving events and wait only for user input.
+q       | Disconnect and exit.
+stop    | Terminate the daemon.
+(peer)states | Toggle receiving various events. Disabled by default.
+TransReq	| Manual request to download a CHK. | FID (SHA-1) | Address ofpeer
+TransAbort	| Cancel the transfer. | FID
+TransStat	| Get status of a transfer. | FID
+TransList	| List all incoming transfers.
+NeighbList	| List all neighbours.
+Route		| List all routes to a node. | PID
+addpeer | Connect to peer. | address
 
 impl| netaddr syntax	| meaning
 ----|-----------------|--------
 yes	| //ip4/127.0.0.1/32					| IP4, port 32 UDP
-no	| //ip6/2001:0db8:85a3:0000:0000:8a2e:0370:7334/32	| IP6, port 32 UDP
+yes	| //ip6/2001:0db8:85a3:0000:0000:8a2e:0370:7334/32	| IP6, port 32 UDP
 no	| //bluetooth/00:10:C6:F7:5B:AC/l2cap/4567	| bluetooth
-no	| //char/dev/ttyS0							| character device
-no	| //local/tmp/foobar						| unix domain socket
+no	| /dev/ttyS0							| character device
+no	| /tmp/foobar							| unix domain socket
 
 Discovery
 ---------
+
+Unimplemeted.
 
 The node finds its peers using local area node discovery (LAND). It is 
 performed by sending Akafuka packet to all devices in range of all network 
@@ -107,25 +121,11 @@ Greetings (Akafuka Fundeluka)
 Akafuka is used to find new peers (LAND) as well as to check 
 availability of peers (like PING).
 
-Akafuka (and Fundeluka, they are same) consist of:
+When a peer appears or disappears an event is sent to other parts of 
+daemon.
 
- - ID of Sender (20B)
- - Average load of the Sender (1B)
- - Socket Address of the Reciever (IPv4 12B, IPv6 24B)
-
-The purpose of the reciever's sockaddr filed
-is to inform nodes behind NAT of their external Address.
-This could be possibly used for STUN.
-It can be null, if unknown (eg: broadcast in LAND).
-
-### If node recieves an Akafuka
-
-- it adds the sender to list of peers. (Fundeluka too)
-
-- in cHelloCooldown{ms} since last Hello from the same peer,
-  no further actions are performed
-
-- it replies Fundeluka
+- Controll: send event on controll interface
+- Neighb: update and propagate neighbour database
 
 The names are reference to Dávid and his awesome Zidan Power.
  
@@ -164,24 +164,13 @@ listed there.
 Tags
 ----
 
+*unimplemented*
+
 Every file has tags.
 Even nodes have tags.
 Tags are used to find files. 
 
 But files have max of 200 tags (to not fragment search packets).
-
-Tags of a given object are stored in file tags.dat in the object's 
-directory. To speed up searching list of objects tagged by
-specific tag is stored in %db%.db/tag/%taghash%.dat.
-
-	files/
-	├── tag/
-	│   ├── BACABABA.dat
-	│   └── 1234FEDC.dat
-	├── CAFEBABE12345678/
-	│   └── tags.dat
-	└── 01234567ABCDEF00/
-	    └── tags.dat
 
 ### Searching
 
@@ -198,53 +187,15 @@ File Transfer
 [File Transfer][Transfer] is used to copy files or parts of files ower the 
 network. Files are identified by SHA1 hash of their contents.
 
-### Parts
-
-Filetransfer answer packets all contain sequence number of part and number 
-of total parts. The Transfer takes care of downloading all parts of the 
-file. When the whole data object is downloaded, its hash is checked. On 
-error, the data object is erased and download is started over again. There 
-shouldn't be errors, since parts are checked for integrity by 
-Transport layer (UDP). After the download is complete and the hash is matched, 
-other units are notified.
-
-To keep tracks on what parts were downloaded, a parts.dat field is stored 
-in files.db. Additionaly an entry to downloadlist.dat is added. Parts of 
-the same file must be downloaded from the same peer.
-
-### Pieces
-
-Files can be split to pieces. Multiple files can share the same pieces. One 
-data object is either File or list of pieces (Pieced file). Pieces are 
-normal files. A node tries to download all pieces of file. The lis of 
-pieces for Pieced file is downloaded in Parts (described in previous section).
-
-Pieced files can be reassembled on request (after the node has downloaded 
-all the pieces). Pieced files are identified by hash of the assembled file. 
-The hash can only be checked after all pieces of the file have been 
-downloaded. If the hashes do not match, only the Pieced file is erased and 
-downloaded again. The already downloaded pieces are left in the files.db.
-
-Pieced files have pieces.dat in the files.db instead of content.dat. And 
-files that are pieces of some Pieced file have ref.dat in files.db. The 
-pieces.dat filie is transfered split to parts the same way as parted file 
-and must be downloaded completly from one peer.
-
-In opposite to Parts, pieces of the same Pieced file can be downloaded from 
-multiple peers *at the same time*. Becouse pieces are just normal files.
+Files are split to 512B blocks. Usually 4 blocks are requested in a single 
+packet and up to 12 blocks perrequest is allowed. All data packets have a 
+transfer ID and part number. Transfer id is used instead of tFTD to save 
+traffic (1 vs 20 bytes). Transfer id is set in request. There is a info 
+packet sent along datapackets when first block is requested.
 
 There is a DoRetry routine that checks all files in progress and resends 
-requests if no reply had been received in Transfer.cRetryPeriod, to 
-accomodate for packet loss.
-
-### Communication
-
-File transfer is initaited by sending a Transfer.tGet packet to peer, who 
-should have the data object. The peer sends back either file contents in 
-Transfer.tDat or list of pieces in Transfer.tPcs (Pieced file) packet.
-
-If no reply is recieved (packet lost) in time, the tGet packet is sent 
-again.
+requests if no reply had been received in timeout, to accomodate for packet 
+loss. There is also a timeout, uppon exceding the transfer is aborted.
 
 The new approach
 ----------------
@@ -259,7 +210,11 @@ akafukaed individualy.
 State of filetransfers is stored in a linked list so that completed parts 
 could be unlinked fast. Uncompleted parts are (re)requested once in a 
 while, every time only fixed amoult of parts are requested, to not overload 
-network.
+network. The state is saved periodically to be able to restore the transfer.
+
+The state file is searched too often, this kills the boost of linked list. 
+FIXME. We should use sonething like chk.part filename to fix problems on 
+unfinished files treating as finidshed. Fix the error cases!
 
 Only data files are alloved to be pieced. Assembly of pieced files is 
 performed on higher level than transfer. Support for pieced files is 
@@ -272,22 +227,11 @@ There is a list of share offers waiting acknowledgement. Theese are
 retransmitted every once in a while. (Should also requests be 
 retransmitted?)
 
-Daemon Controll
-------------
-
-How commmands should be sent to daemon?
-
-1. Signal and file
-   - secure
-2. Unix domain socket
-   - Also secure
-3. Any connection-oriented socket
-   - Scalable
-   - Simple
-   - Have to stop main loop to handle connection.
-   - winner!
-4. tRemote packet over main channel
-   - Hard to send reply
+Web Interface
+-------------
 
 There will definitly be better interface implemented on top of the former, 
 but running in separate process.
+
+Some progress happened on this.
+
