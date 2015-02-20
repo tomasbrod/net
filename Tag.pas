@@ -5,7 +5,7 @@ uses Keys;
 
 type
  T = object
-  (* Tags are SHA255 hashes of tag plaintext *)
+  (* Tags are SHA1 hashes of tag plaintext *)
   procedure Create( plaintext :string);
    unimplemented;
   procedure Clear;
