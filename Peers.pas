@@ -57,6 +57,8 @@ procedure Get( out info:tInfo; const addr:netaddr.t ); overload;
 procedure Get( out info:tInfo; var p:pointer ); overload;
 procedure Add( addr :NetAddr.T );
 {procedure GetList; unimplemented;}
+var ConnectedCount:word unimplemented;
+var ConnectedCountAccurate:boolean experimental;
  
 var
  SendProc: procedure(const rcpt:netaddr.t; var Data; Len:LongInt);
@@ -198,6 +200,7 @@ procedure tAkafuka.Handle( const from: NetAddr.t);
  var peer:tPeersList;
  begin
  inherited;
+ ConnectedCountAccurate:=false;
  (*log.debug('Received '+cAkafukaN+' from '+string(from));*)
  fundeluka.Create;
  if {timesincelast>cAkafukaCooldown} true
@@ -214,6 +217,7 @@ procedure tFundeluka.Handle( const from: NetAddr.t);
  var pending:tPendingList;
  begin
  inherited;
+ ConnectedCountAccurate:=false;
  (*log.debug('Received '+cFundelukaN+' from '+string(from));*)
  pending:=tPendingList(PendingList.Search(from));
  if not assigned(pending) then assert(false);
@@ -254,13 +258,16 @@ procedure DoAkafuka;
  end;
  //log.debug('Akafuka old peers');
  peer:=tPeersList(PeerList.Next);
+ ConnectedCount:=0;
  while peer<>PeerList do begin
+  Inc(ConnectedCount);
   if (now-peer.since)>cAkafukaPeriod then begin
    //log.debug('Peer '+string(peer.addr)+' is too old ('+FloatToStr((now-peer.since)*MsecsPerDay)+'), akafuka');
    Peers.Add(peer.addr,peer);
   end;
   peer:=tPeersList(peer.next);
  end;
+ ConnectedCountAccurate:=true;
  //log.debug('Akafuka complete');
 end;
  
@@ -269,6 +276,7 @@ procedure Add( addr :NetAddr.T; peer:tPeersList );
  var pending:tPendingList;
  var akafuka:tAkafuka;
  begin
+ ConnectedCountAccurate:=false;
  pending:=tPendingList(PendingList.Search(addr));
  if assigned(pending) then begin
   (*log.debug('Already pending');*)
@@ -352,6 +360,7 @@ procedure LoadState;
  end;
  close(f);
  log.info('Restored '+IntToStr(c)+' peers from presistent storage');
+ ConnectedCountAccurate:=false;
 end;
  
 { *** Simple Uninteresting Bullshit ***}
