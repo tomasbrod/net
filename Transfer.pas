@@ -4,10 +4,24 @@ UNIT Transfer;
  To send and recieve CHK files over brodnet.
  Also to assemble pieced and parted files.
  
- TODO: Do not save and load from statefile too often. Use different 
- filename for incomplete files. Trunctate the incomplete file when a 
- download is started (and not running already), to be sure.
+ DONE: Do not save and load from statefile too often (kills performance). 
+
+ DONE:Use different filename for incomplete files.
  
+ TODO: Trunctate the incomplete file when a download is started (and not 
+ running already), to be sure.
+ 
+ TODO: Refactor the whole RequestFile proc. Main objectives:
+
+  * Exit if transfer already running.
+  * try to Resume suspended transfer with the new source (and exit).
+  * Exit if the file is present finished (not *.part).
+  * Create a new transfer.
+ 
+ TODO: Make loading and saving procs of tTransfer object type.
+ 
+ TODO: Make tData constructor try read the .part file as second option.
+
 }
 
 INTERFACE
