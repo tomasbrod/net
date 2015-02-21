@@ -10,6 +10,8 @@ unit Discovery;
   * the mesh network (WAND)
   * the Internet (HTTP hostlist)
  
+ Mechanism uses will be choosen by random until better method is found.
+ 
  This functionality could be dedicated to Neighb. But Neighb is not request 
  based and discovery should be.
 
@@ -34,3 +36,7 @@ procedure NotifyIdle;
 
 const cOptimalPeerCountDefault=6 experimental;
 var cOptimalPeerCount:word=cOptimalPeerCountDefault;
+
+IMPLEMENTATION
+
+END.
