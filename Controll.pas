@@ -6,7 +6,11 @@ INTERFACE
 uses  SocketUtil
      ,NetAddr
      ,Classes
+     {$IFDEF MSWINDOWS}
+     ,WinSockAliases
+     {$ELSE}
      ,BaseUnix
+     {$ENDIF}
      ,Sockets
      ,SysUtils
      ,sSockets

@@ -8,8 +8,14 @@ USES SysUtils
 	,sSockets
 	,SocketUtil
 	,NetAddr
+	{$IFDEF MSWINDOWS}
+	,Windows
+	,WinSock
+	,WinSockAliases
+	{$ELSE}
 	,UnixType
 	,BaseUnix
+	{$ENDIF}
 	,IniFiles
 	,DataBase
 	,EventLog

@@ -3,13 +3,12 @@ unit NetAddr;
 INTERFACE
 uses Sockets
     ,SysUtils
-    ,UnixType
     ;
 
  {Redefine socaddr here, becouse original is too short for ipv6 and unix}
  type tSockAddrL = packed record
            sa_family: sa_family_t;
-           sa_data: array [0..107] of cuint8;
+           sa_data: array [0..107] of byte;
   end;
  type tSockAddr= type tSockAddrL deprecated;
 
