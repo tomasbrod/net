@@ -220,11 +220,15 @@ procedure ServeAsset(path:string);
   else ctype:='';
  end;
  if copy(ctype,1,5)='text/' then ctype:=ctype+'; charset=UTF-8';
- Assign(f,path);
- {$I-}
- Reset(f);
- {$I+}
- r:=IOResult;
+ if (pos('..',path)=0)and(path[1]<>'/') then begin
+  Assign(f,path);
+  {$I-}
+  Reset(f);
+  {$I+}
+  r:=IOResult;
+ end else begin
+  r:=5;
+ end;
  case r of
   0: begin
    PutLine('HTTP/1.1 200 Ok');
