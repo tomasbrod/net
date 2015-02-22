@@ -20,6 +20,11 @@ unit Discovery;
 INTERFACE
 uses Peers, NetAddr;
 
+procedure NotifyIdle;
+
+const cOptimalPeerCountDefault=6 experimental;
+var cOptimalPeerCount: Word =cOptimalPeerCountDefault;
+
 const cRequest=8;
 type tRequest=object(tPacket)
  count:byte;
@@ -31,11 +36,6 @@ type tOffer=object(tPacket);
  {***dynamic length***}
 end;
 const cFeedback=10 unimplemented;
-
-procedure NotifyIdle;
-
-const cOptimalPeerCountDefault=6 experimental;
-var cOptimalPeerCount:word=cOptimalPeerCountDefault;
 
 IMPLEMENTATION
 
