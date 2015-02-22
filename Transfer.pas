@@ -21,6 +21,8 @@ UNIT Transfer;
  TODO: Make loading and saving procs of tTransfer object type.
  
  TODO: Make tData constructor try read the .part file as second option.
+ 
+ TODO: Save state to separate file for each transfer, not global statefile.
 
 }
 
