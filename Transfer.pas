@@ -11,6 +11,10 @@ UNIT Transfer;
  TODO: Trunctate the incomplete file when a download is started (and not 
  running already), to be sure.
  
+ TODO: Make loading and saving procs of tTransfer object type.
+ 
+ TODO: Save state to separate file for each transfer, not global statefile.
+
  TODO: Refactor the whole RequestFile proc. Main objectives:
 
   * Exit if transfer already running.
@@ -18,12 +22,8 @@ UNIT Transfer;
   * Exit if the file is present finished (not *.part).
   * Create a new transfer.
  
- TODO: Make loading and saving procs of tTransfer object type.
- 
  TODO: Make tData constructor try read the .part file as second option.
  
- TODO: Save state to separate file for each transfer, not global statefile.
-
 }
 
 INTERFACE
@@ -157,17 +157,21 @@ type tTransfer=object(tSuspendedTransfer)
  Terminated :boolean;
  Timeouted  :boolean;
  saved      :boolean;
+ {constructor; procedure Load( aFID: tFID );}
+ {constructor; procedure Init( aFID: tFID; aSource: netaddr.t );}
  procedure DoRun;
  procedure HandleInf(count:longword);
  procedure HandleDat(part:longword; var PayLoad; length:longword );
  procedure Done;
  private
+ procedure Save;
  procedure DispatchEvent;
  procedure SetPending(i,c:word);
  end;
 
 const cMaxTransfers=32;
 const cPartExt:string[5]='.part';
+const cPartMetaExt:string[8]='.partdat';
 var TransferList:array [1..cMaxTransfers] of ^tTransfer;
 
 function TransferByFID(ifid:tFID):word; forward;
@@ -368,6 +372,17 @@ procedure Save(var tr:tSuspendedTransfer);
  finally close(f); end;
 end;
 
+procedure tTransfer.Save;
+ var f:file of tSuspendedTransfer;
+ begin
+ log.debug('save transfer');
+ DataBase.dbAssign(f,'chk'+DirectorySeparator+string(fid)+cPartMetaExt);
+ rewrite(f);
+ try write(f,tSuspendedTransfer(self));
+ finally close(f); end;
+ saved:=true;
+end;
+
 procedure tTransfer.HandleInf(count:longword);
  begin
  last:=now;
@@ -488,7 +503,7 @@ procedure tTransfer.DoRun;
  end else
  if (now-last)>cMaxDelta then begin
   log.debug('Timeout => suspend');
-  Save(self); saved:=true;
+  Transfer.Save(self); saved:=true;
   Timeouted:=true;
   Done;
  end else
@@ -508,10 +523,10 @@ procedure tTransfer.DoRun;
    req.Create( fid, trid, completed+i, rqc );
    req.Send(source);
   end;
-  Save(self); saved:=true;
+  Transfer.Save(self); saved:=true;
  end else begin
   log.debug('nothing special');
-  Save(self); saved:=true;
+  Transfer.Save(self); saved:=true;
  end;
  DispatchEvent;
 end;
@@ -533,7 +548,7 @@ procedure NotifyQuit;
  begin
  for i:=1 to high(TransferList) do if assigned(TransferList[i]) then with TransferList[i]^ do begin
   Done;
-  Save(TransferList[i]^);
+  Transfer.Save(TransferList[i]^);
   log.warning('Suspend transport: '+string(fid));
   dispose(TransferList[i]);
   Inc(c);
