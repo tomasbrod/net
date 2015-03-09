@@ -235,3 +235,30 @@ but running in separate process.
 
 Some progress happened on this.
 
+### Messages
+
+Msgs re sent from 'draft-board'. There is a list of current draft with 
+detete buttons etc. and a button to create new. 
+
+There is possible to write message in textarea and select identity and save 
+it (no send button yet!). The message is submited as POST urlencoded text 
+to interface. The message is saved to some tmp storage.
+
+There is then option to send or edit or dispose the draft (the chk is 
+passed as ?param). Recipients are to be specified in a addressbook of some 
+sort. Multiple can be selected. 
+
+Which module should do the draft-storage and crypto?
+
+1. 
+   Drafts are saved by webinterface and also signed/encrypted. Daemon 
+   receives a msg command containing the body of the message and 
+   recipients.
+
+2.
+   Drafts are saved by webinterface and also signed/encrypted. Daemon 
+   receives frst a CHK insert command and then MSG send command with list 
+   of recipients.
+
+3.
+   Everything is done by daemon. WebI is just a relay.
