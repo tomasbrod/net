@@ -37,6 +37,7 @@ end deprecated;
 
 procedure NotifyPeerState( event: byte; info:Peers.tInfo );
 procedure NotifyIdle;
+var OnAppear:procedure(info: tNeighbRecord);
 
 procedure AddPerson(const person:tPID);
 
@@ -66,7 +67,7 @@ IMPLEMENTATION
 uses DataBase;
 
 procedure Propagate(var rec:tNeighbRecord); forward;
-procedure DispatchEvent(const pid:tPID); forward;
+procedure DispatchEvent(const info:tNeighbRecord); forward;
 
 (*** Data storage ***)
 type
@@ -128,7 +129,7 @@ procedure Update(const addr:netaddr.t; const pid:tPID; const hop:byte);
   InsertAfter^:=cur;
   cur^.hop:=hop; cur^.pid:=pid; cur^.addr:=addr; cur^.updated:=now;
   if VisibleChange then begin
-   DispatchEvent(pid);
+   DispatchEvent(cur^);
    Propagate(cur^);
   end;
  end else VisibleChange:=DeletedSomething;
@@ -208,9 +209,10 @@ procedure NotifyIdle;
  end;
 end;
 
-procedure DispatchEvent(const pid:tPID);
+procedure DispatchEvent(const info:tNeighbRecord);
  begin
- log.info('Neighbour '+String(pid)+' appeared');
+ log.info('Neighbour '+String(info.pid)+' appeared');
+ if assigned(OnAppear) then OnAppear(info);
 end;
 
 (*** Networking ***)
@@ -332,6 +334,7 @@ end;
 procedure INIT;
  begin;
  Table.Init;
+ OnAppear:=nil;
 end;
 
 procedure AddPerson(const person:tPID);

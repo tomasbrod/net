@@ -64,6 +64,11 @@ procedure TransferProgressHook( id :tFID; done,total:longword; by: tBys );
  Controll.NotifyTransfer(id,done,total,by);
 end;
 
+procedure NeighbAppearHook( info: Neighb.tNeighbRecord );
+ begin
+ log.debug('NeighbAppearHook');
+end;
+
 {
 procedure TransferRecvHook( id :tFID; by :byte );
 procedure TransferNoSrcHook( id :tFID; by :byte );
@@ -284,7 +289,7 @@ BEGIN
  Peers.SendProc:=@PacketSendHook;
  Controll.OnTerminateRequest:=@DoTerminate;
  Transfer.OnProgress:=@TransferProgressHook;
- //Neighb.OnChange:=@Controll.NotifyNeighbState;
+ Neighb.OnAppear:=@NeighbAppearHook;
  
  {Configure}
  ConfNeighb(config);
