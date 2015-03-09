@@ -18,7 +18,8 @@ type tPID=Keys.tHash;
 type tNeighbRecord=packed object
   addr:netaddr.t;
   pid:tPID;
-  hop:word;
+  hop:byte;
+  {state: (nstOnline=0, nstStatic=1 );}
   propagated:tDateTime;
   updated:tDateTime;
 end;
@@ -32,7 +33,7 @@ type tInfo=object(tNeighbRecord)
  private cur:pointer;
  private maxhop:Word;
  private byaddr:boolean;
-end;
+end deprecated;
 
 procedure NotifyPeerState( event: byte; info:Peers.tInfo );
 procedure NotifyIdle;
@@ -46,7 +47,8 @@ function GetRoute(const dst:tPID; out via:netaddr.t):boolean;
 const cNeighb=7;
 type tNeighb=object(tPacket)
  pid:tPID;
- hop:word2;
+ hop:byte;
+ state:byte unimplemented;
  trid:word2;
  procedure Handle( const from: NetAddr.t);
  procedure Send( const rcpt: NetAddr.t);
@@ -72,6 +74,7 @@ type
  tNeighbRecord_ptr=^tNeighbRecord;
  tNeighbNode=object(tNeighbRecord)
   next:tNeighbNode_Ptr;
+  alt:tNeighbNode_Ptr unimplemented;
  end;
  tNeighbTable=object
   {procedure Insert(const addr:netaddr.t; const pid:tPID; const hop:Word);}
@@ -85,7 +88,7 @@ type
 
 var Table   :tNeighbTable;
 
-procedure Update(const addr:netaddr.t; const pid:tPID; const hop:Word);
+procedure Update(const addr:netaddr.t; const pid:tPID; const hop:byte);
  var slot:byte;
  var cur:^tNeighbNode;
  var insertAfter:^pointer;
@@ -102,23 +105,26 @@ procedure Update(const addr:netaddr.t; const pid:tPID; const hop:Word);
  insertAfter:=pncur;
  while assigned(cur) do begin
   if cur^.pid=pid then begin
-   if cur^.addr=addr then begin
-    if cur^.hop=hop then begin
-     cur^.updated:=now;
-     exit; {it is the same, no need to do anything}
-    end;
-    pncur^:=cur^.next; Dispose(cur); cur:=pncur^;
-    deletedSomething:=true;
-    continue;
-   end else VisibleChange:=false;
-   if cur^.hop=0 then exit;
+   {stop if we found exactly the same}
+   if (cur^.addr=addr) and (cur^.hop=hop) then begin
+    cur^.updated:=now;
+    exit; {it is the same, no need to do anything}
+   end;
+   {stop if better is found}
+   if (hop>cur^.hop) and (hop<255) then exit;
+   {else delete the record}
+   pncur^:=cur^.next; Dispose(cur); cur:=pncur^;
+   deletedSomething:=true;
+   {todo: alternative path if cur^.hop<hop then insertAfter:=@cur^.next;}
+   {no pid more should be in the list}
+   break;
   end;
-  if cur^.hop<hop then insertAfter:=@cur^.next;
   pncur:=@cur^.next;
   cur:=cur^.next;
  end;
  if hop<=cRecordTTL then begin
   New(cur);
+  cur^.next:=InsertAfter^;
   InsertAfter^:=cur;
   cur^.hop:=hop; cur^.pid:=pid; cur^.addr:=addr; cur^.updated:=now;
   if VisibleChange then begin
@@ -134,6 +140,7 @@ procedure SendNeighb(const arcpt:netaddr.t; const apid:tPID; ahop:word); forward
 
 procedure SendNeighbours( const rcpt:netaddr.t );
  var inf:tInfo;
+ {TODO: rewrite to use table directly}
  begin
  inf.Init(cPropagateTTL);
  while inf.next do begin
@@ -210,7 +217,7 @@ end;
 
 procedure tNeighb.Handle( const from: NetAddr.t);
  begin
- Update(from,pid,word(hop)+1);
+ Update(from,pid,hop+1);
 end;
 
 procedure Propagate(var rec:tNeighbRecord);
@@ -280,9 +287,14 @@ end;
 procedure GetRoute(const dst:tPID; out via:netaddr.t; out hop:word; var cur:pointer);
  begin
  via.Clear;
- if cur=nil then cur:=Table.slots[LongWord(dst) and high(Table.slots)] else cur:=tNeighbNode(cur^).next;
+ if cur=nil then begin
+  cur:=Table.slots[LongWord(dst) and high(Table.slots)];
+  while assigned(cur) and (tNeighbNode(cur^).pid<>dst) do cur:=tNeighbNode(cur^).next;
+ end else begin
+  {cur:=tNeighbNode(cur^).alternative;}
+  cur:=nil; {TODO use alternatives};
+ end;
  if cur=nil then exit;
- while assigned(cur)and(tNeighbNode(cur^).pid<>dst) do cur:=tNeighbNode(cur^).next;
  via:=tNeighbNode(cur^).addr;
  hop:=tNeighbNode(cur^).hop;
 end;
