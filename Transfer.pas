@@ -14,13 +14,14 @@ UNIT Transfer;
  TODO: Make loading and saving procs of tTransfer object type.
  
  TODO: Save state to separate file for each transfer, not global statefile.
+ DONE: Do not save any metadata. Trunc off the pending parts if download fails.
 
- TODO: Refactor the whole RequestFile proc. Main objectives:
+ DONE: Refactor the whole RequestFile proc. Main objectives:
 
-  * Exit if transfer already running.
-  * try to Resume suspended transfer with the new source (and exit).
-  * Exit if the file is present finished (not *.part).
-  * Create a new transfer.
+  * Exit if transfer already running. DONE
+  * try to Resume suspended transfer with the new source (and exit). DONE
+  * Exit if the file is present finished (not *.part). DONE
+  * Create a new transfer. DONE
  
  TODO: Make tData constructor try read the .part file as second option.
  
@@ -76,9 +77,11 @@ TYPE {--Packets--}
   end;
  end;
  
+ tDataFile=file of byte;
  tData=object(Peers.tPacket)
   procedure Handle( const from: NetAddr.t; length:longword );
-  procedure CreateSend( const aTrID:byte; const aFID:tFID; aChunk:longword; const rcpt: NetAddr.t);
+  //procedure CreateSend( const aTrID:byte; const aFID:tFID; aChunk:longword; const rcpt: NetAddr.t);
+  procedure CreateSend( const aTrID:byte; var f:tdatafile; aChunk:longword; const rcpt: NetAddr.t);
   private
   TrID :byte;
   part :Word4;
@@ -98,7 +101,6 @@ TYPE {--Packets--}
  tError=object(Peers.tPacket) 
  end unimplemented;
 
-type tDataFile=file of byte;
 type tBy=0..31;
 type tBys=set of tBy;
 
@@ -190,8 +192,8 @@ procedure RequestFile( const src :netaddr.t; id :tFID; aBy: tBy );
  begin
  i:=TransferByFID(id);
  if i<=cMaxTransfers then begin
-  Include(TransferList[i]^.by,by);
-  log.error('Try to add duplicate transfer by '+inttostr(by));
+  Include(TransferList[i]^.by,aby);
+  log.error('Try to add duplicate transfer by '+inttostr(aby));
   exit;
  end else begin
   Create;
@@ -220,9 +222,19 @@ procedure tTransfer.Init( aFID: tFID; aSource: netaddr.t );
  source     :=aSource;
  pending    :=[];
  last       :=Now;
- DataBase.dbAssign(storage,'chk'+DirectorySeparator+string(fid)+cPartExt);
- reset(storage);
- completed:= FileSize(storage) div cChunkLength;
+ DataBase.dbAssign(storage,'chk'+DirectorySeparator+string(fid));
+ if FileSize(storage)>0 then begin
+  Close(storage); {the file is already downloaded, so pretend like just downloaded it and exit}
+  Rename(Storage,DataBase.Prefix+DirectorySeparator+'chk'+DirectorySeparator+string(fid)+cPartExt);
+  reset(storage);
+  completed:= FileSize(storage) div cChunkLength;
+  total:= completed;
+ end else begin
+  erase(Storage);
+  DataBase.dbAssign(storage,'chk'+DirectorySeparator+string(fid)+cPartExt);
+  reset(storage);
+  completed:= FileSize(storage) div cChunkLength;
+ end;
 end;
 
 procedure RecvFileAbort( id :tFID );
@@ -245,7 +257,7 @@ procedure Query( id :tFID; out done,total:longword );
  end else begin
   DataBase.dbAssign(downloaded,'chk'+DirectorySeparator+string(id));
   reset(downloaded);
-  done:= FileSize(storage) div cChunkLength;
+  done:= FileSize(downloaded) div cChunkLength;
   total:=done;
   if done=0 then erase(downloaded) else close(downloaded);
  end;
@@ -294,8 +306,8 @@ end;
 procedure tTransfer.Done;
  begin
  if (pending<>[])and(completed>0) then begin
-  Seek(storage,completed*cChunkLen);
-  Trunctate(storage);
+  Seek(storage,completed*cChunkLength);
+  Truncate(storage);
  end;
  SetPending(0,0);
  try Close(storage); except end;
@@ -467,35 +479,37 @@ procedure tRequest.Handle( const from: NetAddr.t);
  procedure sendinfo;
   var inf:tInfo;
   begin
-  inf.Create(TrID,ID);
+  try
+   inf.Create(TrID,ID);
+  except exit; end;
   inf.Send(from);
  end;
  var part:byte;
  var dat:tData;
+ var f :tDataFile;
  begin
  log.debug('Request for '+String(id)+':'+IntToStr(longword(chunk))+'+'+IntToStr(longword(count))+' from '+string(from)+' #'+IntToStr(TrID));
  if longword(chunk)=0 then SendInfo;
+ DataBase.dbAssign(f,'chk'+DirectorySeparator+string(id)); reset(f);
+ if filesize(f)=0 then begin
+  DataBase.dbAssign(f,'chk'+DirectorySeparator+string(id)+cPartExt); reset(f);
+ end;
  if count>0 then for part:=0 to count-1 do 
-  dat.CreateSend( TrID, ID, longword(chunk)+part, from );
+  dat.CreateSend( TrID, f, longword(chunk)+part, from );
+ close(f);
 end;
 
-procedure tData.CreateSend( const aTrID:byte; const aFID:tFID; aChunk:longword; const rcpt: NetAddr.t);
- var f:tDataFile;
+procedure tData.CreateSend( const aTrID:byte; var f:tdatafile; aChunk:longword; const rcpt: NetAddr.t);
  var br:longword;
  begin
  inherited Create(cData);
- DataBase.dbAssign(f,'chk'+DirectorySeparator+string(afid)); reset(f);
- if filesize(f)=0 then begin
-  WHAT;
+ br:=cChunkLength*(aChunk);
+ if br>FileSize(f) then begin
+  log.error('Transfer request past EOF');
+  exit;
  end;
- try
-  br:=cChunkLength*(aChunk);
-  if br>FileSize(f) then raise eRangeError.Create('Reading past EOF');
-  seek(f,br);
-  blockread(f,PayLoad,cChunkLength,br);
- finally
-  close(f);
- end;
+ seek(f,br);
+ blockread(f,PayLoad,cChunkLength,br);
  part:=aChunk;
  TrID:=aTrID;
  inherited Send(rcpt,(sizeof(self)-sizeof(PayLoad))+br);
@@ -504,23 +518,21 @@ end;
 procedure tInfo.Create( const aTrID:byte; const aFID:tFID );
  var f:tDataFile;
  var br:longword;
- var Tr:tSuspendedTransfer;
+ var Tr:word;
  begin
- try {Get size from live transfer}
-  Tr:=TransferList[TransferByFID(aFID)]^;
- except on eSearch do try {Get size from suspended transfer}
-   Load(Tr,aFID);
-  except on eSearch do begin {Get size from finished file}
-    DataBase.dbAssign(f,'chk'+DirectorySeparator+string(afid)); reset(f);
-    try br:=FileSize(f); 
-    tr.InfoReceived:=(br>0);
-    if (br mod cChunkLength)>0 then Tr.total:=(br div cChunkLength)+1 else Tr.total:=(br div cChunkLength);
-    finally close(f); end;
-  end; end;
- end;
+ {Get size from live transfer}
+ Tr:=TransferByFID(aFID);
+ if Tr>high(TransferList) then begin
+  {get size from finished}
+  DataBase.dbAssign(f,'chk'+DirectorySeparator+string(afid)); reset(f);
+  try
+   br:=FileSize(f);
+   if (br mod cChunkLength)>0 then br:=(br div cChunkLength)+1 else br:=(br div cChunkLength);
+  finally close(f); end;
+ end else br:=TransferList[Tr]^.total;
  inherited Create(cInfo);
- if not Tr.InfoReceived then raise eXception.Create('Transfer: No info for file');
- count := Tr.Total;
+ if br=0 then raise eXception.Create('Transfer: No info for file');
+ count :=       br;
  TrID  :=    aTrID;
 end;
 
