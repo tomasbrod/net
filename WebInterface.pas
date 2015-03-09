@@ -186,6 +186,8 @@ procedure HandleUnknownEvent(event:byte);
   ceInvalid: write('Invalid command');
   else write('?'+IntToStr(event));
  end;
+ writeln;
+ flush(output);
  raise exception.create('Unexpected message from daemon');
 end;
 
@@ -204,6 +206,29 @@ procedure CopyHeader(const header:string; name:string; var value:string);
   value:=copy(header,length(name)+3,9999);
 end;
 
+procedure CopyQuery(const query:string; name:string; var value:string);
+ var p1:longint;
+ var after:string;
+ begin
+ p1:=pos(name+'=',query);
+ p1:=p1+length(name)+1;
+ after:=ExtractSubstr(query,p1,['&']);
+ value:='';
+ p1:=1; while p1<=length(after) do begin
+  case after[p1] of
+   '+': value:=value+' ';
+   '%': begin
+    try value:=value+ Char(StrToInt('$'+Copy(after,p1+1,2))); except end;
+    inc(p1,2);
+    end;
+   else value:=value+after[p1];
+  end;
+ inc(p1);
+ end;
+end;
+
+var Keepalive:boolean=true;
+
 procedure ServeAsset(path:string);
  var f:file of byte;
  var r:longint;
@@ -211,6 +236,7 @@ procedure ServeAsset(path:string);
  var buf:string[255];
  var readed:Cardinal;
  begin
+ Terminated:=not Keepalive;
  if path='' then path:='index.htm';
  case UpCase(ExtractFileExt(path)) of
   '.TXT': ctype:='text/plain';
@@ -274,33 +300,69 @@ procedure ServeNeighb(const module,path,extra:string);
  var event:byte;
  var i:tNeighbInfo;
  begin
- if not EnsureConnection then exit;
- if (path='') and (extra='') then begin
-  PutBasicOKHeader('text/plain',false);
-  PutLine('');
-  writeln('The Neighbours');writeln;
-  Sock.WriteByte(ccGetNeighb);
-  repeat
-   event:=Sock.ReadByte;
-   case event of
-    ceNeighbs: begin
-     Sock.ReadBuffer(i,sizeof(i));
-     writeln(String(i.pid)+' via '+String(i.addr)+' +'+IntToStr(word(i.hop)));
+ case path of
+  '': ServeAsset('neighbIndex.htm');
+  'list': begin
+   if not EnsureConnection then exit;
+   PutBasicOKHeader('text/plain',false);
+   PutLine('');
+   writeln('The Neighbours');writeln;
+   Sock.WriteByte(ccGetNeighb);
+   repeat
+    event:=Sock.ReadByte;
+    case event of
+     ceNeighbs: begin
+      Sock.ReadBuffer(i,sizeof(i));
+      writeln(String(i.pid)+' via '+String(i.addr)+' +'+IntToStr(word(i.hop)));
+     end;
+     ceNeighbsEnd: write('no more');
+     else HandleUnknownEvent(event);
     end;
-    ceNeighbsEnd: write('no more');
-    else HandleUnknownEvent(event);
-   end;
-  until event=ceNeighbsEnd;
+   until event=ceNeighbsEnd;
+  end;
+ end;
+end;
+
+procedure redirect(trg:string);
+ begin
+ PutLine('HTTP/1.1 302 Found');
+ PutLine('Location: '+trg);
+ PutLine('Content-Length: 0');
+ PutLine(''); Terminated:=false;
+end;
+
+procedure ServePeers(const module,path,extra:string);
+ var addrstr:string;
+ var addr:netaddr.t;
+ begin
+ case path of
+  '': ServeAsset('peersIndex.htm');
+  'add': begin
+   if not EnsureConnection then exit;
+   CopyQuery(extra,'addr',addrstr);
+   PutBasicOKHeader('text/plain',false);
+   PutLine('');
+   Writeln('Add peer '+addrstr);
+   try addr:=addrstr; except on eConvertError do begin
+    Writeln('Convert Error!');
+    exit;
+   end; end;
+   Sock.WriteByte(ccAddPeer);
+   Sock.WriteBuffer(addr,sizeof(addr));
+  end;
  end;
 end;
 
 procedure CmdStop;
+ var event:byte;
  begin
  if not EnsureConnection then exit;
  Sock.WriteByte(ccTerminate);
   PutBasicOKHeader('text/plain',false);
   PutLine('');
   writeln('Requested daemon to terminate.');
+  event:=Sock.ReadByte;
+  try HandleUnknownEvent(event); except end;
 end;
 
 procedure Server;
@@ -309,7 +371,6 @@ procedure Server;
  var HV:string;
  var AcceptLanguage:string='';
  var Connection:string='';
- var Keepalive:boolean=true;
  begin
  GetLine(LB); if LB='' then exit;
  method:=Copy2SpaceDel(LB);
@@ -337,6 +398,7 @@ procedure Server;
    ServeAsset(path);
    end;
   'neighb': ServeNeighb(module,path,query);
+  'peers': ServePeers(module,path,query);
   'stop': CmdStop;
   
   else begin
@@ -360,6 +422,7 @@ BEGIN
   repeat
    terminated:=true;
    Server;
+   flush(output);
   until terminated or eof;
  finally
   if assigned(Sock) then Sock.WriteByte(ccQuit);
