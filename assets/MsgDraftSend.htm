@@ -1,0 +1,26 @@
+<!DOCTYPE HTML>
+<html><head><base target='_top'><meta http-equiv='Content-Type' content='text/html; charset=utf-8'/><link rel='stylesheet' type='text/css' href='asset/0.css'/>
+</head><body><div class='main'>
+<h1>Send Zidan</h1>
+
+<h2>Recipients</h2>
+<form method='get' action='/msg-draft/rcpt' target='search'>
+<input type='hidden' name='msg' value='1'>
+<input type='text' name='search' value='Brod'>
+<input type='submit' value='Search'>
+<a href='/msg-draft/preview?msg=1' target='search'>Preview</a>
+</form>
+<iframe name='search' src='about:blank' width='40%' align='left'></iframe>
+<iframe name='rcpt' src='/msg-draft/rcpt?msg=1' width='40%' height='140' align='left'></iframe>
+<br clear='both'>
+<form method='get' action='/msg-draft/sendout'>
+<input type='hidden' name='msg' value='1'>
+<p>
+<input type='submit' value='Send the message'>
+</form>
+
+</div>
+<div id='nav' class='nav'>
+<div class='indexlink'><a href='/' title='Main Screen'>BrodNet</a></div>
+</div>
+</body></html>
