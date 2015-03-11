@@ -174,7 +174,6 @@ function TransferByFID(ifid:tFID):word;
  begin
  result:=1;
  while (result<=cMaxTransfers)and( (TransferList[result]=nil )or( TransferList[result]^.fid<>ifid)  ) do inc(result);
- if result>cMaxTransfers then raise eSearch.Create;
 end;
 
 procedure RequestFile( const source :netaddr.t; id :tFID ); inline;
@@ -202,7 +201,7 @@ procedure RequestFile( const src :netaddr.t; id :tFID; aBy: tBy );
    Init(id,src);
    by:=[aBy];
    log.debug('Transfer '+IntToStr(trid)+' set source='+string(source)+' fid='+string(fid));
-   DoRun; {TEST}
+   {DoRun; TEST}
   end;
  end;
 end;
@@ -222,7 +221,7 @@ procedure tTransfer.Init( aFID: tFID; aSource: netaddr.t );
  source     :=aSource;
  pending    :=[];
  last       :=Now;
- DataBase.dbAssign(storage,'chk'+DirectorySeparator+string(fid));
+ DataBase.dbAssign(storage,'chk'+DirectorySeparator+string(fid)); reset(storage);
  if FileSize(storage)>0 then begin
   Close(storage); {the file is already downloaded, so pretend like just downloaded it and exit}
   Rename(Storage,DataBase.Prefix+DirectorySeparator+'chk'+DirectorySeparator+string(fid)+cPartExt);
@@ -230,9 +229,9 @@ procedure tTransfer.Init( aFID: tFID; aSource: netaddr.t );
   completed:= FileSize(storage) div cChunkLength;
   total:= completed;
  end else begin
+  close(Storage);
   erase(Storage);
-  DataBase.dbAssign(storage,'chk'+DirectorySeparator+string(fid)+cPartExt);
-  reset(storage);
+  DataBase.dbAssign(storage,'chk'+DirectorySeparator+string(fid)+cPartExt); reset(storage);
   completed:= FileSize(storage) div cChunkLength;
  end;
 end;
@@ -294,10 +293,10 @@ procedure DoRetry;
    tr:=TransferList[i];
    TransferList[i]:=nil;
    if (tr^.timeouted)and assigned(OnNoSrc) then OnNoSrc(tr^.fid,tr^.by);
-   log.debug('Transfer disposed '+string(tr^.fid));
+   log.debug('Tr'+IntToStr(i)+' disposed');
    dispose(tr);
   end else begin
-   log.debug('Transfer.DoRun '+string(TransferList[i]^.fid));
+   //log.debug('Transfer '+i+' DoRun');
    TransferList[i]^.DoRun;
   end;
  end;
@@ -320,7 +319,7 @@ procedure tTransfer.HandleInf(count:longword);
  if (not Terminated)and(not InfoReceived) then begin
   total:=count;
   InfoReceived:=true;
-  log.debug(string(fid)+' info received, total='+IntToStr(total));
+  //log.debug(string(fid)+' info received, total='+IntToStr(total));
   //Save(self);
   DispatchEvent;
  end else log.error('protocol desync: info received in invalid state for '+string(fid));
@@ -388,7 +387,7 @@ procedure tTransfer.DoRun;
   seek(storage,0);
   hash.Compute(storage,filesize(storage));
   if hash<>fid then begin
-   log.error('Transfer Hash Mismatch  in '+string(fid)+' from '+string(source));
+   log.error('Tr'+IntToStr(TrID)+' Hash Mismatch  in '+string(fid)+' from '+string(source));
    log.debug('Hash of file='+string(hash));
    Completed:=0;
    InfoReceived:=false;
@@ -396,7 +395,7 @@ procedure tTransfer.DoRun;
    result:=false;
    AbstractError;
  end else begin
-  log.debug('Transfer hash matched :)');
+  log.debug('Tr'+IntToStr(TrID)+' hash matched :)');
   result:=true;
  end; end;
  var req:tRequest;
@@ -410,22 +409,22 @@ procedure tTransfer.DoRun;
    Done;
   end;
  end else
- if pending=[] then begin
-  log.debug('Starting not started');
-  RequestNextBatch;
- end else
- if (now-last)>cMaxDelta then begin
-  log.debug('Timeout');
-  Timeouted:=true;
-  Done;
- end else
- if not InfoReceived then begin
-  log.debug('Re-requesting info');
+ if (not InfoReceived) and (completed>0) then begin
+  log.debug('Tr'+IntToStr(TrID)+' Requesting info');
   req.Create(fid,trid,0,0);
   req.Send(source);
  end else
+ if pending=[] then begin
+  log.debug('Tr'+IntToStr(TrID)+' Starting not started');
+  RequestNextBatch;
+ end else
+ if (now-last)>cMaxDelta then begin
+  log.debug('Tr'+IntToStr(TrID)+' Timeout');
+  Timeouted:=true;
+  Done;
+ end else
  if (now-last)>cRetryPeriod then begin
-  log.debug('Retry pending');
+  log.debug('Tr'+IntToStr(TrID)+' Retry pending');
   i:=0;
   while (i<=high(pending)) and (not (i in pending)) do inc(i); //find first assigned
   rqc:=1;
@@ -436,7 +435,7 @@ procedure tTransfer.DoRun;
    req.Send(source);
   end;
  end else begin
-  log.debug('transfer nothing special');
+  //log.debug('transfer nothing special');
  end;
  DispatchEvent;
 end;
@@ -481,14 +480,14 @@ procedure tRequest.Handle( const from: NetAddr.t);
   begin
   try
    inf.Create(TrID,ID);
-  except exit; end;
+  except log.error('Failed to create info for '+string(id)); exit; end;
   inf.Send(from);
  end;
  var part:byte;
  var dat:tData;
  var f :tDataFile;
  begin
- log.debug('Request for '+String(id)+':'+IntToStr(longword(chunk))+'+'+IntToStr(longword(count))+' from '+string(from)+' #'+IntToStr(TrID));
+ //log.debug('Request for '+String(id)+':'+IntToStr(longword(chunk))+'+'+IntToStr(longword(count))+' from '+string(from)+' #'+IntToStr(TrID));
  if longword(chunk)=0 then SendInfo;
  DataBase.dbAssign(f,'chk'+DirectorySeparator+string(id)); reset(f);
  if filesize(f)=0 then begin
