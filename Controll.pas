@@ -83,7 +83,7 @@ procedure tDaemonController.Run;
  log.debug('CMD/#'+IntToStr(id)+' Command: #'+IntToStr(cmd));
  case cmd of
   13,10:;
-  ccPeerStates: flags:=flags><[cfPeerStates,cfPeerStates0];
+  ccPeerStates: flags:=flags><[cfPeerStates];
   //ccPeerStatesOff: flags:= flags -[cfPeerStates,ccPeerStates];
   ccTerminate: if assigned(OnTerminateRequest) then OnTerminateRequest;
   ccQuit: Finished:=true;
