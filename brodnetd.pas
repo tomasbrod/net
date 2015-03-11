@@ -120,7 +120,7 @@ var socketc:word=0;
 var ctrl_socketl: tListeningSocket;
 
 PROCEDURE Loop;
- var FDS : BaseUnix.tFDSet;
+ var FDS : tFDSet;
  var FDSM: LongInt=99 unimplemented;
  var InPk: ^Peers.tPacket;
  var InPkLen: LongInt;
@@ -130,18 +130,18 @@ PROCEDURE Loop;
   {Reset internal state}
   InPk:=@InPkMem;
   InPkLen:= sizeof(InPkMem);
-  BaseUnix.fpfd_zero(FDS);
-  for i:=1 to socketc do BaseUnix.fpfd_set(socketa[i].handle,FDS);
-  BaseUnix.fpfd_set(ctrl_socketl.handle,FDS);
+  {BaseUnix.}fpfd_zero(FDS);
+  for i:=1 to socketc do {BaseUnix.}fpfd_set(socketa[i].handle,FDS);
+  {BaseUnix.}fpfd_set(ctrl_socketl.handle,FDS);
   Controll.SetSelectFDs(FDS);
   {Wait for data}
   try
   {fpSelect returns >0 if data is available}
-   if BaseUnix.fpSelect( FDSM, @FDS, nil, nil, cRecvWait )<=0 then begin
+   if {BaseUnix.}fpSelect( FDSM, @FDS, nil, nil, cRecvWait )<=0 then begin
     if not ReqQuit then Idle;
    end else begin
 
-   for i:=1 to socketc do if BaseUnix.fpfd_isset(socketa[i].handle,FDS)=1 then begin
+   for i:=1 to socketc do if {BaseUnix.}fpfd_isset(socketa[i].handle,FDS)=1 then begin
     (*log.debug('Received packet on socket #'+IntToStr(i));*)
     {Receive}
     socketa[i].Recv( from, InPkMem, InPkLen );
@@ -149,12 +149,12 @@ PROCEDURE Loop;
    end;
 
     {Check commanders}
-    if BaseUnix.fpfd_isset(ctrl_socketl.handle,FDS)=1 then Controll.HandleConnect(ctrl_socketl);
+    if {BaseUnix.}fpfd_isset(ctrl_socketl.handle,FDS)=1 then Controll.HandleConnect(ctrl_socketl);
     Controll.Receive(FDS);
 
    end;
    if now-LastIdle>cForceRest then begin
-    log.info('Rest forced ('+FloatToStr((now-LastIdle)*SecsPerDay)+'sec)');
+    (*log.info('Rest forced ('+FloatToStr((now-LastIdle)*SecsPerDay)+'sec)');*)
     Idle;
    end;
   except
