@@ -46,6 +46,7 @@ end;
     procedure MenuItemDaemonConnectClick(Sender: TObject);
     procedure MenuItemDaemonDisconnectClick(Sender: TObject);
     procedure TabSheetNeighbShow(Sender: TObject);
+    procedure OnDisconnect;
 
   private
     { private declarations }
@@ -92,10 +93,16 @@ procedure TmainForm.MenuItemDaemonDisconnectClick(Sender: TObject);
 begin
  if assigned(daemon) then begin
   Daemon.WriteByte(ccQuit);
-  FreeAndNil(Daemon);
-  FreeAndNil(Listener);
-  CheckBoxLogEnabled.Checked:=false;
+  OnDisconnect;
  end;
+end;
+
+procedure tMainForm.OnDisconnect;
+begin
+  FreeAndNil(Daemon);
+  Listener.Terminate;
+  CheckBoxLogEnabled.Checked:=false;
+  CheckBoxLogEnabled.Enabled:=false;
 end;
 
 procedure TmainForm.TabSheetNeighbShow(Sender: TObject);
@@ -168,7 +175,7 @@ procedure tListenerThr.ShowStatus;
     else line:=line+'terminating reason='+IntToStr(tmp);
   end; end;
   ceInvalid: line:='Invalid command';
-  255: begin line:='Daemon disconnected'; FreeAndNil(MainForm.Daemon); end;
+  255: begin line:='Daemon disconnected'; MainForm.OnDisconnect; end;
   cePeerState: begin
    line:='Peer ';
    tmp:=MainForm.Daemon.ReadByte;

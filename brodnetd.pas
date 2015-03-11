@@ -53,7 +53,7 @@ procedure PeerStateHook( event: byte; info:Peers.tInfo );
  var ids:string;
  begin
  info.addr.ToString(ids);
- if event>0 then log.info('Detected Peer state change: event='+IntToStr(event)+' addr='+ids+' delta='+FloatToStr(info.delta*MsecsPerDay)+'ms since='+DateTimeToStr(info.since));
+ if event>0 then log.info('Peer: event='+IntToStr(event)+' addr='+ids+' delta='+FloatToStr(info.delta*MsecsPerDay)+'ms since='+DateTimeToStr(info.since));
  Controll.NotifyPeerStateChange(event,info);
  Neighb.NotifyPeerState(event,info);
 end;
@@ -66,7 +66,7 @@ end;
 
 procedure NeighbAppearHook( info: Neighb.tNeighbRecord );
  begin
- log.debug('NeighbAppearHook');
+ log.info('Neighbour: '+String(info.pid)+' appeared');
 end;
 
 {

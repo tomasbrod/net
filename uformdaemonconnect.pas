@@ -40,6 +40,7 @@ begin
    try
     MainForm.Daemon:=tInetSocket.Create(edithost.text,editport.value);
     MainForm.LogListBox.Items.Append('Connected to '+edithost.text+':'+IntToStr(editport.value));
+    MainForm.CheckBoxLogEnabled.Enabled:=true;
     MainForm.Listener:=tListenerThr.Create(false);
    except
     on e:eSocketError do begin

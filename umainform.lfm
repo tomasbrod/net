@@ -62,6 +62,7 @@ object mainForm: TmainForm
         Width = 66
         Anchors = [akTop, akRight]
         Caption = 'Enable'
+        Enabled = False
         OnChange = CheckBoxLogEnabledChange
         TabOrder = 3
       end

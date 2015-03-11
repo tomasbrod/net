@@ -26,7 +26,7 @@ object FormDaemonConnect: TFormDaemonConnect
     ParentColor = False
   end
   object Label2: TLabel
-    Left = 32
+    Left = 48
     Height = 16
     Top = 80
     Width = 27
@@ -34,10 +34,10 @@ object FormDaemonConnect: TFormDaemonConnect
     ParentColor = False
   end
   object EditPort: TSpinEdit
-    Left = 20
+    Left = 48
     Height = 23
     Top = 96
-    Width = 140
+    Width = 64
     MaxValue = 65535
     TabOrder = 1
     Value = 1031

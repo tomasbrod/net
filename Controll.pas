@@ -54,6 +54,7 @@ type tDCFlag=(cfPeerStates,cfPeerStates0);
 
 type tDaemonController=class (tObject)
   public
+  id: byte;
   io: tStream;
   cmd:byte;
   flags:set of tDCFlag;
@@ -65,7 +66,7 @@ type tDaemonController=class (tObject)
   procedure CmdAddPeer;
   procedure NotifyQuit( unexcepted:boolean );
   procedure CmdInvalid;
-  procedure NotifyTransfer( id :tFID; done,total:longword; by: tBys );
+  procedure NotifyTransfer( aid :tFID; done,total:longword; by: tBys );
   procedure CmdRequestTransfer;
   procedure CmdQueryTransfer(op:byte);
   procedure NotifyNeighb( pid:Neighb.tPID; addr: netaddr.t; hopcount: word );
@@ -79,7 +80,7 @@ procedure tDaemonController.Run;
  begin
  try
  cmd:=io.ReadByte;
- log.debug('Command: #'+IntToStr(cmd));
+ log.debug('CMD/#'+IntToStr(id)+' Command: #'+IntToStr(cmd));
  case cmd of
   13,10:;
   ccPeerStates: flags:=flags><[cfPeerStates,cfPeerStates0];
@@ -137,12 +138,12 @@ procedure tDaemonController.NotifyQuit( unexcepted:boolean );
 end;
 
 {Transfer controll}
-procedure tDaemonController.NotifyTransfer( id :tFID; done,total:longword; by: tBys );
+procedure tDaemonController.NotifyTransfer( aid :tFID; done,total:longword; by: tBys );
  var w:netaddr.word4;
  begin
  if not (cTransferBy in by) then exit;
  io.WriteByte(ceTransfer);
- io.WriteBuffer(id,sizeof(id));
+ io.WriteBuffer(aid,sizeof(aid));
  w:=done; io.WriteBuffer(w,4);
  w:=total; io.WriteBuffer(w,4);
  (*io.WriteByte(by);*)
@@ -253,8 +254,9 @@ procedure HandleConnect(const ls:tListeningSocket);
   log.error('Too many clients on command port'); //raise eFull.Create('Too many clients on command port');
   stream.free;
  end else begin
-  log.info('Connect on CMD/#'+IntToStr(ci)+' from '+String(addr));
+  log.info('CMD/#'+IntToStr(ci)+' connect from '+String(addr));
   Clients[ci]:=tDaemonController.Create(stream,addr);
+  Clients[ci].id:=ci;
  end;
 end;
 
@@ -262,10 +264,9 @@ procedure Receive(const FDS : BaseUnix.tFDSet);
  var i:word;
  begin
  for i:=1 to high(Clients) do if assigned(Clients[i]) and (BaseUnix.fpfd_isset((Clients[i].io as tSocketStream).Handle,FDS)=1) then begin
-  log.debug('Recieved on CMD/#'+IntToStr(i));
   Clients[i].Run;
   if Clients[i].Finished then begin
-   log.info('Disconnect on CMD/#'+IntToStr(i));
+   log.info('CMD/#'+IntToStr(i)+ ' disconnect');
    Clients[i].io.free;
    freeandnil(Clients[i]);
   end

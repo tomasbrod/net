@@ -211,7 +211,6 @@ end;
 
 procedure DispatchEvent(const info:tNeighbRecord);
  begin
- log.info('Neighbour '+String(info.pid)+' appeared');
  if assigned(OnAppear) then OnAppear(info);
 end;
 
