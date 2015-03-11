@@ -1,0 +1,147 @@
+object mainForm: TmainForm
+  Left = 274
+  Height = 279
+  Top = 133
+  Width = 561
+  Caption = 'Main | BrodNet'
+  ClientHeight = 254
+  ClientWidth = 561
+  Menu = MainMenu1
+  OnClose = FormClose
+  OnShow = FormShow
+  LCLVersion = '0.9.30.4'
+  object PageControl1: TPageControl
+    Left = 0
+    Height = 254
+    Top = 0
+    Width = 561
+    ActivePage = TabSheetLog
+    Anchors = [akTop, akLeft, akRight, akBottom]
+    TabIndex = 0
+    TabOrder = 0
+    object TabSheetLog: TTabSheet
+      Caption = 'Log'
+      ClientHeight = 225
+      ClientWidth = 557
+      object LogListBox: TListBox
+        Left = 0
+        Height = 204
+        Top = 21
+        Width = 557
+        Align = alCustom
+        Anchors = [akTop, akLeft, akRight, akBottom]
+        ItemHeight = 0
+        ScrollWidth = 553
+        TabOrder = 0
+        TopIndex = -1
+      end
+      object Button1: TButton
+        Left = 496
+        Height = 21
+        Top = -2
+        Width = 60
+        Anchors = [akTop, akRight]
+        Caption = 'Clear'
+        OnClick = Button1Click
+        TabOrder = 1
+      end
+      object Button2: TButton
+        Left = 433
+        Height = 19
+        Top = -1
+        Width = 56
+        Anchors = [akTop, akRight]
+        Caption = 'Copy'
+        Enabled = False
+        TabOrder = 2
+      end
+      object CheckBoxLogEnabled: TCheckBox
+        Left = 360
+        Height = 21
+        Top = -2
+        Width = 66
+        Anchors = [akTop, akRight]
+        Caption = 'Enable'
+        OnChange = CheckBoxLogEnabledChange
+        TabOrder = 3
+      end
+    end
+    object TabSheetNeighb: TTabSheet
+      Caption = 'Neighbours'
+      ClientHeight = 225
+      ClientWidth = 557
+      OnShow = TabSheetNeighbShow
+      object StringGridNeighb: TStringGrid
+        Left = 0
+        Height = 225
+        Top = 0
+        Width = 557
+        Align = alClient
+        AutoEdit = False
+        ColCount = 3
+        Columns = <        
+          item
+            Title.Caption = 'PeerID'
+            Width = 365
+          end        
+          item
+            Title.Caption = 'Via'
+            Width = 144
+          end        
+          item
+            Title.Caption = 'Hop'
+          end>
+        ExtendedSelect = False
+        FixedCols = 0
+        MouseWheelOption = mwGrid
+        Options = [goFixedVertLine, goFixedHorzLine, goVertLine, goHorzLine, goRangeSelect, goColSizing, goSmoothScroll]
+        RowCount = 100
+        TabOrder = 0
+        ColWidths = (
+          365
+          144
+          64
+        )
+        Cells = (
+          2
+          0
+          1
+          'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA0'
+          1
+          1
+          '//ip4/127.0.0.1/40533'
+        )
+      end
+    end
+  end
+  object MainMenu1: TMainMenu
+    left = 256
+    top = 65520
+    object MenuItemDaemon: TMenuItem
+      Caption = 'Daemon'
+      object MenuItemDaemonConnect: TMenuItem
+        Caption = 'Connect'
+        OnClick = MenuItemDaemonConnectClick
+      end
+      object MenuItemDaemonDisconnect: TMenuItem
+        Caption = 'Disconnect'
+        OnClick = MenuItemDaemonDisconnectClick
+      end
+      object MenuItem3: TMenuItem
+        Caption = 'Terminate'
+        OnClick = MenuItem3Click
+      end
+    end
+    object MenuItem2: TMenuItem
+      Caption = 'Peers'
+      object MenuItemAddPeer: TMenuItem
+        Caption = 'Add'
+        OnClick = MenuItemAddPeerClick
+      end
+    end
+    object MenuItem1: TMenuItem
+      Caption = 'Test'
+      OnClick = MenuItem1Click
+    end
+  end
+end

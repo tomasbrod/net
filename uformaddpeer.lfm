@@ -1,0 +1,47 @@
+object FormAddPeer: TFormAddPeer
+  Left = 347
+  Height = 240
+  Top = 173
+  Width = 320
+  AutoSize = True
+  Caption = 'Add Peer | BrodNet'
+  ClientHeight = 240
+  ClientWidth = 320
+  LCLVersion = '0.9.30.4'
+  object GroupBox1: TGroupBox
+    Left = 6
+    Height = 104
+    Top = 5
+    Width = 215
+    AutoSize = True
+    Caption = 'Add'
+    ClientHeight = 87
+    ClientWidth = 211
+    TabOrder = 0
+    object Edit1: TEdit
+      Left = 0
+      Height = 23
+      Top = 0
+      Width = 170
+      TabOrder = 0
+      Text = '//ip4/123.45.67.89/1030'
+    end
+    object Label1: TLabel
+      Left = 0
+      Height = 52
+      Top = 35
+      Width = 152
+      Caption = 'Examples:'#10'//ip4/123.45.67.89/1030'#10'//ip6/fe80::83FA/1030'
+      ParentColor = False
+    end
+    object Button3: TButton
+      Left = 176
+      Height = 23
+      Top = 0
+      Width = 35
+      Caption = 'Add'
+      OnClick = Button3Click
+      TabOrder = 1
+    end
+  end
+end
