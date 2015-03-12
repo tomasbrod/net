@@ -107,6 +107,7 @@ begin
    Log.Error('Processing packet'); 
    Log.Error(e.ClassName+': '+e.message);
    DumpExceptionBackTrace(stderr);
+   flush(stderr);
  end; end;
  took:=now-took;
  if took>cwarntime then log.warning('Processing took: '+FloatToStr(took*MsecsPerDay)+'ms');
@@ -266,7 +267,12 @@ var Config:tINIFile;
 BEGIN
  {Setup database}
  DataBase.Prefix:=GetEnvironmentVariable('BRODNETD_DATA');
- if DataBase.Prefix='' then DataBase.Prefix:=GetCurrentDir+DirectorySeparator+'data';
+ if DataBase.Prefix='' then begin
+  DataBase.Prefix:=GetCurrentDir+DirectorySeparator+'data';
+  writeln(stderr,'WARNING: BRODNETD_DATA environment variable undefined!');
+  writeln(stderr,'WARNING: Using default (./data/)');
+  flush(stderr);
+ end;
  {setup config}
  Config := TINIFile.Create(DataBase.Prefix+DirectorySeparator+'g.ini');
  {setup log}
@@ -275,9 +281,15 @@ BEGIN
  Log.Identification:=ApplicationName(*+':'+IntToStr(GetProcessID)*);
  Log.TimeStampFormat:=(*'yyyy-mm-dd*) 'hh:nn:ss.zzz';
  Log.LogType:=ltFile;
- //Log.FileName:=Database.Prefix+DirectorySeparator+'g.log'; //temp
- Log.FileName:='/dev/stderr'; //even more temp
+ if FindCmdLineSwitch('d') then begin 
+  Log.FileName:='/dev/stderr';
+ end else begin
+  Log.FileName:=Database.Prefix+DirectorySeparator+'g.log';
+  Close(stderr);
+  assign(stderr,Database.Prefix+DirectorySeparator+'g.log');
+ end;
  Log.Active:=True;
+ Append(stderr);
  Log.info('*** '+ApplicationName+', in '+Database.Prefix);
  Peers.Log:=Log;
  Controll.Log:=Log;
