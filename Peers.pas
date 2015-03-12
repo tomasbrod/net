@@ -10,7 +10,7 @@ var Log:tEventLog;
 
 const cAkafukaCooldown = 5000{ms} /MSecsPerDay;
 const cMaxRetry = 0{times};
-const cMaxDelta = 600000{ms} /MSecsPerDay; {10 minutes to ping? Heh!}
+const cMaxDelta = 6000{ms} /MSecsPerDay; {10 minutes to ping? Heh!}
 const cAkafukaPeriod = 10000{ms} /MSecsPerDay;
 const cAkafukaUnknown  = 10;
 
@@ -240,7 +240,7 @@ procedure DoAkafuka;
  //log.debug('Retry pending');
  pending:=tPendingList(PendingList.Next);
  while pending<>PendingList do begin
-  if (now-pending.since)>cAkafukaPeriod then begin
+  if (now-pending.since)>cMaxDelta then begin
    if pending.retry>cMaxRetry then begin
     if assigned(pending.ofpeer) then DispatchStateEvent(false,true,pending.ofpeer);
     log.debug('Peer '+string(pending.addr)+' dropped, not responding');

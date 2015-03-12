@@ -60,8 +60,8 @@ const cPropagateCount=13;
 const cPropagateTTL=5;
 const cRecordTTL=7;
 const cRetryPeriod:tDateTime= 2000 /MSecsPerDay;
-const cPropagatePeriod:tDateTime= 10000 /MSecsPerDay;
-const cRecordTimeout:tDateTime= 25000 /MSecsPerDay;
+const cPropagatePeriod:tDateTime= 40 /SecsPerDay;
+const cRecordTimeoutFactor:real=1.25;
 
 IMPLEMENTATION
 uses DataBase;
@@ -192,7 +192,7 @@ procedure NotifyIdle;
   pncur:=@Table.Slots[slot];
   while assigned(cur) do begin
    //log.debug('>>> TABLEDUMP '+string(cur^.pid)+' via '+string(cur^.addr)+' +'+inttostr(cur^.hop)+' @'+IntToStr(LongWord(cur)));
-   if (cur^.hop>0) and (now-cur^.updated>cRecordTimeout) then begin
+   if (cur^.hop>0) and (now-cur^.updated>(cPropagatePeriod*cRecordTimeoutFactor)) then begin
     log.debug('Delete neighb (timeout) pid='+string(cur^.pid));
     ncur:=cur^.next;
     pncur^:=ncur;
@@ -240,6 +240,7 @@ end;
 procedure SendNeighb(const arcpt:netaddr.t; const apid:tPID; ahop:word);
  var pk:tNeighb;
  begin
+ (*log.debug('SendNeighb '+string(apid)+' -> '+string(arcpt));*)
  pk.Create( 0, apid, ahop );
  pk.Send(arcpt);
 end;
