@@ -13,6 +13,9 @@ uses NetAddr, Neighb, Transfer, SysUtils,EventLog;
 procedure AddReference( name: tFID; referrer: Transfer.tBy );
 procedure FreeReference( name:tFID; referrer: Transfer.tBy );
 
+procedure InsertAssign(var f:file);
+procedure InsertClose(var f:file; out hash:tFID);
+
 function UsedSpace :LongWord;
 var TresholdMB :Word;
 var LimitMB    :Word;
@@ -104,6 +107,7 @@ procedure DoScan;
   end; end;
   assign(metaf,prefix+sr.name);
   reset(metaf); read(metaf,meta); close(metaf);
+  {TODO: record the filesize to cached!}
   if meta.expires<now then exclude(meta.refs,cTimeWait) (*else log.debug('e '+DateTimeToStr(meta.expires))*);
   if meta.refs=[] then begin
    log.debug('Delete '+idstr);
@@ -138,6 +142,23 @@ procedure DoScan;
  LastScan:=now;
 end;
 
+procedure InsertAssign(var f:file);
+ begin
+ DataBase.dbAssign(f, 'justinserting.tmp');
+end;
+
+procedure InsertClose(var f:file; out hash:tFID);
+ var hasht:tHash;
+ begin
+ Reset(f,1);
+ Inc(UsedSpaceCached,FileSize(f));
+ hasht.Compute(f,filesize(f));
+ hash:=tFID(hasht);
+ Close(f);
+ Rename(f,DataBase.Prefix+DirectorySeparator+'chk'+DirectorySeparator+string(hash));
+ AddReference(hash,cTimeWait);
+end;
+ 
 procedure NotifyTransfer( id :tFID; done,total:longword; by: tBys );
  begin
  if done=total then begin
