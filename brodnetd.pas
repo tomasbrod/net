@@ -25,6 +25,7 @@ USES SysUtils
 	,Keys
 	,Transfer
 	,Neighb
+	,Storage
 	;
 
 var Log: tEventLog;
@@ -44,6 +45,7 @@ PROCEDURE Idle;
  Peers.DoAkafuka;
  Transfer.DoRetry;
  Neighb.NotifyIdle;
+ Storage.NotifyIdle;
 
  took:=now-took;
  if took>cwarntime then log.warning('System idle tasks took: '+FloatToStr(took*MsecsPerDay)+'ms');
@@ -62,6 +64,7 @@ procedure TransferProgressHook( id :tFID; done,total:longword; by: tBys );
  begin
  log.Info('Transfer state change: fid='+string(id)+' done='+IntToSTr(done)+' total='+IntToStr(total));
  Controll.NotifyTransfer(id,done,total,by);
+ Storage.NotifyTransfer(id,done,total,by);
 end;
 
 procedure NeighbAppearHook( info: Neighb.tNeighbRecord );
@@ -293,6 +296,7 @@ BEGIN
  Log.info('*** '+ApplicationName+', in '+Database.Prefix);
  Peers.Log:=Log;
  Controll.Log:=Log;
+ Storage.Log:=Log;
  {Hook callbacks}
  fpSignal(SigInt,@TerminateHook);
  fpSignal(SigTerm,@TerminateHook);
@@ -307,6 +311,8 @@ BEGIN
  ConfNeighb(config);
  StartListening(config);
  config.Free;
+ 
+ Storage.Init;
  
  {Restore state}
  log.debug('Reading presistent storage');
@@ -325,6 +331,7 @@ BEGIN
   Peers.SaveState;
   Controll.NotifyQuit(not ReqQuit);
   Transfer.NotifyQuit;
+  Storage.NotifyQuit;
  
  (*
  except
