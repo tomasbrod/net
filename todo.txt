@@ -1,3 +1,4 @@
 To-Do list
 
+- Public types to separate unit
 - Less debug in transfer
