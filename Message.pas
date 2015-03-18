@@ -1,9 +1,9 @@
 unit Message;
 
 INTERFACE
-uses Neighb,ContentHash;
+uses Neighb,ContentHash,KeyWords;
 
-procedure Send( data: contenthash.t; recipient: tPID; aTags: byte{?} );
+procedure Send( data: contenthash.t; recipient: tPID; array of tKeyWord );
  {tags are composed of (3)file keywords, (2)recipient tags and (1)additional tags}
 
  { every hop the tags are replaced with tags of the recipient if known, else unmodified }
