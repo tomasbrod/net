@@ -13,7 +13,7 @@ const cSend=10;
 type  tSend=object(tPacket)
  trid:byte;
  recipient: tPID;
- MsgBody: tFID;
+ MsgBody: tCHK;
  keywords :array [1..8] of tKeyWord;
  tags :array [1..56] of tKeyWord;
  procedure Handle( const from: NetAddr.t);
@@ -21,9 +21,10 @@ type  tSend=object(tPacket)
  end; {approx 300 Byte}
 const cConfirm=11;
 type  tConfirm=object(tPacket)
+ trid:byte;
  recipient: tPID;
- MsgBody: tFID;
- confirm: tFID;
+ MsgBody: tCHK;
+ confirm: tCHK;
  procedure Handle( const from: NetAddr.t);
  procedure Send( const rcpt: NetAddr.t );
  end;
@@ -41,13 +42,11 @@ type  tAck=object(tPacket) {to confirm reception of tSend}
 const cProgress=13;
 type  tProgress=object(tPacket)
  recipient: tPID;
- MsgBody: tFID;
+ MsgBody: tCHK;
  status: tDeliveryStatus;
  procedure Handle( const from: NetAddr.t);
  procedure Send( const rcpt: NetAddr.t );
  end;
-
-const cStorage=10; {identifier for StorageManager to not delete message files}
 
 IMPLEMENTATION
 uses SysUtils
@@ -65,8 +64,8 @@ const cExpireSender= 20;
 type tCHK=ContentHash.t;
 type tMsgMeta=packed object
  recipient: tPID;
- MsgBody: tFID;
- confirm: tFID;
+ MsgBody: tCHK;
+ confirm: tCHK;
  missBody,missConfirm:boolean;
  from: tPID unimplemented;
  received: tDateTime;
@@ -110,6 +109,15 @@ var LastPendingRetry:tDateTime;
 
 const StorePrefix='msg'+DirectorySeparator;
 var LastStoreScan:tDateTime;
+
+type tConfirmList_p=^tConfirmList;
+     tConfirmList=record
+ conf: tCHK;
+ msg: tCHK;
+ rcpt tPID;
+ next: tConfirmList_p;
+end;
+var ConfirmList:^tConfirmList;
  
 procedure Send( data: contenthash.t; recipient: tPID; array of tKeyWord );
  var msg:tMsgMetaDS;
@@ -120,7 +128,7 @@ procedure Send( data: contenthash.t; recipient: tPID; array of tKeyWord );
  msg.affil:=maSender;
  {msg.tags}
  msg.Save;
- Storage.AddReference(data,cStorage);
+ Storage.AddReference(data,cSend);
  proc(msg);
 end;
 
@@ -143,10 +151,29 @@ procedure SendTo( var msg:tMsgMetaDs; const rcpt: netaddr.t );
  px:=low(pending); while assigned(pending[px]) and (px<=high(pending)) do inc(px);
  if px>high(pending) then error;
  New(pending[px]);
+ with pending[px]^ do begin
+  rcpt:=rcpt;  retry:=1;  kind:=cConfirm;
+  with confirm do begin
+   Create(cConfirm);
+   trid:=px;
+   recipient:=msg.recipient;
+   MsgBody:=msg.MsgBody;
+   Confirm:=msg.Confirm;
+   Send(rcpt);
+  end;
+ end;
+end;
+
+procedure SendConfirmTo( var msg:tMsgMetaDs; const rcpt: netaddr.t );
+ var px:byte;
+ begin
+ px:=low(pending); while assigned(pending[px]) and (px<=high(pending)) do inc(px);
+ if px>high(pending) then error;
+ New(pending[px]);
  pending[px]^.rcpt:=rcpt;
  pending[px]^.retry:=1;
- pending[px]^.kind:=cSend;
- with pending[px]^.send do begin
+ pending[px]^.kind:=cConfirm;
+ with pending[px]^.confirm do begin
   Create(cSend);
   trid:=px;
   recipient:=msg.recipient;
@@ -192,7 +219,6 @@ end;
 procedure tSend.Handle( const from: NetAddr.t);
  var msg:tMsgMetaDs;
  var ack:tAck;
- var done,total:longword;
  begin 
  try
   msg.Load(MsgBody,recipient);
@@ -214,7 +240,7 @@ procedure tSend.Handle( const from: NetAddr.t);
   if msg.affil=maStatic then ack.status:=mdsStatic
   {else if ... then ack.status:=mds...}
   else ack.status:=mdsGood;
-  Transfer.RequestFile( from, MsgBody, cStorage );
+  Transfer.RequestFile( from, MsgBody, cSend );
  end else maStatic: ack.status:=mdsAlready;
  ack.Send(from);
  if (not msg.confirm.isNil)and(not msg.MissConfirm) then SendConfirmTo(msg, from);
@@ -222,13 +248,65 @@ end;
 
 procedure tConfirm.Handle( const from: NetAddr.t);
  begin 
- AbstractError;
-end;
-procedure tAck.Handle( const from: NetAddr.t);
+ var msg:tMsgMetaDs;
+ var ack:tAck;
+ var cfl:^tConfirmList;
  begin 
- AbstractError;
+ try msg.Load(MsgBody,recipient);
+ except exit; end;
+ msg.accessed:=Now;
+ ack.Create(cAck);
+ ack.trid:=trid;
+ if msg.Confirm.isNil then begin
+  msg.Confirm:=confirm;
+  msg.MissConfirm:=true;
+  ack.status:=mdsGood;
+  Transfer.RequestFile( from, confirm, cConfirm );
+  new(cfl);
+  cfl^.conf:=confirm;
+  cfl^.msg:=MsgBody;
+  cfl^.rcpt:=recipient;
+  cfl^.next:=ConfirmList;
+  ConfirmList:=cfl;
+ end else ack.status:=mdsAlready;
+ msg.Save;
+ ack.Send(from);
 end;
 
+procedure tAck.Handle( const from: NetAddr.t);
+ var msg:tMsgMetaDs;
+ begin 
+ if assigned(pending[trid]) and (pending[trid]^.rcpt=from) then with pending[trid]^ do begin
+  if (kind=cSend) and (status>low(tDeliveryStaus)) and (status<high(tDeliveryStaus) then try
+   msg.Load(send.MsgBody,send.recipient)
+   msg.statLast[status]:=now;
+   Inc(msg.statCount[status]);
+   msg.Save;
+  except end;
+ end;
+ dispose(pending[trid]);
+ pending[trid]:=nil;
+end;
+
+procedure TransferProgressHook( id :tFID; done,total:longword; by: tBys );
+ begin
+ if cSend in by then begin
+  if total>cMsgSizeLimit ...
+  if (done>0)and(done=total) then HandleMsgBody(id);
+ end;
+ if cConfirm in by then begin
+  if total>cConfirmSizeLimit ...
+  if (done>0)and(done=total) then HandleMsgConfirm(id);
+ end;
+end;
+
+procedure NotifyTransferNoSrc( id :tFID; by :byte );
+ begin
+ if cConfirm in by then begin
+  - delete from list
+  - remove the meta
+ end;
+end;
 
 {senders}
 procedure tSend.Send( const rcpt: NetAddr.t );
