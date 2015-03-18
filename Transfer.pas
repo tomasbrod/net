@@ -29,9 +29,9 @@ UNIT Transfer;
 
 INTERFACE
 USES Peers
-    ,Keys
     ,NetAddr
     ,SysUtils
+    ,ContentHash
     ;
 
 const cChunkLength=512{b}; {should not be changed}
@@ -46,9 +46,8 @@ CONST
  cInfo   =5;
  cData   =6;
 
-type tFID=object(Keys.tHash)
- end;
- 
+type tFID=ContentHash.t;
+
 TYPE {--Packets--}
 
  tRequest=object(Peers.tPacket)
@@ -130,6 +129,7 @@ IMPLEMENTATION
 uses 
      DataBase
     ,LinkedList
+    ,ContentHasher
     ;
 
 { Data storage }
@@ -382,7 +382,7 @@ end;
 
 procedure tTransfer.DoRun;
  function Verify:boolean;
-  var hash:tHash;
+  var hash:tHashSHA1;
   begin
   seek(storage,0);
   hash.Compute(storage,filesize(storage));
