@@ -11,9 +11,10 @@ uses
     ,NetAddr
     ,Keys
     ,SysUtils
+    ,KeyIdent
     ;
 
-type tPID=Keys.tHash;
+type tPID=KeyIdent.t;
 
 type tNeighbRecord=packed object
   addr:netaddr.t;
