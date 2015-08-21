@@ -1,6 +1,3 @@
 *.o
 *.ppu
 lib*.a
-[ad].htm
-[ad].md
-[ad].atom
