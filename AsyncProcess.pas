@@ -1,29 +1,27 @@
-unit BootWeb;
-
-{export start_bootstrap for controll unit}
-
+unit AsyncProcess;
 INTERFACE
+USES MemStream;
+
+type tapx=object
+ pid:SizeUInt;
+ output: ^tMemoryStream;
+ exitcode:Integer;
+ exitsignal:Word;
+ event: procedure of object; {notification on statuc change}
+ procedure Init(const args:ppchar; var ioutput:tMemoryStream);
+ procedure Kill;
+ private
+ opipe:tHandle;
+ procedure PipeEvent(ev:word);
+ end;
+
 IMPLEMENTATION
 USES ServerLoop
     ,Sockets
     ,NetAddr
     ,BaseUnix
     ,SysUtils
-    ,MemStream
     ;
-
-type tapx=object
- opipe:tHandle;
- pid:SizeUInt;
- output: ^tMemoryStream;
- exitcode:Integer;
- exitsignal:Word;
- running:boolean;
- event: procedure of object;
- procedure Init(const args:ppchar; var ioutput:tMemoryStream);
- procedure PipeEvent(ev:word);
- end;
-type tHttpBootstrapClient=tapx deprecated;
 
 procedure IOCHECK(prfx: string);
  var e:eOSError;
@@ -38,10 +36,14 @@ procedure tapx.PipeEvent(ev:word);
  var ecode:LongInt;
  begin
  if (ev and POLLIN)>0 then begin
-  if output^.WRBufLen=0 then {todo};
+  if output^.WRBufLen=0 then begin
+   fpKill(pid,SIGPIPE); {no space left for output, kill}
+  end else begin
   rl:=fpRead(opipe,output^.WRBuf,output^.wrbuflen);
   if rl=-1 then IOCHECK('read from pipe');
   output^.wrend(rl);
+  //writeln('pipeRead ',rl,' ev=',inttohex(ev,4));
+  end;
  end;
  if (ev and POLLHUP)>0 then begin
   {the pipe was broken}
@@ -82,29 +84,14 @@ procedure tapx.Init(const args:ppchar; var ioutput:tMemoryStream);
  end;
 end;
 
-type
- tWBS=object
- {start APX and pass along response}
- async:tAPX;
- procedure Event1;
- procedure Init;
- end;
-
-procedure tWBS.Init;
- var path:pchar;
+procedure tAPX.Kill;
+ var ecode:LongInt;
  begin
- {todo: create buffer and stream, create arg list, set callback, run}
- path:='test24';
+ ServerLoop.WatchFD(opipe,nil);
+ fpClose(opipe);
+ fpKill(pid,SIGTERM);
+ fpWaitPid(pid,ecode,0);
+ pid:=0;
 end;
 
-procedure tWBS.Event1;
- begin
- if (async.exitsignal=0)and(async.exitcode=0) then begin
-  {parse output}
- end else {do some error raising};
- {free buffer}
-end;
- 
-
-BEGIN
 END.
