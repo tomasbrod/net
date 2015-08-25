@@ -19,25 +19,42 @@ procedure SetMsgHandler(OpCode:byte; handler:tMessageHandler);
 procedure SetHiMsgHandler(handler:tMessageHandler);
 
 type tFDEventHandler=procedure(ev:Word) of object;
+type tOnTimer=procedure of object;
+
 procedure WatchFD(fd:tHandle; h:tFDEventHandler);
+procedure Shedule(timeout{ms}: LongWord; h:tOnTimer);
+procedure UnShedule(h:tOnTimer);
 
 IMPLEMENTATION
 
 USES SysUtils,Sockets,UnixType,BaseUnix
+     ,Unix
      ;
 
 {aim for most simple implementation, since could be extended anytime}
 
-type tPollTop=0..7;
 var s_inet:tSocket;
+
+type tPollTop=0..7;
 var pollArr: packed array [tPollTop] of tPollFd;
-var hnd: array [1..36] of tMessageHandler;
-var HiHnd: tMessageHandler;
 type tFdHndDsc=record
  cb: tFDEventHandler; {proc+object}
  end;
 var pollHnd: array [tPollTop] of tFdHndDsc;
 var pollTop: tPollTop;
+
+var hnd: array [1..36] of tMessageHandler;
+var HiHnd: tMessageHandler;
+
+type tSheduled_ptr=^tSheduled; tSheduled=record
+ left:LongWord;
+ cb:tOnTimer;
+ next:tSheduled_ptr;
+ end;
+var ShedTop: ^tSheduled;
+var ShedUU: ^tSheduled;
+var LastShed: UnixType.timeval;
+var PollTimeout:LongInt;
 
 procedure IdleStuff;
 begin write('.'); end;
@@ -105,12 +122,51 @@ procedure PrepareHandler;
  Msg.stream.Init(@Buffer,pkLen,sizeof(Buffer));
  Msg.channel:=0; {!multisocket}
 end;
- 
+
+procedure ShedRun;
+ var cur:^tSheduled;
+ var pcur:^pointer;
+ var now:UnixType.timeval;
+ var delta:LongWord;
+ var olTop:^tSheduled;
+ begin
+ {Sheduling}
+ olTop:=ShedTop;
+ pcur:=@olTop;
+ cur:=pcur^;
+ ShedTop:=nil; {unlink the current shed list}
+ fpgettimeofday(@Now,nil);
+ delta:=(Now.tv_sec-LastShed.tv_sec);
+ if delta>6 then delta:=5000 else delta:=(delta*1000)+((Now.tv_usec-LastShed.tv_usec) div 1000);
+ LastShed:=Now;
+ writeln('DeltaTime: ',delta);
+ while assigned(cur) do begin
+  if cur^.left<delta then begin
+   cur^.cb;
+   pcur^:=cur^.next;
+   cur^.next:=ShedUU;
+   ShedUU:=cur;
+   cur:=pcur^;
+  end else begin
+   DEC(cur^.left,delta);
+   if pollTimeOut>cur^.left then PollTimeOut:=cur^.left;
+   //if pollTimeout>20 then pollTimeOut:=pollTimeOut div 2;
+   if pollTimeout=0 then pollTimeOut:=1;
+   pcur:=@cur^.next;
+   cur:=cur^.next;
+  end;
+ end;
+ pcur^:=ShedTop; {append newly added tasks to end of untriggererd list}
+ ShedTop:=olTop; {link in the untriggered tasks}
+end;
+
 procedure Main;
  begin
  s_setupInet;
  while not terminated  do begin
-  EventsCount:=fpPoll(@PollArr[0],PollTop,5000);
+  PollTimeout:=5000;
+  ShedRun;
+  EventsCount:=fpPoll(@PollArr[0],PollTop,PollTimeout);
   if (eventscount=-1)and terminated then break;
   if eventscount=-1 then break;  {fixme: print error}
   if eventscount=0 then IdleStuff else begin
@@ -167,10 +223,44 @@ begin
  end;
 end;
 
+procedure Shedule(timeout{ms}: LongWord; h:tOnTimer);
+ var old:^tSheduled;
+ begin
+ old:=ShedTop;
+ if Assigned(ShedUU) then begin
+  ShedTop:=ShedUU;
+  ShedUU:=ShedUU^.next;
+ end else New(ShedTop);
+ ShedTop^.Left:=timeout;
+ ShedTop^.CB:=h;
+ ShedTop^.Next:=old;
+end;
+
+procedure UnShedule(h:tOnTimer);
+ var cur:^tSheduled;
+ var pcur:^pointer;
+ begin
+ pcur:=@ShedTop;
+ cur:=pcur^;
+ while assigned(cur) do begin
+  if cur^.cb=h then begin
+   pcur^:=cur^.next; {unlink from main list}
+   cur^.next:=ShedUU; ShedUU:=cur; {link to unused}
+   break;
+  end else begin
+   pcur:=@cur^.next;
+   cur:=pcur^;
+  end;
+ end;
+end;
+
 var i:byte;
 BEGIN
  fpSignal(SigInt,@SignalHandler);
  fpSignal(SigTerm,@SignalHandler);
  for i:=1 to high(hnd) do hnd[i]:=nil;
  pollTop:=1; {1 for basic listen}
+ ShedTop:=nil;
+ ShedUU:=nil;
+ fpgettimeofday(@LastShed,nil);
 END.
