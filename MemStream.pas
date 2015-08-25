@@ -5,8 +5,8 @@ uses SysUtils;
 type tMemoryStream=object
  length: LongWord;
  size: LongWord;
- data: pointer;
- position: pointer;
+ base: pointer;
+ position: LongWord;
  procedure Seek(absolute:LongWord);
  procedure Skip(cnt:Word);
  procedure Read(var buf; cnt:Word);
@@ -17,8 +17,14 @@ type tMemoryStream=object
  function  Tell:LongWord;
  procedure Write(var buf; cnt:word);
  procedure WriteByte(v:byte);
- procedure WriteWord(v:LongWord; cnt:byte); experimental;
+ procedure WriteWord(v:LongWord; cnt:byte);
  procedure Init(ibuf:pointer; ilen,isize:LongWord);
+ function WRBuf:pointer;
+ function WRBufLen:LongWord;
+ procedure WREnd(used:LongWord);
+ function RDBuf:pointer;
+ function RDBufLen:LongWord;
+ procedure RDEnd(used:LongWord);
  end;
 
 type eInvalidMemStreamAccess=class(Exception)
@@ -29,20 +35,19 @@ IMPLEMENTATION
 
 procedure tMemoryStream.Seek(absolute:LongWord);
  begin
- if absolute>=size then raise eInvalidMemStreamAccess.Create('Seek out of bounds');
- position:=data+absolute;
+ if absolute>size then raise eInvalidMemStreamAccess.Create('Seek out of bounds');
+ position:=absolute;
 end;
 
 procedure tMemoryStream.Skip(cnt:Word);
  begin
- if cnt>=size then raise eInvalidMemStreamAccess.Create('Seek out of bounds');
- position:=position+cnt;
+ Seek(position+cnt);
 end;
 
 procedure tMemoryStream.Read(var buf; cnt:Word);
  begin
- if (position+cnt)>=(data+length) then raise eInvalidMemStreamAccess.Create('Read out of bounds');
- Move(position^,buf,cnt);
+ if (position+cnt)>length then raise eInvalidMemStreamAccess.Create('Read out of bounds');
+ Move((base+position)^,buf,cnt);
  position:=position+cnt;
 end;
 
@@ -54,9 +59,9 @@ function  tMemoryStream.ReadWord(cnt:byte): LongWord;
  var tm:packed array [0..3] of byte;
  var i:byte;
  begin
- if (position+cnt)>=(data+length) then raise eInvalidMemStreamAccess.Create('Read out of bounds');
+ if (position+cnt)>length then raise eInvalidMemStreamAccess.Create('Read out of bounds');
  for i:=cnt-1 downto 0 do begin
-  tm[i]:=byte((position)^);
+  tm[i]:=byte((base+position)^);
   inc(position);
  end;
  {$ELSE}
@@ -67,16 +72,17 @@ function  tMemoryStream.ReadWord(cnt:byte): LongWord;
 end;
  
 procedure tMemoryStream.Rewind;
- begin position:=data; end;
+ begin position:=0; end;
 procedure tMemoryStream.Append;
- begin position:=data+length; end;
-function  tMemoryStream.Tell:LongWord;
- begin Tell:=position-data; end;
+ begin position:=length; end;
+function tMemoryStream.Tell:LongWord;
+ begin Tell:=position; end;
+
 procedure tMemoryStream.Write(var buf; cnt:word);
  begin
- if (position+cnt)>=(data+size) then raise eInvalidMemStreamAccess.Create('Write out of bounds');
- Move(buf,position^,cnt);
- length:=position-data;
+ if (position+cnt)>size then raise eInvalidMemStreamAccess.Create('Write out of bounds');
+ Move(buf,(base+position)^,cnt);
+ if position>length then length:=position;
 end;
 procedure tMemoryStream.WriteByte(v:byte);
  begin Write(v,1); end;
@@ -86,23 +92,37 @@ procedure tMemoryStream.WriteWord(v:LongWord; cnt:byte);
  var i:byte;
  begin
  {$IFDEF ENDIAN_LITTLE}
- if (position+cnt)>=(data+size) then raise eInvalidMemStreamAccess.Create('Write out of bounds');
+ if (position+cnt)>size then raise eInvalidMemStreamAccess.Create('Write out of bounds');
  for i:=cnt-1 to 0 do begin
-  byte(position^):=tm[i];
+  byte((base+position)^):=tm[i];
   inc(position);
  end;
+ if position>length then length:=position;
  {$ELSE}
  Write(tm[4-cnt],cnt);
  {$ENDIF}
- length:=position-data;
 end;
 
 procedure tMemoryStream.Init(ibuf:pointer; ilen,isize:LongWord);
  begin
- data:=ibuf;
+ base:=ibuf;
  length:=ilen;
  size:=isize;
+ seek(0);
 end;
+
+function tMemoryStream.WRBuf:pointer;
+ begin result:=base+position end;
+function tMemoryStream.WRBufLen:LongWord;
+ begin result:=size-position end;
+procedure tMemoryStream.WREnd(used:LongWord);
+ begin RDEnd(used); if position>length then length:=position end;
+function tMemoryStream.RDBuf:pointer;
+ begin result:=base+position end;
+function tMemoryStream.RDBufLen:LongWord;
+ begin result:=length-position end;
+procedure tMemoryStream.RDEnd(used:LongWord);
+ begin skip(used) end;
 
 END.
 
