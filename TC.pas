@@ -44,11 +44,9 @@ type tTCS=object {this is sender part}
  rxCumTime:tTime; {cumulative for current mark}
  rxCumSize:longword;
  txLastSize:word; {last recent}
- (*
  txLastTime:tDateTime; {last recent}
  txCumTime:tTime; {cumulative for current mark}
  txCumSize:longword;
- *)
  trySize:Word; {experimental size}
  isTrySize:boolean;
  SizeIncScarcity:Word; {inverse probability of size experiment}
@@ -172,7 +170,7 @@ procedure tTCS.Start; {start the transmission}
  mark:=Random(256);
  isTrySize:=false;
  isCanSend:=false;
- (*txLastSize:=0;*)
+ txLastSize:=0;
  paused:=false;
  Shedule(80,@TransmitDelay);
  Shedule(2000,@AdjustSpeed);
@@ -197,12 +195,14 @@ procedure tTCS.Send(var s:tMemoryStream);
  paused:=false;
  isCanSend:=false;
  ServerLoop.SendMessage(s.base^,s.length,remote);
- (*if txLastSize=0 then txCumTime:=0 else begin
+ if txLastSize=0 then begin
+  txCumTime:=0;
+  txCumSize:=0;
+ end else begin
   txCumTime:=txCumTime+((Now-txLastTime)*SecsPerDay);
-  inc(txCumSize,txLastSize);
+  txCumSize:=txCumSize+txLastSize;
  end;
  txLastTime:=Now;
- *)
  txLastSize:=s.length;
 end;
 
@@ -250,16 +250,16 @@ end;
 procedure tTCS.AdjustSpeed;
  var rxRate:real;
  var RateFill:single;
- (*var txRate:real;*)
+ var txRate:real;
  begin
  if isCanSend then begin paused:=true; exit end; {nothing to transmit, sleep forever}
  if isTimeout then begin Start; exit end;
  if markc>3 then begin {only proceed with enough data}
   rxrate:=rxCumSize/rxCumTime;
-  RateFill:=rxrate/cur.rate;
-  (*txrate:=txCumSize/txCumTime;
-  //write('speed: ',(rxrate/1024):1:4,'kB/s ',(txrate/1024):1:4,'kB/s (',((rxrate/cur.rate)*100):3:1,'%), ');*)
-  write('speed: ',(rxrate/1024):1:4,'kB/s (',(RateFill*100):3:1,'%), ');
+  if txCumTime>0.01 then txrate:=txCumSize/txCumTime
+  else txrate:=cur.Rate;
+  RateFill:=rxrate/txRate;
+  write('speed: ',(rxrate/1024):1:4,'kB/s @',(txRate/1024):1:4,'kB/s (',(RateFill*100):3:1,'%), ');
   if RateFill<0.85 then begin
    write('limit, ');
    {we hit the limit}
@@ -270,8 +270,7 @@ procedure tTCS.AdjustSpeed;
   end else begin
    write('pass, ');
    {rates are ok}
-   {if RateFill>1.05 then cur.Rate:=rxRate
-   else }cur.Rate:=cur.Rate+(cur.Rate*cur.RateIF);
+   cur.Rate:=txrate+(cur.Rate*cur.RateIF);
    if cur.Rate>limit.Rate then cur.Rate:=Limit.Rate;
    cur.RateIF:=cur.RateIF*2;
    if cur.RateIF>limit.RateIF then cur.RateIF:=Limit.RateIF;
@@ -285,6 +284,7 @@ procedure tTCS.AdjustSpeed;
  end;
  //writeln('txwait ',((cur.size/cur.rate)*1000):1:1);
  markc:=0;
+ txLastSize:=0;
  writeln('adjust to ',(Cur.Rate/1024):1:4,'kB/s mark', mark, ' size=',cur.Size);
  (*txLastSize:=0;*)
  Shedule(1600,@AdjustSpeed);
@@ -302,7 +302,7 @@ procedure tTCS.TransmitDelay;
   if trySize>Limit.Size then trySize:=Limit.Size;
   //writeln('Try size ',trySize);
   CanSend(trySize-5);
-  txwait:=txwait+((txLastSize/cur.rate)*1000);
+  txwait:=((txLastSize/cur.rate)*1000);
   Shedule(round(txwait),@TransmitDelay);
   if not isCanSend then Shedule(2500,@TimeoutIncreaseSize)
  end else begin
