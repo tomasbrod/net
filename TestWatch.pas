@@ -17,21 +17,21 @@ procedure tObj.Init;
  assign(f,'');
  reset(f);
  h:=GetFileHandle(f);
- writeln('Input handle ',h);
+ writeln('TestWatch: Input handle ',h);
  WatchFD(h,@Event1);
- Shedule(3201,@Event2);
+ Shedule(32,@Event2);
 end;
 
 procedure tObj.Event1(ev:Word);
  begin
- writeln('Event1 ',IntToHex(ev,4));
+ writeln('TestWatch: Event1 ',IntToHex(ev,4));
  readln;
  WatchFD(h,nil);
  UnShedule(@Event2);
 end;
 procedure tObj.Event2;
  begin
- writeln('Event2 ');
+ writeln('TestWatch: Event2 ');
  WatchFD(h,nil);
 end;
 
