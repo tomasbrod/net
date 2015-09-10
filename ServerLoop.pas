@@ -5,6 +5,7 @@ uses MemStream,NetAddr;
 
 procedure Main;
 
+{#Message handling#}
 type tSMsg=object
  Source: ^tNetAddr;
  Length: {Long}Word;
@@ -12,18 +13,17 @@ type tSMsg=object
  stream: tMemoryStream;
  channel: word;
  end;
-
 type tMessageHandler=procedure(msg:tSMsg);
-
 procedure SetMsgHandler(OpCode:byte; handler:tMessageHandler);
 procedure SetHiMsgHandler(handler:tMessageHandler);
 
+{#Sheduling and watching#}
 type tFDEventHandler=procedure(ev:Word) of object;
 type tOnTimer=procedure of object;
-
 procedure WatchFD(fd:tHandle; h:tFDEventHandler);
 procedure Shedule(timeout{ms}: LongWord; h:tOnTimer);
 procedure UnShedule(h:tOnTimer);
+ {note unshed will fail when called from OnTimer proc}
 
 IMPLEMENTATION
 
@@ -55,9 +55,6 @@ var ShedTop: ^tSheduled;
 var ShedUU: ^tSheduled;
 var LastShed: UnixType.timeval;
 var PollTimeout:LongInt;
-
-procedure IdleStuff;
-begin write('.'); end;
 
 procedure SC(fn:pointer; retval:cint);
  begin
@@ -139,7 +136,7 @@ procedure ShedRun;
  delta:=(Now.tv_sec-LastShed.tv_sec);
  if delta>6 then delta:=5000 else delta:=(delta*1000)+((Now.tv_usec-LastShed.tv_usec) div 1000);
  LastShed:=Now;
- writeln('DeltaTime: ',delta);
+ //writeln('DeltaTime: ',delta);
  while assigned(cur) do begin
   if cur^.left<delta then begin
    cur^.cb;
@@ -169,7 +166,7 @@ procedure Main;
   EventsCount:=fpPoll(@PollArr[0],PollTop,PollTimeout);
   if (eventscount=-1)and terminated then break;
   if eventscount=-1 then break;  {fixme: print error}
-  if eventscount=0 then IdleStuff else begin
+  if eventscount=0 then continue else begin
    {INET socket}
    with PollArr[0] do begin
     if (revents and pollIN)>0 then begin
