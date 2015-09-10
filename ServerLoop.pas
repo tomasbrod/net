@@ -1,7 +1,7 @@
 UNIT ServerLoop;
 
 INTERFACE
-uses MemStream,NetAddr;
+uses MemStream,NetAddr,UnixType;
 
 procedure Main;
 
@@ -17,6 +17,10 @@ type tMessageHandler=procedure(msg:tSMsg);
 procedure SetMsgHandler(OpCode:byte; handler:tMessageHandler);
 procedure SetHiMsgHandler(handler:tMessageHandler);
 
+procedure SendMessage(const data; len:word; const rcpt:tNetAddr );
+{procedure SendReply(const data; len:word; const rcpt:tSMsg );}
+procedure SendMessage(const data; len:word; const rcpt:tNetAddr; channel:word );
+
 {#Sheduling and watching#}
 type tFDEventHandler=procedure(ev:Word) of object;
 type tOnTimer=procedure of object;
@@ -25,9 +29,12 @@ procedure Shedule(timeout{ms}: LongWord; h:tOnTimer);
 procedure UnShedule(h:tOnTimer);
  {note unshed will fail when called from OnTimer proc}
 
+type tTimeVal=UnixType.timeval;
+var iNow:tTimeVal;
+
 IMPLEMENTATION
 
-USES SysUtils,Sockets,UnixType,BaseUnix
+USES SysUtils,Sockets,BaseUnix
      ,Unix
      ;
 
@@ -83,10 +90,21 @@ procedure s_SetupInet;
 
 var Terminated:boolean=false;
 
-procedure SendMessage(const data; len:word; const rcpt:tSockAddr );
+procedure SendMessage(const data; len:word; const rcpt:tSockAddrL );
  var rc:Integer;
  begin
  SC(@fpsendto,fpsendto(s_inet,@data,len,0,@rcpt,sizeof(sockaddr_in)));
+end;
+procedure SendMessage(const data; len:word; const rcpt:tNetAddr );
+ var sa:tSockAddrL;
+ begin
+ rcpt.ToSocket(sa);
+ SendMessage(data,len,sa);
+end;
+procedure SendMessage(const data; len:word; const rcpt:tNetAddr; channel:word );
+ begin
+ SendMessage(data,len,rcpt);
+ {todo: optimization??}
 end;
 
 procedure SignalHandler(sig:cint);CDecl;
@@ -123,7 +141,7 @@ end;
 procedure ShedRun;
  var cur:^tSheduled;
  var pcur:^pointer;
- var now:UnixType.timeval;
+ var now:UnixType.timeval absolute iNow;
  var delta:LongWord;
  var olTop:^tSheduled;
  begin
@@ -138,7 +156,7 @@ procedure ShedRun;
  LastShed:=Now;
  //writeln('DeltaTime: ',delta);
  while assigned(cur) do begin
-  if cur^.left<delta then begin
+  if (cur^.left<=delta)or(cur^.left=0) then begin
    cur^.cb;
    pcur^:=cur^.next;
    cur^.next:=ShedUU;
@@ -146,15 +164,20 @@ procedure ShedRun;
    cur:=pcur^;
   end else begin
    DEC(cur^.left,delta);
+   //writeln('Left: ',cur^.left);
    if pollTimeOut>cur^.left then PollTimeOut:=cur^.left;
-   //if pollTimeout>20 then pollTimeOut:=pollTimeOut div 2;
-   if pollTimeout=0 then pollTimeOut:=1;
    pcur:=@cur^.next;
    cur:=cur^.next;
   end;
  end;
  pcur^:=ShedTop; {append newly added tasks to end of untriggererd list}
  ShedTop:=olTop; {link in the untriggered tasks}
+ cur:=olTop;
+ while assigned(cur) do begin
+  if cur^.left<PollTimeout then PollTimeout:=cur^.left;
+  cur:=cur^.next;
+ end;
+ if pollTimeout=0 then pollTimeOut:=1;
 end;
 
 procedure Main;
@@ -192,7 +215,7 @@ procedure Main;
 end;
 
 procedure SetMsgHandler(OpCode:byte; handler:tMessageHandler);
-begin hnd[OpCode]:=handler; end;
+begin assert(hnd[OpCode]=nil); hnd[OpCode]:=handler; end;
 procedure SetHiMsgHandler(handler:tMessageHandler);
 begin Hihnd:=handler; end;
 
@@ -253,11 +276,12 @@ end;
 
 var i:byte;
 BEGIN
+ Randomize;
  fpSignal(SigInt,@SignalHandler);
  fpSignal(SigTerm,@SignalHandler);
  for i:=1 to high(hnd) do hnd[i]:=nil;
  pollTop:=1; {1 for basic listen}
  ShedTop:=nil;
- ShedUU:=nil;
+ ShedUU:=nil; {todo: allocate a few to improve paging}
  fpgettimeofday(@LastShed,nil);
 END.
