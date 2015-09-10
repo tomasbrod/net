@@ -72,6 +72,7 @@ procedure SC(fn:pointer; retval:cint);
 
 procedure s_SetupInet;
  var bind_addr:tInetSockAddr;
+ var turnon:cint;
  begin
   with bind_addr do begin
    family:=AF_INET;
@@ -79,6 +80,8 @@ procedure s_SetupInet;
    addr:=0; {any}
    s_inet:=fpSocket(family,SOCK_DGRAM,IPPROTO_UDP);
    SC(@fpSocket,s_inet);
+   turnon:=IP_PMTUDISC_DO;
+   SC(@fpsetsockopt,fpsetsockopt(s_inet, IPPROTO_IP, IP_MTU_DISCOVER, @turnon, sizeof(turnon)));
   end;
   SC(@fpBind,fpBind(s_inet,@bind_addr,sizeof(bind_addr)));
   with PollArr[0] do begin
@@ -93,7 +96,7 @@ var Terminated:boolean=false;
 procedure SendMessage(const data; len:word; const rcpt:tSockAddrL );
  var rc:Integer;
  begin
- SC(@fpsendto,fpsendto(s_inet,@data,len,0,@rcpt,sizeof(sockaddr_in)));
+ {SC(@fpsendto,}fpsendto(s_inet,@data,len,0,@rcpt,sizeof(sockaddr_in)){)};
 end;
 procedure SendMessage(const data; len:word; const rcpt:tNetAddr );
  var sa:tSockAddrL;
