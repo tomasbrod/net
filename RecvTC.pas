@@ -47,7 +47,7 @@ procedure HandleMSG(sock:tSocket; var s:tMemoryStream; const from: tSockAddr);
   6:begin
    r.WriteByte(7);
    r.WriteByte(mark);
-   r.WriteWord(r.length,2);
+   r.WriteWord(s.length,2);
    SC(@fpsendto,fpsendto(s_inet,r.base,r.length,0,@from,sizeof(sockaddr_in)));
    end;
  end;

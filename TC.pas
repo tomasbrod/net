@@ -36,6 +36,8 @@ type tTCS=object {this is sender part}
  MarkStart:tDateTime; {when the mark was started}
  MarkData:LongWord; {how much data sent}
  txLastSize:Word;
+ siMark:byte;
+ siNow,siWait:boolean;
  Cur:tTCSSe; {current values}
  Limit:tTCSSe; {maximum alloved}
  Initial:tTCSSe; {after start/timeout}
@@ -50,7 +52,7 @@ type tTCS=object {this is sender part}
  procedure TransmitDelay;
  //procedure TimeoutCont;
  procedure OnCont(rmark:byte;rrate:real);
- //procedure OnAck(rmark:byte;rsize:word);
+ procedure OnAck(rmark:byte;rsize:word);
  procedure Done; {unregister all callbacks}
  end;
 
@@ -92,13 +94,20 @@ procedure RecvCont(msg:ServerLoop.tSMsg);
  var t:^tTCS;
  var rmark:byte;
  var rrate:longword;
+ var rsize:word absolute rrate;
+ var opcode:byte;
  begin
  t:=GetTxer(msg.source^);
  if not assigned(t) then exit;
- msg.stream.skip(1); {skip opcode}
+ opcode:=msg.stream.ReadByte; {skip opcode}
  rmark:=msg.stream.ReadByte;
- rrate:=msg.stream.ReadWord(4);
- t^.OnCont(rmark,rrate);
+ if opcode=5 {periodic} then begin
+  rrate:=msg.stream.ReadWord(4);
+  t^.OnCont(rmark,rrate);
+ end else if opcode=7 {explicit} then begin
+  rsize:=msg.stream.ReadWord(2);
+  t^.OnAck(rmark,rsize);
+ end;
 end;
 
 procedure tTCS.Init;
@@ -109,8 +118,8 @@ procedure tTCS.Init;
  Limit.Size:=4096;
  Limit.RateIF:=1;
  Limit.SizeIF:=2;
- Initial.Rate:=20*1024;
- Initial.Size:={32+5}1024;
+ Initial.Rate:={20*}1024;
+ Initial.Size:=32+5;
  Initial.RateIF:=0.5;
  Initial.SizeIF:=2;
  minRateIF:=0.01;
@@ -122,21 +131,28 @@ procedure tTCS.Start; {start the transmission}
  Assert(assigned(CanSend) ); Assert(not remote.isnil);
  Cur:=Initial; 
  mark:=Random(256); MarkData:=0;
+ siMark:=0;
  Shedule(80,@TransmitDelay); 
 end;
 
 function tTCS.MaxSize(req:word):word;
  begin
- if req>cur.Size then MaxSize:=cur.Size else MaxSize:=req;
+ if siNow
+ then result:=round(cur.Size*(1+cur.SizeIF))
+ else result:=cur.Size;
+ dec(result,2);
+ if result>req then result:=req;
 end;
 
 procedure tTCS.WriteHeaders(var s:tMemoryStream);
  begin
- {if isTrySize then begin
- end else begin}
+ if siNow then begin
+  s.WriteByte(6);{opcode}
+  s.WriteByte(siMark);
+ end else begin
   s.WriteByte(4);{opcode}
   s.WriteByte(mark);
- {end;}
+ end;
 end;
 
 procedure tTCS.Send(var s:tMemoryStream);
@@ -147,6 +163,7 @@ procedure tTCS.Send(var s:tMemoryStream);
   MarkData:=1;
  end else MarkData:=MarkData+s.length;
  txLastSize:=s.length;
+ siNow:=false;
 end;
 
 procedure tTCS.OnCont(rmark:byte;rrate:real);
@@ -178,19 +195,23 @@ procedure tTCS.OnCont(rmark:byte;rrate:real);
   repeat mark:=Random(256) until (mark<>rMark);
   MarkData:=0;
   writeln('-> ',(Cur.Rate/1024):1:4,'kB/s if=',cur.RateIF:6:4);
- end;
- (*
- if rmark=simark then begin
-  isTrySize:=false;
-  TrySize:=0;
-  if rsize>cur.size then begin
+  if siWait then begin
+   cur.SizeIF:=cur.SizeIF/2;
+  end;
+  siMark:=0;
+end end;
+ 
+procedure tTCS.OnAck(rmark:byte;rsize:word);
+ begin
+ if rmark<>simark then exit;
+ if rsize>cur.size then begin
+   writeln('size inc to ',rsize);
    cur.SizeIF:=((rSize/cur.Size)-1)*2;
    if cur.SizeIF>Limit.SizeIF then Cur.SizeIF:=Limit.SizeIF;
    if (rsize/cur.rate)<=0.3 then cur.size:=rSize; {use new size for all transmit}
-   UnShedule(@TimeoutIncreaseSize);
-  end;
+   siWait:=false;
+ //  UnShedule(@TimeoutIncreaseSize);
  end;
- *)
 end;
 
 procedure tTCS.TransmitDelay;
@@ -200,12 +221,18 @@ procedure tTCS.TransmitDelay;
  txLastSize:=0;
  txwait:=0;
  burst:=0;
+ if (siMark=0)and(cur.Size<limit.Size){and(random(10)=0)} then begin
+  siNow:=true;
+  siWait:=true;
+  siMark:=random(255)+1;
+ end;
  repeat
   CanSend;
   if txLastSize=0 then exit;{pause}
   //txwait:=txwait+(txLastSize/cur.rate);
   txwait:=(MarkData/cur.Rate)-((Now-MarkStart)*SecsPerDay);
   inc(burst);
+  siNow:=false;
  until (txwait>0.02)or(burst>200);
  if txwait<0.02 then txwait:=0.01;
  //writeln(txwait:1:3,burst);
@@ -220,5 +247,5 @@ end;
 BEGIN
  FillByte(txers,sizeof(txers),0); {make'em nil}
  SetMsgHandler(5,@RecvCont);
- //SetMsgHandler(7,@RecvCtrl);
+ SetMsgHandler(7,@RecvCont);
 END.
