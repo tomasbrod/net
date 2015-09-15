@@ -38,6 +38,7 @@ type tTCS=object {this is sender part}
  txLastSize:Word;
  siMark:byte;
  siNow,siWait:boolean;
+ isTimeout:word;
  Cur:tTCSSe; {current values}
  Limit:tTCSSe; {maximum alloved}
  Initial:tTCSSe; {after start/timeout}
@@ -50,7 +51,7 @@ type tTCS=object {this is sender part}
  private
  {timer callbacks}
  procedure TransmitDelay;
- //procedure TimeoutCont;
+ procedure Timeout;
  procedure OnCont(rmark:byte;rrate:real);
  procedure OnAck(rmark:byte;rsize:word);
  procedure Done; {unregister all callbacks}
@@ -132,7 +133,9 @@ procedure tTCS.Start; {start the transmission}
  Cur:=Initial; 
  mark:=Random(256); MarkData:=0;
  siMark:=0;
+ isTimeout:=0;
  Shedule(80,@TransmitDelay); 
+ Shedule(2000,@Timeout); 
 end;
 
 function tTCS.MaxSize(req:word):word;
@@ -149,9 +152,12 @@ procedure tTCS.WriteHeaders(var s:tMemoryStream);
  if siNow then begin
   s.WriteByte(6);{opcode}
   s.WriteByte(siMark);
- end else begin
+ end else if isTimeout=0 then begin
   s.WriteByte(4);{opcode}
   s.WriteByte(mark);
+ end else begin
+  s.WriteByte(6);{opcode}
+  s.WriteByte(simark);
  end;
 end;
 
@@ -178,6 +184,8 @@ procedure tTCS.OnCont(rmark:byte;rrate:real);
   txRate:=MarkData/((rnow-MarkStart)*SecsPerDay);
   RateFill:=rxRate/txRate;
   write('speed: ',(rxRate/1024):1:3,'kB/s (',(RateFill*100):3:1,'% of ',txRate/1024:1:3,'), ');
+  UnShedule(@Timeout); 
+  Shedule(2000,@Timeout); 
   if RateFill<0.85 then begin
    write('limit, ');
    cur.Rate:=rxrate;
@@ -204,14 +212,27 @@ end end;
 procedure tTCS.OnAck(rmark:byte;rsize:word);
  begin
  if rmark<>simark then exit;
+ if isTimeout>0 then begin
+   Shedule(80,@TransmitDelay); 
+   isTimeout:=0;
+ end else
  if rsize>cur.size then begin
    writeln('size inc to ',rsize);
    cur.SizeIF:=((rSize/cur.Size)-1)*2;
    if cur.SizeIF>Limit.SizeIF then Cur.SizeIF:=Limit.SizeIF;
    if (rsize/cur.rate)<=0.3 then cur.size:=rSize; {use new size for all transmit}
-   siWait:=false;
- //  UnShedule(@TimeoutIncreaseSize);
  end;
+ if rsize>=cur.size then siWait:=false;
+end;
+
+procedure tTCS.Timeout;
+ begin
+ cur:=initial;
+ mark:=Random(256); MarkData:=0;
+ siMark:=0;
+ Inc(isTimeout);
+ Shedule(80,@TransmitDelay); 
+ Shedule(5000,@Timeout);
 end;
 
 procedure tTCS.TransmitDelay;
@@ -221,7 +242,7 @@ procedure tTCS.TransmitDelay;
  txLastSize:=0;
  txwait:=0;
  burst:=0;
- if (siMark=0)and(cur.Size<limit.Size){and(random(10)=0)} then begin
+ if (siMark=0)and(cur.Size<limit.Size){and(random(10)=0)}and(istimeout=0) then begin
   siNow:=true;
   siWait:=true;
   siMark:=random(255)+1;
@@ -229,6 +250,7 @@ procedure tTCS.TransmitDelay;
  repeat
   CanSend;
   if txLastSize=0 then exit;{pause}
+  if (isTimeout>0) then exit;
   //txwait:=txwait+(txLastSize/cur.rate);
   txwait:=(MarkData/cur.Rate)-((Now-MarkStart)*SecsPerDay);
   inc(burst);
@@ -242,6 +264,7 @@ end;
 procedure tTCS.Done; {unregister all callbacks}
  begin
  UnShedule(@TransmitDelay);
+ UnShedule(@Timeout);
 end;
 
 BEGIN
