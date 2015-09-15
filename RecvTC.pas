@@ -12,23 +12,55 @@ procedure SC(fn:pointer; retval:cint);
   end;
  end;
 
+var CurMark:byte=0;
+var PrvMark:byte=0;
+var StartT:tDateTime;
+var Total:LongWord=0;
+var DGcnt:LongWord=0;
+{opcode 4=data, 8=data-no-report, 6=data-immediate-ack}
+{opcode 5=cont, 7=ack}
+
 procedure HandleMSG(sock:tSocket; var s:tMemoryStream; const from: tSockAddr);
  var opcode:byte;
- var trid:word;
- var sec:word;
+ var mark:byte;
  var sendbuf:array [1..128] of byte;
  var r:tMemoryStream;
+ var rateR:real;
+ var rate:DWord; {BytesPerSecond shr 6 (=64)}
  begin
- opcode:=s.readbyte;
- assert(opcode=6);
- s.Read(trid,2);
- s.Read(sec,2);
  r.Init(@sendbuf,0,128);
- r.WriteByte(4);
- trid:=22; //intel :)
- r.Write(trid,2);
- r.Write(sec,2);
- r.WriteWord(s.length,2);
+ opcode:=s.ReadByte;
+ mark:=s.ReadByte;
+ case opcode of
+  4:begin
+    if mark<>PrvMark then begin
+    if mark<>CurMark then begin
+     PrvMark:=CurMark;
+     CurMark:=mark;
+     StartT:=now;
+     Total:=1;
+     DgCnt:=1;
+    end else begin Inc(Total,s.length); Inc(DgCnt) end;
+    end;
+   end;
+  8:;
+  6:begin
+   r.WriteByte(7);
+   r.WriteByte(mark);
+   r.WriteWord(r.length,2);
+   SC(@fpsendto,fpsendto(s_inet,r.base,r.length,0,@from,sizeof(sockaddr_in)));
+   end;
+ end;
+ if DgCnt<8 then exit;
+ if (now-Startt)<(0.4/SecsPerDay) then exit;
+ rateR:=Total/((now-Startt)*SecsPerDay);
+ writeln('Rate: ',(rateR/1024):7:1);
+ rate:=round(rateR/64);
+ StartT:=now;
+ Total:=1;
+ r.WriteByte(5);
+ r.WriteByte(mark);
+ r.WriteWord(rate,4);
  SC(@fpsendto,fpsendto(s_inet,r.base,r.length,0,@from,sizeof(sockaddr_in)));
 end;
 
@@ -37,7 +69,7 @@ procedure s_SetupInet;
  begin
   with bind_addr do begin
    family:=AF_INET;
-   port:=htons(3511);
+   port:=htons(3519);
    addr:=0; {any}
    s_inet:=fpSocket(family,SOCK_DGRAM,IPPROTO_UDP);
    SC(@fpSocket,s_inet);
