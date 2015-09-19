@@ -13,6 +13,7 @@ uses Sockets
  type tSockAddr= type tSockAddrL deprecated;
 
 TYPE
+ {$PACKENUM 1}
  tFamily=(afNil=0, afInet=1, afInet6 );
 
  { Network-byte-ordered words }
@@ -34,6 +35,7 @@ TYPE
   {$HINT Not actually testet, byt seems to work}
   procedure FromString( str :String );
   {$HINT Not actually testet, byt seems to work}
+  function Hash:Word;
 
   procedure LocalHost( af: tFamily );
   {Generate localhost address of address family af.}
@@ -210,6 +212,31 @@ procedure t.FromString( str :String );
  end else if fam='nil' then begin
   data.family:=afNil;
  end else raise eConvertError.Create('');
+end;
+
+function t.Hash:word;
+ var h:word;
+ var i:byte;
+ procedure hashstep(v:byte);
+  begin
+  h:=((h shl 5)and $FFFF) xor ((h shr 2)and $FFFF) xor v;
+ end;
+ begin
+ h:=0;
+ assert(sizeof(data.family)=1,'simple set size'+IntToStr(sizeof(data.family)));
+ hashstep(byte(data.family));
+ case data.Family of
+  afInet: for i:=1 to 4 do HashStep(data.inet.addr.s_bytes[i]);
+  afInet6: for i:=1 to 16 do HashStep(data.inet6.addr.u6_addr8[i]);
+  else AbstractError;
+ end;
+ case data.Family of
+  afInet,afInet6: begin 
+   HashStep(data.inet.port and $FF);
+   HashStep((data.inet.port shr 8) and $FF);
+  end;
+ end;
+ result:=h;
 end;
 
 const cLocalHostIP4:Sockets.tInAddr=( s_bytes:(127,0,0,1) );
