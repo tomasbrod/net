@@ -79,10 +79,10 @@ procedure s_SetupInet;
  var turnon:cint;
  begin
   with bind_addr do begin
-   family:=AF_INET;
-   port:=htons(3511);
-   addr:=0; {any}
-   s_inet:=fpSocket(family,SOCK_DGRAM,IPPROTO_UDP);
+   sin_family:=AF_INET;
+   sin_port:=htons(3511);
+   sin_addr.s_addr:=0; {any}
+   s_inet:=fpSocket(sin_family,SOCK_DGRAM,IPPROTO_UDP);
    SC(@fpSocket,s_inet);
    turnon:=IP_PMTUDISC_DO;
    SC(@fpsetsockopt,fpsetsockopt(s_inet, IPPROTO_IP, IP_MTU_DISCOVER, @turnon, sizeof(turnon)));
@@ -98,7 +98,6 @@ procedure s_SetupInet;
 var Terminated:boolean=false;
 
 procedure SendMessage(const data; len:word; const rcpt:tSockAddrL );
- var rc:Integer;
  begin
  {SC(@fpsendto,}fpsendto(s_inet,@data,len,0,@rcpt,sizeof(sockaddr_in)){)};
 end;
