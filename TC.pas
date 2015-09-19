@@ -80,21 +80,24 @@ procedure tTCS.Init(const iremote:tNetAddr);
  Initial.SizeIF:=2;
  minRateIF:=0.01;
  CanSend:=nil;
+ Cur:=Initial; 
+ txLastSize:=0;
 end;
 
 procedure tTCS.Start; {start the transmission}
  begin
  Assert(assigned(CanSend) ); Assert(not remote.isnil);
- Cur:=Initial; 
+ assert(txLastSize=0);
  mark:=Random(256); MarkData:=0;
  siMark:=0;
  isTimeout:=0;
  Shedule(80,@TransmitDelay); 
- Shedule(2000,@Timeout); 
+ Shedule(3000,@Timeout); 
 end;
 
 function tTCS.MaxSize(req:word):word;
  begin
+ req:=req-2;{headers}
  if siNow
  then result:=round(cur.Size*(1+cur.SizeIF))
  else result:=cur.Size;
@@ -196,12 +199,13 @@ end;
 
 procedure tTCS.Timeout;
  begin
+ if txLastSize=0 then exit; {suspend}
  cur:=initial;
  mark:=Random(256); MarkData:=0;
  siMark:=0;
  Inc(isTimeout);
  Shedule(80,@TransmitDelay); 
- Shedule(5000,@Timeout);
+ Shedule(3000,@Timeout);
 end;
 
 procedure tTCS.TransmitDelay;
@@ -218,8 +222,8 @@ procedure tTCS.TransmitDelay;
  end;
  repeat
   CanSend;
-  if txLastSize=0 then exit;{pause}
-  if (isTimeout>0) then exit;
+  if txLastSize=0 then exit; {pause}
+  if (isTimeout>0) then exit; {no burst, no shedule next}
   //txwait:=txwait+(txLastSize/cur.rate);
   txwait:=(MarkData/cur.Rate)-((Now-MarkStart)*SecsPerDay);
   inc(burst);
