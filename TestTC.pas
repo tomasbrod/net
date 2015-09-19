@@ -4,6 +4,7 @@ IMPLEMENTATION
 USES ServerLoop
     ,TC
     ,MemStream
+    ,NetAddr
     ;
 type t=object
  tcs:TC.tTCS;
@@ -29,10 +30,8 @@ end;
 procedure t.Init;
  begin
  cnt:=0;
- tcs.Init;
- tcs.Remote.FromString('//ip4/192.168.1.49/3519');
+ tcs.Init(tNetAddr('//ip4/127.0.0.1/3519'));
  tcs.CanSend:=@CanSend;
- TC.RegTXer(tcs);
  tcs.Start;
  writeln('TestTC: Transfer started');
 end;

@@ -6,6 +6,11 @@ if pass set payload to that
 useful for file transfer, voip should only consult the current rate
 and detect congestion based on latency
 
+Used by UploadManager. 1 TC per peer.
+
+Suspend: return from CanSend without sending :)
+Resume: call start
+
 opcodes:
  data=4
   mark:1;payload:XX
@@ -17,7 +22,7 @@ opcodes:
   mark:1;len:Word2
 }
 INTERFACE
-uses MemStream,NetAddr;
+uses MemStream,NetAddr,ServerLoop;
 
 type tTCSSe=record
  Rate:Real; {sending rate}
@@ -29,13 +34,13 @@ type tTCSSe=record
 
 type tTCS=object {this is sender part}
  {in order methods should be set/called}
- procedure Init; {set defaults for vars}
+ procedure Init(const iremote:tNetAddr); {set defaults for vars}
  public
  remote:tNetAddr;
  Mark:byte;
  MarkStart:tDateTime; {when the mark was started}
  MarkData:LongWord; {how much data sent}
- txLastSize:Word;
+ txLastSize:Word; {is zero if suspend}
  siMark:byte;
  siNow,siWait:boolean;
  isTimeout:word;
@@ -52,69 +57,19 @@ type tTCS=object {this is sender part}
  {timer callbacks}
  procedure TransmitDelay;
  procedure Timeout;
- procedure OnCont(rmark:byte;rrate:real);
- procedure OnAck(rmark:byte;rsize:word);
+ procedure OnCont(msg:ServerLoop.tSMsg);
+ procedure OnAck(msg:ServerLoop.tSMsg);
  procedure Done; {unregister all callbacks}
  end;
 
-procedure RegTxer(var t:tTCS);
-procedure DelTxer(var t:tTCS);
-
 IMPLEMENTATION
-uses ServerLoop,SysUtils;
+uses SysUtils;
 
-var Txers:array [0..31] of ^tTCS;
-
-procedure RegTxer(var t:tTCS);
- var tn:byte;
+procedure tTCS.Init(const iremote:tNetAddr);
  begin
- for tn:=0 to high(TXERS) do if txers[tn]=nil then break;
- assert(not assigned(txers[tn]));
- txers[tn]:=@t;
-end;
-
-procedure DelTxer(var t:tTCS);
- var tn:byte;
- begin
- tn:=0; while tn<=high(TXERS) do if txers[tn]=@t then break else inc(tn);
- assert(tn<=high(TXERS));
- t.Done;
- txers[tn]:=nil;
-end;
-
-type tTCSp=^tTCS;
-function GetTxer(const cource:tNetAddr):tTCSp;
- var tn:byte;
- begin
- result:=nil;
- tn:=0; while tn<=high(TXERS) do if txers[tn]^.remote=cource then break else inc(tn);
- if tn<=high(TXERS) then result:=txers[tn];
-end;
-
-procedure RecvCont(msg:ServerLoop.tSMsg);
- var t:^tTCS;
- var rmark:byte;
- var rrate:longword;
- var rsize:word absolute rrate;
- var opcode:byte;
- begin
- t:=GetTxer(msg.source^);
- if not assigned(t) then exit;
- opcode:=msg.stream.ReadByte; {skip opcode}
- rmark:=msg.stream.ReadByte;
- if opcode=5 {periodic} then begin
-  rrate:=msg.stream.ReadWord(4);
-  t^.OnCont(rmark,rrate);
- end else if opcode=7 {explicit} then begin
-  rsize:=msg.stream.ReadWord(2);
-  t^.OnAck(rmark,rsize);
- end;
-end;
-
-procedure tTCS.Init;
- begin
- remote.clear;
- //SizeIncScarcity:=20; {inverse probability of size experiment}
+ remote:=iremote;
+ SetMsgHandler(5,remote,@OnCont);
+ SetMsgHandler(7,remote,@OnAck);
  Limit.Rate:=2*1024*1024*1024; {2GB}
  Limit.Size:=4096;
  Limit.RateIF:=1;
@@ -172,12 +127,19 @@ procedure tTCS.Send(var s:tMemoryStream);
  siNow:=false;
 end;
 
-procedure tTCS.OnCont(rmark:byte;rrate:real);
+procedure tTCS.OnCont(msg:ServerLoop.tSMsg);
  var rnow:tDateTime;
  var RateFill:single;
  var txRate:real;
  var rxRate:real;
+ var rmark:byte;
+ var rrate:longword;
+ var opcode:byte;
  begin
+ opcode:=msg.stream.ReadByte; {skip opcode}
+ rmark:=msg.stream.ReadByte;
+ assert(opcode=5);
+ rrate:=msg.stream.ReadWord(4);
  if (rmark=Mark) then begin
   rnow:=Now;
   rxRate:=(rrate*64); {B/s}
@@ -209,8 +171,15 @@ procedure tTCS.OnCont(rmark:byte;rrate:real);
   siMark:=0;
 end end;
  
-procedure tTCS.OnAck(rmark:byte;rsize:word);
+procedure tTCS.OnAck(msg:ServerLoop.tSMsg);
+ var rmark:byte;
+ var rsize:word;
+ var opcode:byte;
  begin
+ opcode:=msg.stream.ReadByte; {skip opcode}
+ rmark:=msg.stream.ReadByte;
+ assert(opcode=7);
+ rsize:=msg.stream.ReadWord(2);
  if rmark<>simark then exit;
  if isTimeout>0 then begin
    Shedule(80,@TransmitDelay); 
@@ -265,10 +234,9 @@ procedure tTCS.Done; {unregister all callbacks}
  begin
  UnShedule(@TransmitDelay);
  UnShedule(@Timeout);
+ SetMsgHandler(5,remote,nil);
+ SetMsgHandler(7,remote,nil);
 end;
 
 BEGIN
- FillByte(txers,sizeof(txers),0); {make'em nil}
- SetMsgHandler(5,@RecvCont);
- SetMsgHandler(7,@RecvCont);
 END.
