@@ -264,6 +264,7 @@ procedure Main;
   PollTimeout:=5000;
   ShedRun;
   EventsCount:=fpPoll(@PollArr[0],PollTop,PollTimeout);
+  ShedRun;
   if (eventscount=-1)and terminated then break;
   if eventscount=-1 then break;  {fixme: print error}
   if eventscount=0 then continue else begin
