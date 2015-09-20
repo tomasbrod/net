@@ -12,10 +12,9 @@ type tChat=object
  rxSeq:Word;
  rxAcked:boolean;
  closed:boolean;
- txPk:pointer; txLen:word; {last sent, not acked msg}
  RTT:LongWord;{in ms}
- callback: procedure(msg:tSMsg;data:boolean) of object; {client must maintain active chats}
- TMhook: procedure(willwait:LongWord) of object;
+ callback: procedure(msg:tSMsg; data:boolean) of object; {client must maintain active chats}
+ TMhook  : procedure(willwait:LongWord      ) of object;
  procedure Init(const iremote:tNetAddr);
  procedure AddHeaders(var s:tMemoryStream);
  procedure Send(s:tMemoryStream);
@@ -23,13 +22,16 @@ type tChat=object
  procedure Ack;
  procedure Close;
  private
+ txPk:pointer; txLen:word; {last sent, not acked msg}
  txTime:tDateTime;
  procedure InitFrom(const iremote:tNetAddr; iopcode:byte);
  procedure Done;
  procedure Resend;
  procedure OnReply(msg:tSMsg);
 end;
+
 type tChatHandler=procedure(var nchat:tChat; msg:tSMsg);
+procedure SetChatHandler(initcode:byte; handler:tChatHandler);
 
 { download manager create FileRequest
  File Request open chat session to server
@@ -53,6 +55,11 @@ procedure tChat.Init(const iremote:tNetAddr);
  remote:=iremote;
  opcode:=128;
  while ServerLoop.IsMsgHandled(opcode,remote) do inc(opcode);
+ InitFrom(remote,opcode);
+end;
+procedure tChat.InitFrom(const iremote:tNetAddr; iopcode:byte);
+ begin
+ opcode:=iopcode;
  txSeq:=0;
  rxSeq:=0;
  rxAcked:=true; {to not ack pk 0}
@@ -70,6 +77,9 @@ end;
  ack_seq:2
  data:xx
 }
+
+procedure tCHat.AddHeaders(var s:tMemoryStream);
+ begin s.skip(5) end;
 
 procedure tChat.Send(s:tMemoryStream);
  begin
@@ -177,18 +187,31 @@ procedure tChat.OnReply(msg:tSMsg);
  end;
 end;
 
+var ChatHandlers: array [1..32] of tChatHandler;
+
+procedure SetChatHandler(initcode:byte; handler:tChatHandler);
+ begin
+ assert(ChatHandlers[initcode]=nil);
+ ChatHandlers[initcode]:=handler;
+end;
+
 procedure OnHiMsg(msg:tSMsg);
  {new chat was received!}
  var opcode:byte;
  var seq,aseq:word;
  var hnd:tChatHandler;
  var nchat:^tChat;
+ var ix:byte;
  begin
  opcode:=msg.stream.ReadByte;
+ assert(not IsMsgHandled(opcode,msg.source^));
  seq:=msg.stream.ReadWord(2);
  aseq:=msg.stream.ReadWord(2);
  if (seq<>1)and(aseq>0) then exit; {invalid initial state}
- hnd:=GetHnd(msg.stream.ReadByte);
+ ix:=msg.stream.ReadByte;
+ if (ix<1)or(ix>high(ChatHandlers)) then exit;
+ hnd:=ChatHandlers[ix];
+ if not assigned(hnd) then raise eXception.Create('No handler for initcode '+IntToStr(ix));
  msg.stream.seek(msg.stream.position-1);{unskip the initcode}
  New(nchat);
  nchat^.InitFrom(msg.Source^,opcode);
@@ -196,5 +219,6 @@ procedure OnHiMsg(msg:tSMsg);
 end;
 
 BEGIN
+ FillChar(ChatHandlers,sizeof(chathandlers),0);
  ServerLoop.SetHiMsgHandler(@OnHiMsg);
 END.
