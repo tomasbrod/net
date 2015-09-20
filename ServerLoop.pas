@@ -32,6 +32,7 @@ procedure UnShedule(h:tOnTimer);
 type tObjMessageHandler=procedure(msg:tSMsg) of object;
 {deliver message from peer to the object}
 procedure SetMsgHandler(OpCode:byte; from:tNetAddr; handler:tObjMessageHandler);
+function IsMsgHandled(OpCode:byte; from:tNetAddr):boolean;
 
 type tTimeVal=UnixType.timeval;
 var iNow:tTimeVal;
@@ -142,6 +143,9 @@ function FindPT(opcode:byte; const addr:tNetAddr):Word; { $FFFF=fail}
  result:=$FFFF;
 end;
 
+function IsMsgHandled(OpCode:byte; from:tNetAddr):boolean;
+ begin result:=FindPT(opcode,from)<>$FFFF end;
+
 procedure UnSetMsgHandler(const from:tNetAddr; opcode:byte);
  var i,h:word;
  begin
@@ -206,7 +210,7 @@ procedure DoSock(var p:tPollFD);
  Msg.Data:=@Buffer; {!thread}
  Msg.stream.Init(@Buffer,pkLen,sizeof(Buffer));
  Msg.channel:=0; {!multisocket}
- if Buffer[1]>128 then curhnd:=HiHnd else if Buffer[1]<=high(hnd) then curhnd:=hnd[Buffer[1]];
+ if Buffer[1]>=128 then curhnd:=HiHnd else if Buffer[1]<=high(hnd) then curhnd:=hnd[Buffer[1]];
  if Buffer[1] in PT_opcodes then ptidx:=FindPT(Buffer[1],FromG) else ptidx:=0;
  if ptidx>0 then curhndo:=PT[ptidx]^.handler;
 end;
