@@ -4,6 +4,7 @@ PROGRAM brodnetd;
 uses ServerLoop
     ,TestWatch
     ,TestTC
+	,TestChat
     ;
 
 BEGIN
