@@ -138,9 +138,9 @@ type tPeerTableBucket=record
  handler:tObjMessageHandler;
 end;
 var PT:array [0..255] of ^tPeerTableBucket;
-var PT_opcodes: set of 1..36;
+var PT_opcodes: set of 1..high(hnd);
 
-function FindPT(opcode:byte; const addr:tNetAddr):Word; { $FFFF=fail}
+function FindPT(opcode:byte; addr:tNetAddr):Word; { $FFFF=fail}
  var i,o:word;
  begin
  i:=(addr.hash+opcode) mod high(PT); {0..63}
@@ -188,7 +188,7 @@ procedure SetMsgHandler(OpCode:byte; from:tNetAddr; handler:tObjMessageHandler);
  PT[i]^.opcode:=OpCode;
  PT[i]^.remote:=from;
  PT[i]^.handler:=handler;
- Include(PT_opcodes,opcode);
+ if opcode<=high(hnd) then Include(PT_opcodes,opcode);
 end;
 
 {do not waste stack on statics}
@@ -197,18 +197,20 @@ end;
  var pkLen:LongWord;
  var From:tSockAddrL; {use larger struct so everything fits}
  var FromLen:LongWord;
+ var FromG:tNetAddr;
  var curhnd:tMessageHandler;
  var curhndo:tObjMessageHandler;
  var Msg:tSMsg;
  var tp:tPollTop;
 
-procedure DoSock(var p:tPollFD);
- var FromG:tNetAddr;
- var ptidx:byte;
+function DoSock(var p:tPollFD):boolean;
+ var ptidx:word;
  begin
  curhnd:=nil;
  curhndo:=nil;
- if (p.revents and pollIN)=0 then exit;
+ result:=false;
+ ptidx:=$FFFF;
+ if (p.revents and pollIN)=0 then exit else  result:=true;
  FromLen:=sizeof(From);
  pkLen:=fprecvfrom(p.FD,@Buffer,sizeof(Buffer),0,@from,@fromlen);
  SC(@fprecvfrom,pkLen);
@@ -220,8 +222,10 @@ procedure DoSock(var p:tPollFD);
  Msg.stream.Init(@Buffer,pkLen,sizeof(Buffer));
  Msg.channel:=0; {!multisocket}
  if Buffer[1]>=128 then curhnd:=HiHnd else if Buffer[1]<=high(hnd) then curhnd:=hnd[Buffer[1]];
- if Buffer[1] in PT_opcodes then ptidx:=FindPT(Buffer[1],FromG) else ptidx:=0;
- if ptidx>0 then curhndo:=PT[ptidx]^.handler;
+ if (Buffer[1]>high(hnd))or(Buffer[1] in PT_opcodes) then begin
+  ptidx:=FindPT(Buffer[1],FromG);
+  if ptidx<$FFFF then curhndo:=PT[ptidx]^.handler;
+ end;
 end;
 
 procedure ShedRun;
@@ -278,7 +282,7 @@ procedure Main;
   if eventscount=-1 then break;  {fixme: print error}
   if eventscount=0 then continue else begin
    {INET socket}
-   DoSock(PollArr[0]);
+   if DoSock(PollArr[0]) then
    if assigned(curhndo) then curhndo(msg)
    else if assigned(curhnd) then curhnd(msg)
    else raise eXception.Create('No handler for opcode '+IntToStr(Buffer[1]));
