@@ -11,7 +11,7 @@ type tMemoryStream=object
  procedure Skip(cnt:Word);
  procedure Read(var buf; cnt:Word);
  function  ReadByte:byte;
- function  ReadWord(cnt:byte): LongWord; experimental;
+ function  ReadWord(cnt:byte): LongWord;
  procedure Rewind;
  procedure Append;
  function  Tell:LongWord;

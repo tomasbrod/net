@@ -19,23 +19,29 @@ procedure tObj.Init;
  h:=GetFileHandle(f);
  writeln('TestWatch: Input handle ',h);
  WatchFD(h,@Event1);
- Shedule(32,@Event2);
 end;
 
 procedure tObj.Event1(ev:Word);
  begin
  writeln('TestWatch: Event1 ',IntToHex(ev,4));
  readln;
- WatchFD(h,nil);
- UnShedule(@Event2);
+ writeln('TestWatch: shedule ev2');
+ Shedule(1000,@Event2);
 end;
 procedure tObj.Event2;
  begin
  writeln('TestWatch: Event2 ');
- WatchFD(h,nil);
 end;
 
-var o:tObj;
+procedure Test;
+ var o:^tObj;
+ begin
+ if OptIndex('-test-watch')>0 then begin
+  new(o);
+  o^.Init;
+ end;
+end;
+  
 BEGIN
- o.Init;
+ test;
 END.

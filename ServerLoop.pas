@@ -34,6 +34,9 @@ type tObjMessageHandler=procedure(msg:tSMsg) of object;
 procedure SetMsgHandler(OpCode:byte; from:tNetAddr; handler:tObjMessageHandler);
 function IsMsgHandled(OpCode:byte; from:tNetAddr):boolean;
 
+function OptIndex(o:string):word;
+function OptParamCount(o:word):word;
+
 type tTimeVal=UnixType.timeval;
 var iNow:tTimeVal;
 
@@ -78,10 +81,16 @@ procedure SC(fn:pointer; retval:cint);
 procedure s_SetupInet;
  var bind_addr:tInetSockAddr;
  var turnon:cint;
+ var oi:word;
  begin
   with bind_addr do begin
    sin_family:=AF_INET;
-   sin_port:=htons(3511);
+   oi:=OptIndex('-port');
+   if oi=0 then sin_port:=htons(3511)
+   else begin
+    assert(OptParamCount(oi)=1);
+    sin_port:=htons(StrToInt(paramstr(oi+1)));
+   end;
    sin_addr.s_addr:=0; {any}
    s_inet:=fpSocket(sin_family,SOCK_DGRAM,IPPROTO_UDP);
    SC(@fpSocket,s_inet);
@@ -343,6 +352,25 @@ procedure UnShedule(h:tOnTimer);
    pcur:=@cur^.next;
    cur:=pcur^;
   end;
+ end;
+end;
+
+function OptIndex(o:string):word;
+ begin
+ result:=paramcount;
+ while result>0 do begin
+  if o=system.paramstr(result) then break;
+  dec(result);
+ end;
+end;
+
+function OptParamCount(o:word):word;
+ var i:word;
+ begin
+ result:=0;
+ if o>0 then for i:=o+1 to paramcount do begin
+  if paramstr(i)[1]<>'-' then inc(result)
+  else break;
  end;
 end;
 

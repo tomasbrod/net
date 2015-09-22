@@ -5,14 +5,14 @@ USES ServerLoop
     ,TC
     ,MemStream
     ,NetAddr
+    ,SysUtils
     ;
 type t=object
  tcs:TC.tTCS;
  cnt:byte;
  buf: array [1..4096] of char;
  procedure CanSend;
- procedure Init;
- end;
+end;
 
 procedure t.CanSend;
  var s:tMemoryStream;
@@ -27,16 +27,24 @@ procedure t.CanSend;
  tcs.Send(s);
 end;
 
-procedure t.Init;
+procedure Test;
+ var o:^t;
+ var oi:word;
+ const opt='-test-tc';
  begin
- cnt:=0;
- tcs.Init(tNetAddr('//ip4/127.0.0.1/3519'));
- tcs.CanSend:=@CanSend;
- tcs.Start;
- writeln('TestTC: Transfer started');
+ oi:=OptIndex(opt);
+ if oi>0 then begin
+  assert(OptParamCount(oi)=1,opt+'(rcpt:tNetAddr) '+IntToStr(OptParamCount(oi)));
+  New(o);
+  with o^ do begin
+   cnt:=0;
+   tcs.Init(paramstr(oi+1));
+   tcs.CanSend:=@CanSend;
+   tcs.Start;
+  end;
+ end;
 end;
-
-var o:t;
+        
 BEGIN
- o.Init;
+ test;
 END.
