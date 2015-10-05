@@ -22,7 +22,7 @@ opcodes:
   mark:1;len:Word2
 }
 INTERFACE
-uses MemStream,NetAddr,ServerLoop;
+uses MemStream,NetAddr,ServerLoop,opcode;
 
 type tTCSSe=record
  Rate:Real; {sending rate}
@@ -68,8 +68,8 @@ uses SysUtils;
 procedure tTCS.Init(const iremote:tNetAddr);
  begin
  remote:=iremote;
- SetMsgHandler(5,remote,@OnCont);
- SetMsgHandler(7,remote,@OnAck);
+ SetMsgHandler(opcode.tccont,remote,@OnCont);
+ SetMsgHandler(opcode.tceack,remote,@OnAck);
  Limit.Rate:=2*1024*1024*1024; {2GB}
  Limit.Size:=4096;
  Limit.RateIF:=1;
@@ -108,13 +108,13 @@ end;
 procedure tTCS.WriteHeaders(var s:tMemoryStream);
  begin
  if siNow then begin
-  s.WriteByte(6);{opcode}
+  s.WriteByte(opcode.tcdataimm);{opcode}
   s.WriteByte(siMark);
  end else if isTimeout=0 then begin
-  s.WriteByte(4);{opcode}
+  s.WriteByte(opcode.tcdata);{opcode}
   s.WriteByte(mark);
  end else begin
-  s.WriteByte(6);{opcode}
+  s.WriteByte(opcode.tcdataimm);{opcode}
   s.WriteByte(simark);
  end;
 end;
