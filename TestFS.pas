@@ -25,6 +25,7 @@ procedure t.ST1(msg:tSMsg; data:boolean);
   s.WriteByte(99);
   ch.Send(s);
   ch.Callback:=@ST2;
+  halt(32);
  end else writeln('unexpected data');
 end;
 procedure t.ST2(msg:tSMsg; data:boolean);

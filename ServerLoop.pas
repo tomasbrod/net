@@ -236,6 +236,7 @@ procedure ShedRun;
  var olTop:^tSheduled;
  begin
  {Sheduling}
+ {fixme: proste niak aby to šlo vymazať z callbacku}
  olTop:=ShedTop;
  pcur:=@olTop;
  cur:=pcur^;

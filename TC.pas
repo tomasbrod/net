@@ -43,12 +43,13 @@ type tTCS=object {this is sender part}
  txLastSize:Word; {is zero if suspend}
  siMark:byte;
  siNow,siWait:boolean;
- isTimeout:word;
+ isTimeout,maxTimeout:word;
  Cur:tTCSSe; {current values}
  Limit:tTCSSe; {maximum alloved}
  Initial:tTCSSe; {after start/timeout}
  minRateIF:single; {used after rate decrease}
  CanSend: procedure of object;   {called when transmit possible}
+ OnTimeout: procedure of object;
  procedure Start; {start the transmission}
  function MaxSize(req:word):word;
  procedure WriteHeaders(var s:tMemoryStream); {add headers before the data}
@@ -80,6 +81,8 @@ procedure tTCS.Init(const iremote:tNetAddr);
  Initial.SizeIF:=2;
  minRateIF:=0.01;
  CanSend:=nil;
+ OnTimeout:=nil;
+ maxTimeout:=65535;
  Cur:=Initial; 
  txLastSize:=0;
 end;
@@ -204,6 +207,7 @@ procedure tTCS.Timeout;
  mark:=Random(256); MarkData:=0;
  siMark:=0;
  Inc(isTimeout);
+ if (isTimeout>maxTimeout)and assigned(OnTimeout) then OnTimeout;
  Shedule(80,@TransmitDelay); 
  Shedule(3000,@Timeout);
 end;
