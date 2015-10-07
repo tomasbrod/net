@@ -1,7 +1,15 @@
 UNIT UPMGR;
 {Upload Manager for brodnetd}
+
+{all file requests in one chat
+ -chat
+ >FILETRANSFER
+ <ACK
+ ...
+ Close:><CLOSE
+}
+
 {mission:
- multiplex uploads thru TC connection
   - read files
   - add demux info
   - add sequence/offset
@@ -13,56 +21,127 @@ UNIT UPMGR;
 }
 
 {to download a file:
- - send file request (chat)
-   (GET channel CHK hash ofset length)
-   - channel, client choose, reuse
- - prepare recv channel
- - wait reply (positive/negative)
+ >GET channel CHK hash ofs+len (if len>0 start transfer)
+ <INFO/FAIL
+ <DONE channel
+ [
+ >SEG channel ofs len
+ <SEGOK/fail
+ <DONE channel
+ ]
+ >FIN channel
 }
 
 INTERFACE
-USES TC;
-
-type tUH = procedure(var tcs:tTCS): of object;
-procedure AddUpload(rcpt:tNetAddr; channel:byte; handler:tUH);
-{delete with handler=nil}
+USES Chat,TC,opcode,ServerLoop,MemStream,NetAddr;
 
 IMPLEMENTATION
 
-type tPeer_ptr=^tPeer; tPeer=object
- tcs: tTCS;
- prv: ^tUH; {dynamic array}
- prvc: word; {number of allocated items unused are nil}
- next:tPeer_ptr;
- procedure OnCont;
- function AllocChannel:word;
+type
+tAggr_ptr=^tAggr;
+tPrv=object
+ u:byte;
 end;
-var Peers:^tPeer;
+tPrv_ptr=^tPrv;
+tAggr=object
+ state: byte; {0=idle}
+ tcs: tTCS;
+ ch: ^tChat;
+ prv: array of tPrv;
+ next,prev: tAggr_ptr;
+ //procedure OnCont;
+ procedure OnMsg(msg: tSMsg; data: boolean);
+ procedure Init(var nchat:tChat; msg:tSMsg);
+ procedure Done;
+ procedure SendTestReply;
+end;
 
-function FindPeer(const addr:tNetAddr): tPeer_ptr;
+var Peers:^tAggr;
+
+procedure tAggr.OnMsg(msg: tSMsg; data: boolean);
+ var op:byte;
+ begin
+ if data then begin
+  op:=msg.stream.readbyte;
+  case op of
+  opcode.upClose: begin
+   ch^.Ack;
+   Done;
+   FreeMem(@self,sizeof(self));
+   end;
+  99: SendTestReply;
+  end{case};
+ end{data};
+end;
+
+procedure tAggr.SendTestReply;
+ var s:tMemoryStream;
+ begin
+ s.Init(GetMem(56),0,56);
+ ch^.AddHeaders(s);
+ s.WriteByte(98);
+ s.WriteByte(42);
+ ch^.send(s);
+end;
+
+procedure tAggr.Init(var nchat:tChat; msg:tSMsg);
+ begin
+ next:=Peers;
+ prev:=nil;
+ if assigned(Peers) then Peers^.prev:=@self;
+ Peers:=@self;
+ ch:=@nchat;
+ tcs.Init(msg.source^);
+ //tcs.CanSend:=@OnCont;
+ SetLength(prv,2);
+ prv[0].u:=0;
+ prv[1].u:=0;
+ ch^.Callback:=@OnMsg;
+ //ch^.TMHook
+ writeln('upmgr: send ack to init');
+ ch^.Ack;
+ state:=0;
+end;
+
+procedure tAggr.Done;
+ var s:tMemoryStream;
+ begin
+ {s.Init(GetMem(56),0,56);
+ ch^.AddHeaders(s);
+ s.WriteByte(opcode.upClose);
+ s.WriteByte(22);
+ ch^.send(s);}
+ ch^.Close;
+ tcs.Done;
+ if assigned(prev) then prev^.next:=next else Peers:=next;
+ if assigned(next) then next^.prev:=prev;
+ state:=$FF;
+end;
+
+function FindAggr({const} addr:tNetAddr): tAggr_ptr;
  begin
  result:=Peers;
  while assigned(result) do begin
   if result^.tcs.remote=addr then exit;
+  assert(result^.prev=result);
   result:=result^.next;
  end;
 end;
 
-procedure AddUpload(rcpt:tNetAddr; channel:byte; handler:tUH);
- var peer:^tPeer;
+procedure ChatHandler(var nchat:tChat; msg:tSMsg);
+ var dup:^tAggr;
  begin
- peer:=FindPeer(rcpt);
- if not assigned(peer) then begin
-  New(peer);
-  peer^.next:=Peers;
-  peer^.prvc:=channel+1;
-  peer^.prv:=GetMem(sizeof(peer^.prv)*peer^.prvc);
-  Peers:=peer;
-  peer^.tcs.Init(rcpt);
-  peer^.tcs.CanSend:=@OnCont;
+ {check dup}
+ dup:=FindAggr(msg.source^);
+ if assigned(dup) then begin
+  Dup^.Done;
  end else begin
- 
+  New(dup);
  end;
- if peer^.tcs.txLastSize=0 then peer^.tcs.Start;
- 
- 
+ writeln('upmgr: init');
+ Dup^.Init(nchat,msg);
+end;
+
+BEGIN
+ SetChatHandler(opcode.upFileServer,@ChatHandler);
+END.

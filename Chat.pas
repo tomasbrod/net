@@ -124,7 +124,7 @@ procedure tChat.Close;
  Ack;
  closed:=true;
  if txLen=0 {no packets in flight} then begin
-  Shedule(3000{todo},@Done); {wait for something lost}
+  Shedule(5000{todo},@Done); {wait for something lost}
   callback:=nil; {avoid calling}
   tmhook:=nil;
  end;
@@ -169,6 +169,16 @@ procedure tChat.OnReply(msg:tSMsg);
  msg.stream.skip(1{opcode});
  seq:=msg.stream.ReadWord(2);
  aseq:=msg.stream.ReadWord(2);
+ if aseq>0 then {ack of our msg} begin
+  if (aseq=txSeq)and(txLen>0) {it is current} then begin
+   if txTime>0 then RTT:=Round((Now-txTime)*MsecsPerDay);
+   FreeMem(txPk,txLen);
+   TxLen:=0;
+   txPk:=nil;
+   if assigned(callback) then callback(msg,false);
+   ServerLoop.UnShedule(@Resend);
+  end else {write(' old-ack')it is ack of old data, do nothing};
+ end;
  if seq>0 then {some data} begin
   if seq<=rxSeq then {remote didnt get our ack} begin
    s.Init(GetMem(5),0,5);
@@ -184,16 +194,6 @@ procedure tChat.OnReply(msg:tSMsg);
    rxAcked:=false;
    if assigned(callback) then callback(msg,true);
   end;
- end;
- if aseq>0 then {ack of our msg} begin
-  if (aseq=txSeq)and(txLen>0) {it is current} then begin
-   if txTime>0 then RTT:=Round((Now-txTime)*MsecsPerDay);
-   FreeMem(txPk,txLen);
-   TxLen:=0;
-   txPk:=nil;
-   if assigned(callback) then callback(msg,false);
-   ServerLoop.UnShedule(@Resend);
-  end else {write(' old-ack')it is ack of old data, do nothing};
  end;
 end;
 

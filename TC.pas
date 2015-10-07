@@ -53,13 +53,13 @@ type tTCS=object {this is sender part}
  function MaxSize(req:word):word;
  procedure WriteHeaders(var s:tMemoryStream); {add headers before the data}
  procedure Send(var s:tMemoryStream);
+ procedure Done; {unregister all callbacks}
  private
  {timer callbacks}
  procedure TransmitDelay;
  procedure Timeout;
  procedure OnCont(msg:ServerLoop.tSMsg);
  procedure OnAck(msg:ServerLoop.tSMsg);
- procedure Done; {unregister all callbacks}
  end;
 
 IMPLEMENTATION
