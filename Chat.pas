@@ -18,6 +18,7 @@ type tChat=object
  DisposeHook: procedure of object; {called instead of freeing self}
  procedure Init(const iremote:tNetAddr);
  procedure AddHeaders(var s:tMemoryStream);
+ procedure StreamInit(var s:tMemoryStream; l:word);
  procedure Send(s:tMemoryStream);
   {the stream can be invalidated, but the buffer must not be modified or freed}
  procedure Ack;
@@ -84,6 +85,11 @@ end;
 
 procedure tCHat.AddHeaders(var s:tMemoryStream);
  begin s.skip(5) end;
+procedure tChat.StreamInit(var s:tMemoryStream; l:word);
+ begin
+ s.Init(GetMem(l+5),0,l+5);
+ AddHeaders(s);
+end;
 
 procedure tChat.Send(s:tMemoryStream);
  begin
