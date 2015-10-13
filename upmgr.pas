@@ -1,187 +1,299 @@
 UNIT UPMGR;
 {Upload Manager for brodnetd}
 
-{mission:
-  - read files
-  - add demux info
-  - add sequence/offset
-  - handle retransmit requests
-  - handle all requests
-  - deprioritize/cancel uploads
- keep one TC connection per peer (+expire-delete)
- => need 'chat' protocol
-}
-
 INTERFACE
 USES Chat,TC,opcode,ServerLoop,MemStream,NetAddr;
 
 IMPLEMENTATION
+USES ZidanStore;
 
 type
 tAggr_ptr=^tAggr;
-tPrv=object
- u:byte;
-end;
 tPrv_ptr=^tPrv;
+tPrv=object
+ aggr:tAggr_ptr;
+ ch: ^tChat;
+ chan: byte;
+ next,prev: tPrv_ptr;
+ weight,wcur:Word;
+ isOpen,Active:boolean;
+ seglen:LongWord;
+ datafile:file of byte;
+ procedure Init(ag:tAggr_ptr; var nchat:tChat; msg: tSMsg);
+ procedure OnMsg(msg:tSMsg; data:boolean);
+ procedure IdleTimeout;
+ procedure ChatTimeout(willwait:LongWord);
+ procedure Cont;
+ procedure DoGET(const fid:tfid; base,limit:LongWord);
+ procedure DoSEG(base,limit:LongWord);
+ procedure Start;
+ procedure Stop;
+ procedure DoClose;
+end;
 tAggr=object
- idle: boolean;
  tcs: tTCS;
- ch:^tChat;
- prv: array [0..15] of ^tPrv;
- cprv:byte;{current}
+ rekt:boolean;
  next,prev: tAggr_ptr;
- procedure OnCont;
- procedure OnMsg(msg: tSMsg; data: boolean);
- procedure Init(var nchat:tChat; msg:tSMsg);
- procedure ForceClose;
+ prv:^tPrv;
+ Cnt:Byte;
+ procedure UnRef;
+ procedure Cont;
+ procedure Init(const source:tNetAddr);
  procedure Done;
- procedure IdleTimeout; procedure TCTimeout; procedure CHTimeout(willwait:LongWOrd);
- procedure SendTestReply;
- procedure ExpandPrv(last:byte);
+ procedure TCTimeout;
 end;
 
 var Peers:^tAggr;
 
 {Requests
 Close();
-GET(channel:byte; filehash:20; baseHi:word2; base:word4; limit:word4);
-SEG(channel:byte; baseHi:word2; base:word4; limit:word4);
-FIN(channel:byte; avail:byte);
+GET(filehash:20; baseHi:word2; base:word4; limit:word4);
+SEG(baseHi:word2; base:word4; limit:word4);
 }{Responses
-INFO(channel:byte; struct);
-FAIL(channel:byte; code:byte);
-DONE(channel:byte);
+INFO(sizeHi:word2; size:word4; final:byte; seglen:word4);
+FAIL(code:byte;...);
+DONE();
 }
 
-procedure tAggr.OnMsg(msg: tSMsg; data: boolean);
- var op:byte;
+procedure tPrv.DoGET(const fid:tfid; base,limit:LongWord);
+ var err:tmemorystream;
+ var info:tStoreObjectInfo;
  begin
- if data then begin
-  op:=msg.stream.readbyte;
-  case op of
-  opcode.upClose: begin
-   ch^.Ack;
-   Done;
-   FreeMem(@self,sizeof(self));
-   end;
-  opcode.upGET: ReqGET(msg);
-  99: SendTestReply;
-  end{case};
- end{data};
-end;
-
-procedure tAggr.ReqGET(msg:tSMsg);
- var chan:byte;
- var filehash: array [1..20] of byte;
- var basehi:word;
- var base:LongWord;
- var limit:LongWord;
- begin
- if msg.stream.RdBufLen<31 then begin
-  SendError(opcode.upErrMalformed); exit end;
- chan:=msg.stream.ReadByte;
- if chan>high(prv) then begin
-  SendError(opcode.upErrHiChan,chan); exit end;
- if assigned(prv[chan]) then begin
-  SendError(opcode.upErrChanInUse,chan); exit end;
- msg.stream.Read(FileHash,20);
- basehi:=msg.stream.ReadWord(2);
- base:=msg.stream.Read(4);
- limit:=msg.stream.Read(4);
- New(prv[chan]);
+ Assert(not(active or isOpen)); //todo
  ch^.Ack;
- with prv[chan]^ do begin
-  channel:=chan;
-  aggr:=@self;
-  Init(filehash,basehi,base,limit);
+ info.Open(fid);
+ if not info.final then begin
+  info.rc:=200;
+  Close(info.hnd);
+ end;
+ if info.rc>0 then begin
+  ch^.StreamInit(err,3);
+  err.WriteByte(upFAIL);
+  if (info.rc=1)or(not info.final) then err.WriteByte(upErrNotFound)
+  else begin err.WriteByte(upErrIO); err.WriteByte(info.rc) end;
+  ch^.Send(err);
+ end else begin
+  ch^.StreamInit(err,12);
+  err.WriteByte(upINFO);
+  datafile:=info.hnd;
+  isopen:=true;
+  err.WriteWord(0,2);
+  err.WriteWord(info.length,4);
+  seglen:=limit;
+  if info.length<seglen then seglen:=info.length;
+  err.WriteByte(1);
+  err.WriteWord(seglen,4);
+  ch^.Send(err);
+  Start;
  end;
 end;
- 
-procedure tAggr.OnCont;
- var pprv:byte;
+
+procedure tPrv.DoSEG(base,limit:LongWord);
  begin
- pprv:=cprv;
- repeat
- repeat
-  if cprv>=length(prv) then cprv:=0 else inc(cprv);
-  if cprv=pprv then begin
-   idle:=true;
-   Shedule(15000,@IdleTimeout);
-   exit;
-  end;
- until prv[cprv].u>0;
- {}
- until tcs.txLastSize>0;
 end;
 
-procedure tAggr.SendTestReply;
+procedure tPrv.Start;
+ begin
+ Assert(isOpen);
+ Assert(not Active);
+ Active:=true;
+ UnShedule(@IdleTimeout);
+ if not assigned(aggr^.prv) then begin
+  next:=@self;
+  prev:=@self;
+  aggr^.prv:=@self;
+ end else begin
+  next:=aggr^.prv^.next;
+  prev:=aggr^.prv;
+  prev^.next:=@self;
+  next^.prev:=@self;
+ end;
+ wcur:=weight;
+end;
+
+procedure tPrv.Stop;
+ begin
+ Assert(isOpen);
+ Assert(Active);
+ if prev<>@self then begin
+  prev^.next:=next;
+  next^.prev:=prev;
+ end else next:=nil;
+ if aggr^.prv=@self then aggr^.prv:=next;
+ active:=false;
+ Shedule(20000,@IdleTimeout);
+end;
+
+procedure tPrv.Cont;
  var s:tMemoryStream;
+ var sz:LongWord;
+ var rs:LongWord;
+ var buf:array [1..4096] of byte;
  begin
- writeln('upmgr: test');
- s.Init(GetMem(56),0,56);
- ch^.AddHeaders(s);
- s.WriteByte(98);
- s.WriteByte(42);
- ch^.send(s);
+ Assert(Active and isOpen);
+ sz:=SegLen;
+ if SegLen>high(buf) then sz:=high(buf) else sz:=SegLen;
+ sz:=aggr^.tcs.MaxSize(sz);
+ //s.Init(GetMem(sz),0,sz);
+ s.Init(@buf,0,sz);
+ aggr^.tcs.WriteHeaders(s);
+ Assert(s.WrBufLen=sz); //really?
+ BlockRead(datafile,s.WrBuf^,s.WrBufLen,rs);
+ s.WrEnd(rs);
+ Assert(RS=s.WrBufLen);//todo
+ aggr^.tcs.Send(s);
+ //FreeMem(s.base,s.size);
+ SegLen:=SegLen-sz;
+ dec(wcur);
+ if wcur=0 then begin
+  wcur:=weight;
+  aggr^.prv:=next;
+ end;
 end;
 
-procedure tAggr.Init(var nchat:tChat; msg:tSMsg);
- var i:byte;
+procedure tPrv.DoClose;
+ begin
+ if Active then Stop;
+ if isOpen then Close(datafile);
+ isOpen:=false;
+ UnShedule(@IdleTimeout);
+ ch^.Ack;
+ ch^.Close;
+ aggr^.UnRef;
+ FreeMem(@self,sizeof(self));
+end;
+
+procedure tPrv.OnMsg(msg:tSMsg; data:boolean);
+ var op:byte;
+ var hash:tfid;
+ var base:LongWord;
+ var limit:LongWord;
+ var err:tmemorystream;
+ label malformed;
+ begin
+ if not data then exit; //todo
+ Assert(not(aggr^.rekt and active));
+ if aggr^.rekt then exit;
+ if msg.stream.RdBufLen<1 then goto malformed;
+ op:=msg.stream.ReadByte;
+ case op of
+  upClose: DoClose;
+  upGET: begin
+         if msg.stream.RdBufLen<>30 then goto malformed;
+         msg.stream.Read(hash,20);
+         if msg.stream.ReadWord(2)>0 then goto malformed;
+         base:=msg.stream.ReadWord(4);
+         limit:=msg.stream.ReadWord(4);
+         DoGet(hash,base,limit);
+         end;
+{  upSEG: begin
+         if msg.stream.RdBufLen<10 then goto malformed;
+         if msg.stream.ReadWord(2)>0 then goto malformed;
+         base:=msg.stream.ReadWord(4);
+         limit:=msg.stream.ReadWord(4);
+         DoSEG(base, limit);
+         end;
+}
+  else goto malformed;
+ end;
+ exit; malformed:
+ ch^.StreamInit(err,2);
+ err.WriteByte(upFAIL);
+ err.WriteByte(upErrMalformed);
+ ch^.Send(err);
+end;
+
+procedure tPrv.ChatTimeout(willwait:LongWord);
+ var wasactive:boolean;
+ begin
+ if WillWait<30000 then exit;
+ wasactive:=active;
+ if Active then Stop;
+ if isOpen then Close(datafile);
+ isOpen:=false;
+ ch^.Close;
+ ch:=nil;
+ if wasactive then IdleTimeout {else it is sheduled};
+end;
+procedure tPrv.IdleTimeout;
+ var err:tMemoryStream;
+ begin
+ if assigned(ch) then begin {chat is still not rekt}
+  ch^.StreamInit(err,1);
+  err.WriteByte(upClose);
+  ch^.Send(err);
+  ch^.Close;
+ end;
+ if Active then Stop;
+ if isOpen then Close(datafile);
+ aggr^.UnRef;
+ FreeMem(@self,sizeof(self));
+end;
+
+procedure tPrv.Init(ag:tAggr_ptr; var nchat:tChat; msg: tSMsg);
+ begin
+ ch:=@nchat;
+ ch^.Callback:=@OnMsg;
+ ch^.TMHook:=@ChatTimeout;
+ aggr:=ag;
+ next:=nil;
+ prev:=nil;
+ chan:=msg.stream.readbyte;
+ weight:=100;
+ wcur:=0;
+ isOpen:=false; Active:=false;
+ inc(aggr^.Cnt);
+ Shedule(15000,@IdleTimeout);
+ OnMsg(msg,true);
+end;
+
+procedure tAggr.Init(const source:tNetAddr);
  begin
  writeln('upmgr: init');
  next:=Peers;
  prev:=nil;
+ rekt:=false;
  if assigned(Peers) then Peers^.prev:=@self;
  Peers:=@self;
- ch:=@nchat;
- tcs.Init(msg.source^);
- tcs.CanSend:=@OnCont;
+ tcs.Init(source);
+ tcs.CanSend:=@Cont;
  tcs.maxTimeout:=8;
  tcs.OnTimeout:=@TCTimeout;
- for i:=0 to high(prv) do prv[i]:=nil;
- cprv:=0;
- ch^.Callback:=@OnMsg;
- ch^.TMHook:=@CHTimeout;
- writeln('upmgr: send ack to init');
- ch^.Ack;
- idle:=true;
- Shedule(15000,@IdleTimeout);
+ prv:=nil;
+ cnt:=0;
 end;
 
-procedure tAggr.IdleTimeout;
- begin if not idle then exit;
- writeln('Idle Timeout');
- ForceClose end;
 procedure tAggr.TCTimeout;
+ var pprv:pointer;
  begin
  writeln('TCTimeout');
- ForceClose end;
-procedure tAggr.CHTimeout(willwait:LongWOrd);
- begin if willwait<30000 then exit;
- writeln('ChatTimeout');
- ForceClose end;
-
-procedure tAggr.ForceClose;
- var s:tMemoryStream;
- begin
- writeln('upmgr: force close');
- s.Init(GetMem(56),0,56);
- ch^.AddHeaders(s);
- s.WriteByte(opcode.upClose);
- s.WriteByte(22);
- try
-  ch^.send(s);
- except end;
- Done; {fixme sheduler}
- FreeMem(@self,sizeof(self));
+ while assigned(prv) do begin
+  pprv:=prv;
+  prv^.IdleTimeout;
+  Assert(pprv<>prv);
+ end;
+ Done;
 end;
-
+procedure tAggr.Cont;
+ begin
+ assert(assigned(prv));
+ prv^.Cont;
+end;
+procedure tAggr.UnRef;
+ begin
+ Assert(cnt>0);
+ Dec(Cnt);
+ if cnt=0 then begin
+  Done;
+  FreeMem(@self,sizeof(self));
+ end;
+end;
 procedure tAggr.Done;
  begin
+ if rekt then exit;
  writeln('upmgr: close');
- ch^.Close;
+ rekt:=true;
  tcs.Done;
- UnShedule(@IdleTimeout);
  if assigned(prev) then prev^.next:=next else Peers:=next;
  if assigned(next) then next^.prev:=prev;
 end;
@@ -197,17 +309,38 @@ function FindAggr({const} addr:tNetAddr): tAggr_ptr;
 end;
 
 procedure ChatHandler(var nchat:tChat; msg:tSMsg);
- var dup:^tAggr;
+ var ag:^tAggr;
+ var pr:^tPrv;
+ var s:tMemoryStream;
+ const cMax=16;
  begin
- {check dup}
- dup:=FindAggr(msg.source^);
- if assigned(dup) then begin
-  Dup^.ForceClose;
-  Dup^.Done;
+ if msg.stream.RdBufLen<2 then begin
+  writeln('upmgr: malformed init');
+  nchat.StreamInit(s,16);
+  s.WriteByte(upFAIL);
+  s.writebyte(upErrMalformed);
+  nchat.Send(s);
+  nchat.Close;
+ exit end;
+ {first get the ag}
+ ag:=FindAggr(msg.source^);
+ if assigned(ag) then begin
+ {check}
+ if ag^.Cnt>=cMax then begin
+  nchat.StreamInit(s,16);
+  s.WriteByte(upFAIL);
+  s.WriteByte(upErrHiChan);
+  s.WriteByte(cMax);
+  s.WriteByte(ag^.Cnt);
+  nchat.Send(s);
+  nchat.Close;
+ exit end;
  end else begin
-  New(dup);
+  New(ag);
+  ag^.init(msg.source^);
  end;
- Dup^.Init(nchat,msg);
+ New(pr);
+ pr^.Init(ag,nchat,msg);
 end;
 
 BEGIN

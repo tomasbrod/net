@@ -21,6 +21,8 @@ const {FS opcodes}
  upErrMalformed=1;
  upErrHiChan=2;
  upErrChanInUse=3;
+ upErrNotFound=4;
+ upErrIO=5;
  
 IMPLEMENTATION
 END.
