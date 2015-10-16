@@ -346,13 +346,14 @@ procedure UnShedule(h:tOnTimer);
  var cur:^tSheduled;
  var pcur:^pointer;
  begin
+ if ShedTop=nil then AbstractError;
  pcur:=@ShedTop;
  cur:=pcur^;
  while assigned(cur) do begin
   if cur^.cb=h then begin
    pcur^:=cur^.next; {unlink from main list}
    cur^.next:=ShedUU; ShedUU:=cur; {link to unused}
-   break;
+   cur:=pcur^;
   end else begin
    pcur:=@cur^.next;
    cur:=pcur^;
