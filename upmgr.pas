@@ -18,6 +18,7 @@ tPrv=object
  weight,wcur:Word;
  isOpen,Active:boolean;
  seglen:LongWord;
+ oinfo:tStoreObjectInfo;
  datafile:file of byte;
  procedure Init(ag:tAggr_ptr; var nchat:tChat; msg: tSMsg);
  procedure OnMsg(msg:tSMsg; data:boolean);
@@ -57,39 +58,59 @@ DONE();
 
 procedure tPrv.DoGET(const fid:tfid; base,limit:LongWord);
  var err:tmemorystream;
- var info:tStoreObjectInfo;
  begin
- Assert(not(active or isOpen)); //todo
+ if isOpen then oinfo.Close;
+ if Active then Stop; //opt
  ch^.Ack;
- info.Open(fid);
- if not info.final then begin
-  info.rc:=200;
-  Close(info.hnd);
- end;
- if info.rc>0 then begin
+ oinfo.Open(fid);
+ {if not oinfo.final then begin
+  oinfo.rc:=200;
+  Close(oinfo.hnd);
+ end;}
+ if oinfo.rc>0 then begin
   ch^.StreamInit(err,3);
   err.WriteByte(upFAIL);
-  if (info.rc=1)or(not info.final) then err.WriteByte(upErrNotFound)
-  else begin err.WriteByte(upErrIO); err.WriteByte(info.rc) end;
+  if oinfo.rc=1 then err.WriteByte(upErrNotFound)
+  else begin err.WriteByte(upErrIO); err.WriteByte(oinfo.rc) end;
   ch^.Send(err);
  end else begin
-  ch^.StreamInit(err,12);
-  err.WriteByte(upINFO);
-  datafile:=info.hnd;
+  datafile:=oinfo.hnd;
   isopen:=true;
-  err.WriteWord(0,2);
-  err.WriteWord(info.length,4);
-  seglen:=limit;
-  if info.length<seglen then seglen:=info.length;
-  err.WriteByte(1);
-  err.WriteWord(seglen,4);
-  ch^.Send(err);
-  Start;
+  DoSeg(base,limit);
  end;
 end;
 
 procedure tPrv.DoSEG(base,limit:LongWord);
+ var err:tmemorystream;
  begin
+ if isOpen then begin
+  ch^.StreamInit(err,12);
+  oinfo.SegSeek(base);
+  if oinfo.rc>0 then begin
+   err.WriteByte(upFAIL);
+   err.WriteByte(upErrIO);
+   err.WriteByte(oinfo.rc);
+   ch^.Send(err);
+   if Active then Stop;
+  end else begin
+  err.WriteByte(upINFO);
+  datafile:=oinfo.hnd;
+  err.WriteWord(0,2);
+  err.WriteWord(oinfo.length,4);
+  seglen:=limit;
+  if oinfo.seglen<seglen then seglen:=oinfo.seglen;
+  if oinfo.final
+  then err.WriteByte(1)
+  else err.WriteByte(0);
+  err.WriteWord(seglen,4);
+  ch^.Send(err);
+  if not Active then Start;
+ end end else begin
+  ch^.StreamInit(err,2);
+  err.WriteByte(upFAIL);
+  err.WriteByte(upErrSegNoGet);
+  ch^.Send(err);
+ end;
 end;
 
 procedure tPrv.Start;
@@ -128,7 +149,7 @@ procedure tPrv.Cont;
  var s:tMemoryStream;
  var sz:LongWord;
  var rs:LongWord;
- var buf:array [1..4096] of byte;
+ var buf:array [1..2048] of byte;
  begin
  Assert(Active and isOpen);
  sz:=SegLen;
@@ -145,7 +166,13 @@ procedure tPrv.Cont;
  //FreeMem(s.base,s.size);
  SegLen:=SegLen-sz;
  dec(wcur);
- if wcur=0 then begin
+ if SegLen=0 then begin
+  ch^.StreamInit(s,2);
+  s.WriteByte(upDONE);
+  ch^.Send(s);
+  Stop;
+ end else
+ if (wcur=0) then begin
   wcur:=weight;
   aggr^.prv:=next;
  end;
@@ -154,7 +181,7 @@ end;
 procedure tPrv.DoClose;
  begin
  if Active then Stop;
- if isOpen then Close(datafile);
+ if isOpen then oinfo.Close;
  isOpen:=false;
  UnShedule(@IdleTimeout);
  ch^.Ack;
@@ -186,14 +213,13 @@ procedure tPrv.OnMsg(msg:tSMsg; data:boolean);
          limit:=msg.stream.ReadWord(4);
          DoGet(hash,base,limit);
          end;
-{  upSEG: begin
+  upSEG: begin
          if msg.stream.RdBufLen<10 then goto malformed;
          if msg.stream.ReadWord(2)>0 then goto malformed;
          base:=msg.stream.ReadWord(4);
          limit:=msg.stream.ReadWord(4);
          DoSEG(base, limit);
          end;
-}
   else goto malformed;
  end;
  exit; malformed:
@@ -209,7 +235,7 @@ procedure tPrv.ChatTimeout(willwait:LongWord);
  if WillWait<30000 then exit;
  wasactive:=active;
  if Active then Stop;
- if isOpen then Close(datafile);
+ if isOpen then oinfo.Close;
  isOpen:=false;
  ch^.Close;
  ch:=nil;
@@ -224,8 +250,8 @@ procedure tPrv.IdleTimeout;
   ch^.Send(err);
   ch^.Close;
  end;
- if Active then Stop;
- if isOpen then Close(datafile);
+ Assert(not Active); {is idle}
+ if isOpen then oinfo.Close; {may still be open}
  aggr^.UnRef;
  FreeMem(@self,sizeof(self));
 end;
@@ -243,7 +269,7 @@ procedure tPrv.Init(ag:tAggr_ptr; var nchat:tChat; msg: tSMsg);
  wcur:=0;
  isOpen:=false; Active:=false;
  inc(aggr^.Cnt);
- Shedule(15000,@IdleTimeout);
+ Shedule(5000,@IdleTimeout);
  OnMsg(msg,true);
 end;
 

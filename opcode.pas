@@ -23,6 +23,7 @@ const {FS opcodes}
  upErrChanInUse=3;
  upErrNotFound=4;
  upErrIO=5;
+ upErrSegNoGet=6;
  
 IMPLEMENTATION
 END.
