@@ -15,34 +15,49 @@ type t=object
 end;
 
 procedure t.ST1(msg:tSMsg; data:boolean);
+ var r:tMemoryStream absolute msg.stream;
  var s:tMemoryStream;
+ var op:byte;
  begin
+ {reply from GET request}
  write('TestFS: ST1 reply from FS: ');
  if not data then begin
   writeln('ack');
-  s.init(GetMem(56),0,56);
-  ch.AddHeaders(s);
-  s.WriteByte(99);
-  ch.Send(s);
-  ch.Callback:=@ST2;
-  halt(32);
- end else writeln('unexpected data');
+ end else begin
+  ch.Ack;
+  op:=msg.stream.ReadByte;
+  if op=upFAIL then writeln('FAIL ',r.readbyte{,'-',r.readbyte})
+  else if op=upINFO then begin
+   r.skip(2);
+   writeln('INFO size=',r.ReadWord(4),' final=',r.readbyte,' seg=',r.readword(4));
+   ch.Callback:=@ST2;
+  end else if op=upClose then writeln('CLOSE')
+  else writeln('unknown');
+ end;
 end;
 procedure t.ST2(msg:tSMsg; data:boolean);
+ var r:tMemoryStream absolute msg.stream;
  var s:tMemoryStream;
+ var op:byte;
  begin
+ {Status Message}
  write('TestFS: ST2 reply from FS: ');
  if data then begin
-  writeln(msg.stream.ReadByte,'-',msg.stream.ReadByte);
-  s.init(GetMem(56),0,56);
-  ch.AddHeaders(s);
-  s.WriteByte(opcode.upClose);
-  ch.Send(s);
-  ch.Callback:=@ST3;
- end else writeln('ack');
+  ch.Ack;
+  op:=msg.stream.ReadByte;
+  if op=upCLOSE then writeln('CLOSE ')
+  else if op=upDONE then begin
+   writeln('DONE');
+   ch.streaminit(s,1);
+   s.WriteByte(opcode.upClose);
+   ch.Send(s);
+   ch.Callback:=@ST3;
+  end;
+ end else writeln('ack (unexpected)');
 end;
 procedure t.ST3(msg:tSMsg; data:boolean);
  begin
+ {ACK to Close}
  write('TestFS: ST3 reply from FS: ');
  if data then writeln('unepected data') else begin
   writeln('ack');
@@ -79,9 +94,14 @@ procedure init;
    ch.Init(paramstr(oi+1));
    ch.Callback:=@ST1;
    Shedule(7000,@HardTimeout);
-   s.init(GetMem(56),0,56);
-   ch.AddHeaders(s);
+   ch.streaminit(s,33);
    s.WriteByte(opcode.upFileServer);
+   s.WriteByte({channel}99);
+   s.WriteByte(opcode.upGET);
+   s.Skip(20);
+   s.WriteWord(0,2);
+   s.WriteWord(0,4);
+   s.WriteWord($FFFFFFFF,4);
    ch.Send(s);
   end;
  end;

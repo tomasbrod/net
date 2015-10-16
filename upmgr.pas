@@ -119,10 +119,12 @@ procedure tPrv.Start;
  Assert(not Active);
  Active:=true;
  UnShedule(@IdleTimeout);
+ writeln('upmgr: Startig transfer');
  if not assigned(aggr^.prv) then begin
   next:=@self;
   prev:=@self;
   aggr^.prv:=@self;
+  aggr^.tcs.Start;
  end else begin
   next:=aggr^.prv^.next;
   prev:=aggr^.prv;
@@ -143,6 +145,7 @@ procedure tPrv.Stop;
  if aggr^.prv=@self then aggr^.prv:=next;
  active:=false;
  Shedule(20000,@IdleTimeout);
+ writeln('upmgr: Stop');
 end;
 
 procedure tPrv.Cont;
@@ -151,17 +154,17 @@ procedure tPrv.Cont;
  var rs:LongWord;
  var buf:array [1..2048] of byte;
  begin
+ writeln('upmgr: CONT! ',chan);
  Assert(Active and isOpen);
- sz:=SegLen;
- if SegLen>high(buf) then sz:=high(buf) else sz:=SegLen;
- sz:=aggr^.tcs.MaxSize(sz);
+ sz:=aggr^.tcs.MaxSize(sizeof(buf))-1;
+ if sz>SegLen then sz:=SegLen;
  //s.Init(GetMem(sz),0,sz);
- s.Init(@buf,0,sz);
- aggr^.tcs.WriteHeaders(s);
- Assert(s.WrBufLen=sz); //really?
- BlockRead(datafile,s.WrBuf^,s.WrBufLen,rs);
- s.WrEnd(rs);
- Assert(RS=s.WrBufLen);//todo
+ Assert((sz+1)<=sizeof(buf));
+ s.Init(@buf,0,sizeof(buf)); aggr^.tcs.WriteHeaders(s);
+ s.WriteByte(Chan);
+ Assert(sz<=s.WrBufLen);
+ BlockRead(datafile,s.WrBuf^,sz,rs); s.WrEnd(rs);
+ Assert(RS=sz);//todo
  aggr^.tcs.Send(s);
  //FreeMem(s.base,s.size);
  SegLen:=SegLen-sz;
@@ -203,6 +206,7 @@ procedure tPrv.OnMsg(msg:tSMsg; data:boolean);
  if aggr^.rekt then exit;
  if msg.stream.RdBufLen<1 then goto malformed;
  op:=msg.stream.ReadByte;
+ writeln('upmgr: opcode=',op,' sz=',msg.stream.RdBufLen);
  case op of
   upClose: DoClose;
   upGET: begin
@@ -227,12 +231,14 @@ procedure tPrv.OnMsg(msg:tSMsg; data:boolean);
  err.WriteByte(upFAIL);
  err.WriteByte(upErrMalformed);
  ch^.Send(err);
+ writeln('upmgr: malformed request stage=1');
 end;
 
 procedure tPrv.ChatTimeout(willwait:LongWord);
  var wasactive:boolean;
  begin
- if WillWait<30000 then exit;
+ if WillWait<8000 then exit;
+ writeln('upmgr: Chat timeout');
  wasactive:=active;
  if Active then Stop;
  if isOpen then oinfo.Close;
@@ -245,13 +251,17 @@ procedure tPrv.IdleTimeout;
  var err:tMemoryStream;
  begin
  if assigned(ch) then begin {chat is still not rekt}
+  if not active then writeln('upmgr: Idle timeout');
   ch^.StreamInit(err,1);
   err.WriteByte(upClose);
-  ch^.Send(err);
+  try ch^.Send(err);
+  except end;
   ch^.Close;
  end;
- Assert(not Active); {is idle}
+ {it is idle timeout, but may be called from aggr it tc tiomes out}
+ if Active then Stop;
  if isOpen then oinfo.Close; {may still be open}
+ UnShedule(@IdleTimeout);
  aggr^.UnRef;
  FreeMem(@self,sizeof(self));
 end;
@@ -265,6 +275,7 @@ procedure tPrv.Init(ag:tAggr_ptr; var nchat:tChat; msg: tSMsg);
  next:=nil;
  prev:=nil;
  chan:=msg.stream.readbyte;
+ writeln('upmgr: prv init chan=',chan);
  weight:=100;
  wcur:=0;
  isOpen:=false; Active:=false;
@@ -292,23 +303,26 @@ end;
 procedure tAggr.TCTimeout;
  var pprv:pointer;
  begin
- writeln('TCTimeout');
+ writeln('upmgr: TCTimeout');
  while assigned(prv) do begin
+  assert(not rekt);
   pprv:=prv;
   prv^.IdleTimeout;
+  if rekt then exit;
   Assert(pprv<>prv);
  end;
  Done;
 end;
 procedure tAggr.Cont;
  begin
- assert(assigned(prv));
+ if not assigned(prv) then exit;
  prv^.Cont;
 end;
 procedure tAggr.UnRef;
  begin
  Assert(cnt>0);
  Dec(Cnt);
+ writeln('upmgr: aggr unrefd');
  if cnt=0 then begin
   Done;
   FreeMem(@self,sizeof(self));
@@ -316,8 +330,8 @@ procedure tAggr.UnRef;
 end;
 procedure tAggr.Done;
  begin
- if rekt then exit;
- writeln('upmgr: close');
+ assert(not rekt);
+ writeln('upmgr: aggr close');
  rekt:=true;
  tcs.Done;
  if assigned(prev) then prev^.next:=next else Peers:=next;
@@ -328,8 +342,8 @@ function FindAggr({const} addr:tNetAddr): tAggr_ptr;
  begin
  result:=Peers;
  while assigned(result) do begin
+  if assigned(result^.next) then assert(result^.next^.prev=result);
   if result^.tcs.remote=addr then exit;
-  assert(result^.prev=result);
   result:=result^.next;
  end;
 end;
@@ -340,6 +354,8 @@ procedure ChatHandler(var nchat:tChat; msg:tSMsg);
  var s:tMemoryStream;
  const cMax=16;
  begin
+ writeln('upmgr: ChatHandler');
+ msg.stream.skip({the initcode}1);
  if msg.stream.RdBufLen<2 then begin
   writeln('upmgr: malformed init');
   nchat.StreamInit(s,16);
@@ -347,6 +363,7 @@ procedure ChatHandler(var nchat:tChat; msg:tSMsg);
   s.writebyte(upErrMalformed);
   nchat.Send(s);
   nchat.Close;
+  writeln('upmgr: malformed request stage=0');
  exit end;
  {first get the ag}
  ag:=FindAggr(msg.source^);
