@@ -129,8 +129,9 @@ procedure tChat.Close;
  assert(not closed);
  Ack;
  closed:=true;
+ //writeln('Chat: closing');
  if txLen=0 {no packets in flight} then begin
-  Shedule(5000{todo},@Done); {wait for something lost}
+  Shedule(15000{todo},@Done); {wait for something lost}
   callback:=nil; {avoid calling}
   tmhook:=nil;
  end;
@@ -143,14 +144,16 @@ procedure tChat.Done;
  SetMsgHandler(opcode,remote,nil);
  if assigned(DisposeHook) then DisposeHook
  else FreeMem(@self,sizeof(self));
+ //writeln('Chat: closed');
 end;
 
 procedure tChat.Resend;
  {timeout waiting for ack}
  begin
  {resend and reshedule}
- Assert(txLen>0);
+ if txLen=0 then exit;
  txTime:=0;
+ if RTT<1 then RTT:=2;
  RTT:=RTT*2;
  if assigned(TMhook) and (not closed) then begin
   TMhook(RTT);
@@ -159,10 +162,12 @@ procedure tChat.Resend;
    exit;
   end;
  end;
- if (RTT>16000) and closed then begin
+ if closed and (RTT<400) then RTT:=400;
+ if (RTT>=5000) and closed then begin
   Done {give up}
  end else begin
   {finally resend the msg}
+  //writeln('Chat: retry');
   ServerLoop.SendMessage(txPk^,txLen,remote);
   ServerLoop.Shedule(RTT,@Resend);
  end;
