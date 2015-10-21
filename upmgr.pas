@@ -21,14 +21,14 @@ tPrv=object
  oinfo:tStoreObjectInfo;
  procedure Init(ag:tAggr_ptr; var nchat:tChat; msg: tSMsg);
  procedure OnMsg(msg:tSMsg; data:boolean);
- procedure IdleTimeout;
- procedure ChatTimeout(willwait:LongWord);
  procedure Cont;
  procedure DoGET(const fid:tfid; base,limit:LongWord);
  procedure DoSEG(base,limit:LongWord);
+ procedure DoClose;
  procedure Start;
  procedure Stop;
- procedure DoClose;
+ procedure ChatTimeout(willwait:LongWord);
+ procedure Close;
 end;
 tAggr=object
  tcs: tTCS;
@@ -39,8 +39,8 @@ tAggr=object
  procedure UnRef;
  procedure Cont;
  procedure Init(const source:tNetAddr);
- procedure Done;
  procedure TCTimeout;
+ procedure Done;
 end;
 
 var Peers:^tAggr;
@@ -115,7 +115,7 @@ procedure tPrv.Start;
  Assert(isOpen);
  Assert(not Active);
  Active:=true;
- UnShedule(@IdleTimeout);
+ UnShedule(@Close);
  writeln('upmgr: Startig transfer');
  if not assigned(aggr^.prv) then begin
   next:=@self;
@@ -141,17 +141,16 @@ procedure tPrv.Stop;
  end else next:=nil;
  if aggr^.prv=@self then aggr^.prv:=next;
  active:=false;
- Shedule(20000,@IdleTimeout);
+ Shedule(20000,@Close);
  writeln('upmgr: Stop');
 end;
 
 procedure tPrv.Cont;
  var s:tMemoryStream;
  var sz:LongWord;
- var rs:LongWord;
  var buf:array [1..2048] of byte;
  begin
-// writeln('upmgr: CONT! ',chan);
+ //writeln('upmgr: CONT! ',chan);
  Assert(Active and isOpen);
  sz:=aggr^.tcs.MaxSize(sizeof(buf))-1;
  if sz>SegLen then sz:=SegLen;
@@ -182,14 +181,8 @@ end;
 
 procedure tPrv.DoClose;
  begin
- if Active then Stop;
- if isOpen then oinfo.Close;
- isOpen:=false;
- UnShedule(@IdleTimeout);
  ch^.Ack;
- ch^.Close;
- aggr^.UnRef;
- FreeMem(@self,sizeof(self));
+ Close;
 end;
 
 procedure tPrv.OnMsg(msg:tSMsg; data:boolean);
@@ -233,38 +226,30 @@ procedure tPrv.OnMsg(msg:tSMsg; data:boolean);
  writeln('upmgr: malformed request stage=1');
 end;
 
+{######Timeouts and Shit#######}
 procedure tPrv.ChatTimeout(willwait:LongWord);
- var wasactive:boolean;
  begin
  if WillWait<8000 then exit;
  writeln('upmgr: Chat timeout');
- wasactive:=active;
+ Close;
+end;
+procedure tPrv.Close;
+ var err:tMemoryStream;
+ begin
+ assert(assigned(ch));
+ ch^.StreamInit(err,1);
+ err.WriteByte(upClose);
+ try ch^.Send(err); except end;
  if Active then Stop;
  if isOpen then oinfo.Close;
  isOpen:=false;
  ch^.Close;
  ch:=nil;
- if wasactive then IdleTimeout {else it is sheduled};
-end;
-procedure tPrv.IdleTimeout;
- var err:tMemoryStream;
- begin
- if assigned(ch) then begin {chat is still not rekt}
-  if not active then writeln('upmgr: Idle timeout');
-  ch^.StreamInit(err,1);
-  err.WriteByte(upClose);
-  try ch^.Send(err);
-  except end;
-  ch^.Close;
- end;
- {it is idle timeout, but may be called from aggr it tc tiomes out}
- if Active then Stop;
- if isOpen then oinfo.Close; {may still be open}
- UnShedule(@IdleTimeout);
+ UnShedule(@Close);
  aggr^.UnRef;
  FreeMem(@self,sizeof(self));
 end;
-
+ 
 procedure tPrv.Init(ag:tAggr_ptr; var nchat:tChat; msg: tSMsg);
  begin
  ch:=@nchat;
@@ -279,7 +264,7 @@ procedure tPrv.Init(ag:tAggr_ptr; var nchat:tChat; msg: tSMsg);
  wcur:=0;
  isOpen:=false; Active:=false;
  inc(aggr^.Cnt);
- Shedule(5000,@IdleTimeout);
+ Shedule(5000,@Close);
  OnMsg(msg,true);
 end;
 
@@ -306,7 +291,7 @@ procedure tAggr.TCTimeout;
  while assigned(prv) do begin
   assert(not rekt);
   pprv:=prv;
-  prv^.IdleTimeout;
+  prv^.Close;
   if rekt then exit;
   Assert(pprv<>prv);
  end;
