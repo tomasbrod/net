@@ -8,6 +8,7 @@ uses ServerLoop
 	,AsyncProcess
 	,upmgr
 	,TestFS
+	,Download
 	;
 
 BEGIN
