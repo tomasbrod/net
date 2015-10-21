@@ -2,10 +2,11 @@ unit TestFS;
 
 INTERFACE
 IMPLEMENTATION
-USES ServerLoop,Chat,SysUtils,MemStream,NetAddr,opcode;
+USES ServerLoop,Chat,SysUtils,MemStream,NetAddr,opcode,Download;
 
 type t=object
  ch: tChat;
+ dw:Download.tAggr;
  //procedure UserInput
  procedure ST1(msg:tSMsg; data:boolean);
  procedure ST2(msg:tSMsg; data:boolean);
@@ -31,6 +32,8 @@ procedure t.ST1(msg:tSMsg; data:boolean);
    r.skip(2);
    writeln('INFO size=',r.ReadWord(4),' final=',r.readbyte,' seg=',r.readword(4));
    ch.Callback:=@ST2;
+   UnShedule(@HardTimeout);
+   halt(99);
   end else if op=upClose then writeln('CLOSE')
   else writeln('unknown');
  end;
@@ -61,9 +64,9 @@ procedure t.ST3(msg:tSMsg; data:boolean);
  write('TestFS: ST3 reply from FS: ');
  if data then writeln('unepected data') else begin
   writeln('ack');
-  UnShedule(@HardTimeout);
   ch.DisposeHook:=@Rekt;
   ch.Close;
+  dw.Done;
  end;
 end;
 
@@ -101,6 +104,7 @@ procedure init;
   new(o); with o^ do begin
    ch.Init(paramstr(oi+1));
    ch.Callback:=@ST1;
+   dw.Init(ch.remote);
    Shedule(20000,@HardTimeout);
    ch.streaminit(s,33);
    s.WriteByte(opcode.upFileServer);
@@ -111,8 +115,8 @@ procedure init;
    s.WriteWord(0,4);
    s.WriteWord($FFFFFFFF,4);
    ch.Send(s);
-   ServerLoop.SetMsgHandler(4,@IgnoreData);
-   ServerLoop.SetMsgHandler(6,@IgnoreData);
+   //ServerLoop.SetMsgHandler(4,@IgnoreData);
+   //ServerLoop.SetMsgHandler(6,@IgnoreData);
   end;
  end;
 end;
