@@ -67,9 +67,17 @@ procedure t.ST3(msg:tSMsg; data:boolean);
  end;
 end;
 
+var cnt:LongWOrd=0;
+procedure IgnoreData(msg:tSMsg);
+ begin
+ cnt:=cnt+msg.length;
+ //Writeln('Data: ',cnt);
+end;
+
 procedure t.Rekt;
  begin
  writeln('TestFS: rekt');
+ UnShedule(@HardTimeout);
  FreeMem(@self,sizeof(self));
 end;
 
@@ -93,7 +101,7 @@ procedure init;
   new(o); with o^ do begin
    ch.Init(paramstr(oi+1));
    ch.Callback:=@ST1;
-   Shedule(7000,@HardTimeout);
+   Shedule(20000,@HardTimeout);
    ch.streaminit(s,33);
    s.WriteByte(opcode.upFileServer);
    s.WriteByte({channel}99);
@@ -103,6 +111,8 @@ procedure init;
    s.WriteWord(0,4);
    s.WriteWord($FFFFFFFF,4);
    ch.Send(s);
+   ServerLoop.SetMsgHandler(4,@IgnoreData);
+   ServerLoop.SetMsgHandler(6,@IgnoreData);
   end;
  end;
 end;
