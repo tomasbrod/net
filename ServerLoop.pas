@@ -31,7 +31,7 @@ procedure UnShedule(h:tOnTimer);
 
 type tObjMessageHandler=procedure(msg:tSMsg) of object;
 {deliver message from peer to the object}
-procedure SetMsgHandler(OpCode:byte; from:tNetAddr; handler:tObjMessageHandler);
+procedure SetMsgHandler(OpCode:byte; from:tNetAddr; handler:tObjMessageHandler); overload;
 function IsMsgHandled(OpCode:byte; from:tNetAddr):boolean;
 
 function OptIndex(o:string):word;
@@ -233,14 +233,15 @@ procedure ShedRun;
  var pcur:^pointer;
  var now:UnixType.timeval absolute iNow;
  var delta:LongWord;
- var olTop:^tSheduled;
+ var tasks:word;
  begin
  {Sheduling}
  {fixme: proste niak aby to šlo vymazať z callbacku}
- olTop:=ShedTop;
- pcur:=@olTop;
+ {prejdi ich od zaciatku,
+  po spusteni jednej, chod zas na zaciatok
+ }
+ pcur:=@ShedTop;
  cur:=pcur^;
- ShedTop:=nil; {unlink the current shed list}
  fpgettimeofday(@Now,nil);
  delta:=(Now.tv_sec-LastShed.tv_sec);
  if delta>6 then delta:=5000 else delta:=(delta*1000)+((Now.tv_usec-LastShed.tv_usec) div 1000);
@@ -248,10 +249,16 @@ procedure ShedRun;
  //writeln('DeltaTime: ',delta);
  while assigned(cur) do begin
   if (cur^.left<=delta)or(cur^.left=0) then begin
-   cur^.cb;
+   {unlink}
    pcur^:=cur^.next;
+   {link to unused}
    cur^.next:=ShedUU;
    ShedUU:=cur;
+   {call}
+   cur^.cb;
+   {go to beginning}
+   break;
+   pcur:=@ShedTop;
    cur:=pcur^;
   end else begin
    DEC(cur^.left,delta);
@@ -261,14 +268,15 @@ procedure ShedRun;
    cur:=cur^.next;
   end;
  end;
- pcur^:=ShedTop; {append newly added tasks to end of untriggererd list}
- ShedTop:=olTop; {link in the untriggered tasks}
- cur:=olTop;
+ cur:=ShedTop;
+ tasks:=0;
  while assigned(cur) do begin
   if cur^.left<PollTimeout then PollTimeout:=cur^.left;
   cur:=cur^.next;
+  inc(tasks);
  end;
  if pollTimeout=0 then pollTimeOut:=1;
+ //writeln('ServerLoop: tasks=',tasks);
 end;
 
 procedure Main;
@@ -346,7 +354,7 @@ procedure UnShedule(h:tOnTimer);
  var cur:^tSheduled;
  var pcur:^pointer;
  begin
- if ShedTop=nil then AbstractError;
+ //if ShedTop=nil then AbstractError;
  pcur:=@ShedTop;
  cur:=pcur^;
  while assigned(cur) do begin
