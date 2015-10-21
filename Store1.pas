@@ -34,9 +34,10 @@ procedure tStoreObjectInfo.mkfilen(var d:string; flag:char; const fid:tfid);
   end;
  var b,i:byte;
  begin
- d:=prefix+flag+DirectorySeparator;
+ d:=prefix+flag+'/';
  b:=system.length(d);
  SetLength(d,b+40);
+ inc(b);
  for i:=0 to 19 do begin
   filename[b+(i*2)]:=hc(fid[i] shr 4);
   filename[b+(i*2)+1]:=hc(fid[i] and $F);
@@ -49,7 +50,8 @@ procedure tStoreObjectInfo.Open(const fid:tfid);
  if dh<>-1 then begin
   rc:=0;
   final:=true;
-  length:=1000;
+  length:=FileSeek(dh,0,fsFromEnd);
+  FileSeek(dh,0,fsFromBeginning);
  end else begin
   Writeln('Store1: open failed for file ',filename,', ioresult=',IOResult);
   rc:=2;
