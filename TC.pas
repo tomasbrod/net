@@ -216,7 +216,6 @@ procedure tTCS.TransmitDelay;
  var txwait:real;
  var burst:word;
  begin
- txLastSize:=0;
  txwait:=0;
  burst:=0;
  if (siMark=0)and(cur.Size<limit.Size){and(random(10)=0)}and(istimeout=0) then begin
@@ -225,6 +224,7 @@ procedure tTCS.TransmitDelay;
   siMark:=random(255)+1;
  end;
  repeat
+  txLastSize:=0;
   CanSend;
   if txLastSize=0 then exit; {pause}
   if (isTimeout>0) then exit; {no burst, no shedule next}

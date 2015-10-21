@@ -163,7 +163,7 @@ procedure UnSetMsgHandler(const from:tNetAddr; opcode:byte);
  Dispose(PT[h]);
  PT[h]:=nil;
  {go reverse exit on null, hash them, match: move to H and stop}
- i:=h-1;
+ if h=0 then i:=high(PT) else i:=h-1;
  while (i<>h)and assigned(PT[i]) do begin
   if (PT[i]^.remote.hash+PT[i]^.opcode)=h then begin
    PT[h]:=PT[i];
@@ -276,7 +276,7 @@ procedure ShedRun;
   inc(tasks);
  end;
  if pollTimeout=0 then pollTimeOut:=1;
- //writeln('ServerLoop: tasks=',tasks);
+ //if delta >4990 then writeln('ServerLoop: tasks=',tasks);
 end;
 
 procedure Main;
@@ -358,7 +358,7 @@ procedure UnShedule(h:tOnTimer);
  pcur:=@ShedTop;
  cur:=pcur^;
  while assigned(cur) do begin
-  if cur^.cb=h then begin
+  if 0=CompareByte(cur^.cb,h,sizeof(h)) then begin
    pcur^:=cur^.next; {unlink from main list}
    cur^.next:=ShedUU; ShedUU:=cur; {link to unused}
    cur:=pcur^;

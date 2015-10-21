@@ -46,7 +46,7 @@ end;
 procedure tStoreObjectInfo.Open(const fid:tfid);
  begin
  mkfilen(filename,'f',fid);
- dh:=FileOpen(filename,fmOpenRead);
+ dh:=FileOpen(filename,fmOpenRead or fmShareDenyWrite);
  if dh<>-1 then begin
   rc:=0;
   final:=true;

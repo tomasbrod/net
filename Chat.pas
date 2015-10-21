@@ -55,7 +55,7 @@ uses SysUtils;
 procedure tChat.Init(const iremote:tNetAddr);
  begin
  remote:=iremote;
- opcode:=128;
+ opcode:=128+Random(128);
  while ServerLoop.IsMsgHandled(opcode,remote) do inc(opcode);
  InitFrom(remote,opcode);
 end;
@@ -139,7 +139,6 @@ end;
 
 procedure tChat.Done;
  begin
- {called from sheduler, Done is unsheduled, Resend is not sheduled since ack was received when Done was sheduled}
  if txLen>0 then FreeMem(txPk,txLen);
  SetMsgHandler(opcode,remote,nil);
  if assigned(DisposeHook) then DisposeHook
@@ -184,11 +183,11 @@ procedure tChat.OnReply(msg:tSMsg);
   if (aseq=txSeq)and(txLen>0) {it is current} then begin
    if txTime>0 then RTT:=Round((Now-txTime)*MsecsPerDay);
    FreeMem(txPk,txLen);
+   UnShedule(@Resend);
+   if Closed then Shedule(5,@Done);
    TxLen:=0;
    txPk:=nil;
    if assigned(callback) then callback(msg,false);
-   ServerLoop.UnShedule(@Resend);
-   if Closed then ServerLoop.Shedule(5000,@Done);
   end else {write(' old-ack')it is ack of old data, do nothing};
  end;
  if seq>0 then {some data} begin
