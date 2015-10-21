@@ -188,6 +188,7 @@ procedure tChat.OnReply(msg:tSMsg);
    txPk:=nil;
    if assigned(callback) then callback(msg,false);
    ServerLoop.UnShedule(@Resend);
+   if Closed then ServerLoop.Shedule(5000,@Done);
   end else {write(' old-ack')it is ack of old data, do nothing};
  end;
  if seq>0 then {some data} begin
