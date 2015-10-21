@@ -5,7 +5,7 @@ INTERFACE
 USES Chat,TC,opcode,ServerLoop,MemStream,NetAddr;
 
 IMPLEMENTATION
-USES ZidanStore;
+USES Store1;
 
 type
 tAggr_ptr=^tAggr;
@@ -19,7 +19,6 @@ tPrv=object
  isOpen,Active:boolean;
  seglen:LongWord;
  oinfo:tStoreObjectInfo;
- datafile:file of byte;
  procedure Init(ag:tAggr_ptr; var nchat:tChat; msg: tSMsg);
  procedure OnMsg(msg:tSMsg; data:boolean);
  procedure IdleTimeout;
@@ -74,7 +73,6 @@ procedure tPrv.DoGET(const fid:tfid; base,limit:LongWord);
   else begin err.WriteByte(upErrIO); err.WriteByte(oinfo.rc) end;
   ch^.Send(err);
  end else begin
-  datafile:=oinfo.hnd;
   isopen:=true;
   DoSeg(base,limit);
  end;
@@ -94,7 +92,6 @@ procedure tPrv.DoSEG(base,limit:LongWord);
    if Active then Stop;
   end else begin
   err.WriteByte(upINFO);
-  datafile:=oinfo.hnd;
   err.WriteWord(0,2);
   err.WriteWord(oinfo.length,4);
   seglen:=limit;
@@ -154,7 +151,7 @@ procedure tPrv.Cont;
  var rs:LongWord;
  var buf:array [1..2048] of byte;
  begin
- writeln('upmgr: CONT! ',chan);
+// writeln('upmgr: CONT! ',chan);
  Assert(Active and isOpen);
  sz:=aggr^.tcs.MaxSize(sizeof(buf))-1;
  if sz>SegLen then sz:=SegLen;
@@ -163,8 +160,10 @@ procedure tPrv.Cont;
  s.Init(@buf,0,sizeof(buf)); aggr^.tcs.WriteHeaders(s);
  s.WriteByte(Chan);
  Assert(sz<=s.WrBufLen);
- BlockRead(datafile,s.WrBuf^,sz,rs); s.WrEnd(rs);
- Assert(RS=sz);//todo
+ oinfo.ReadAhead(sz,s.WrBuf); //todo
+ oinfo.WaitRead;
+ Assert(oinfo.rc=0); //todo
+ s.WrEnd(sz);
  aggr^.tcs.Send(s);
  //FreeMem(s.base,s.size);
  SegLen:=SegLen-sz;
