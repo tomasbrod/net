@@ -38,7 +38,10 @@ function OptIndex(o:string):word;
 function OptParamCount(o:word):word;
 
 type tTimeVal=UnixType.timeval;
+type tMTime=DWORD;
 var iNow:tTimeVal;
+var mNow:tMTime; { miliseconds since start }
+                  {overflows in hunderd hours }
 
 IMPLEMENTATION
 
@@ -193,7 +196,7 @@ end;
 
 {do not waste stack on statics}
  var EventsCount:integer;
- var Buffer:array [1..1024] of byte;
+ var Buffer:array [1..4096] of byte;
  var pkLen:LongWord;
  var From:tSockAddrL; {use larger struct so everything fits}
  var FromLen:LongWord;
@@ -231,24 +234,38 @@ end;
 procedure ShedRun;
  var cur:^tSheduled;
  var pcur:^pointer;
- var now:UnixType.timeval absolute iNow;
+ var now:UnixType.timeval{ absolute iNow};
  var delta:LongWord;
  var tasks:word;
  begin
  {Sheduling}
- {fixme: proste niak aby to šlo vymazať z callbacku}
- {prejdi ich od zaciatku,
-  po spusteni jednej, chod zas na zaciatok
- }
- pcur:=@ShedTop;
- cur:=pcur^;
+ {gmagic with delta-time, increment mNow, ...}
  fpgettimeofday(@Now,nil);
  delta:=(Now.tv_sec-LastShed.tv_sec);
  if delta>6 then delta:=5000 else delta:=(delta*1000)+((Now.tv_usec-LastShed.tv_usec) div 1000);
  LastShed:=Now;
+ mNow:=mNow+Delta;
  //writeln('DeltaTime: ',delta);
+ {first tick all tasks}
+ tasks:=0;
+ cur:=ShedTop;
  while assigned(cur) do begin
-  if (cur^.left<=delta)or(cur^.left=0) then begin
+  if cur^.left<=delta then cur^.left:=0 else begin
+   dec(cur^.left,delta);
+   {also set next wake time}
+   if cur^.left<PollTimeout then PollTimeout:=cur^.left;
+  end;
+  {count tasks here}
+  inc(tasks);
+  cur:=cur^.next;
+ end;
+ {correct floating-point glitch}
+ if pollTimeout=0 then pollTimeOut:=1;
+ {run first runnable task}
+ pcur:=@ShedTop;
+ cur:=pcur^;
+ while assigned(cur) do begin
+  if cur^.left=0 then begin
    {unlink}
    pcur^:=cur^.next;
    {link to unused}
@@ -256,27 +273,14 @@ procedure ShedRun;
    ShedUU:=cur;
    {call}
    cur^.cb;
-   {go to beginning}
+   {do rest later}
+   pollTimeout:=0;
    break;
-   pcur:=@ShedTop;
-   cur:=pcur^;
-  end else begin
-   DEC(cur^.left,delta);
-   //writeln('Left: ',cur^.left);
-   if pollTimeOut>cur^.left then PollTimeOut:=cur^.left;
-   pcur:=@cur^.next;
-   cur:=cur^.next;
   end;
- end;
- cur:=ShedTop;
- tasks:=0;
- while assigned(cur) do begin
-  if cur^.left<PollTimeout then PollTimeout:=cur^.left;
+  pcur:=@cur^.next;
   cur:=cur^.next;
-  inc(tasks);
  end;
- if pollTimeout=0 then pollTimeOut:=1;
- //if delta >4990 then writeln('ServerLoop: tasks=',tasks);
+ if delta >4990 then writeln('ServerLoop: tasks=',tasks);
 end;
 
 procedure Main;
@@ -390,6 +394,7 @@ end;
 
 var i:byte;
 BEGIN
+ mNow:=0;
  Randomize;
  fpSignal(SigInt,@SignalHandler);
  fpSignal(SigTerm,@SignalHandler);
