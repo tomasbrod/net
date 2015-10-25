@@ -80,6 +80,7 @@ procedure tAggr.MsgDATA(sz:Word; mark:byte);
  var r:tMemoryStream;
  var rateb: DWord; {BytesPerSecond shr 6 (=64)}
  var buf:array [1..6] of byte;
+ var delta:tMTime;
  begin
  if mark<>PrvMark then begin
   if mark<>CurMark then begin
@@ -92,10 +93,11 @@ procedure tAggr.MsgDATA(sz:Word; mark:byte);
   inc(DgrCntCheck);
  end;
  if DgrCnt<8 then exit;
- if (mnow-Startt)<400 then exit;
- rate:=(ByteCnt/(mNow-StartT))*1000;
- writeln('Rate: ',(rate/1024):7:1);
- rateb:=round(rate/64);
+ delta:=(mNow-StartT){*MSecsPerDay};
+ if delta<400 then exit;
+ rate:=(ByteCnt/delta)*1000;
+ writeln('Rate: ',(rate/1024):7:1, '(',ByteCnt,')');
+ rateb:=round((rate)/64);
  StartT:=mNow;
  ByteCnt:=1;
  r.Init(@buf,0,sizeof(buf));
