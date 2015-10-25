@@ -38,7 +38,7 @@ type tTCS=object {this is sender part}
  public
  remote:tNetAddr;
  Mark:byte;
- MarkStart:tDateTime; {when the mark was started}
+ MarkStart:tMTime; {when the mark was started}
  MarkData:LongWord; {how much data sent}
  txLastSize:Word; {is zero if suspend}
  siMark:byte;
@@ -64,7 +64,6 @@ type tTCS=object {this is sender part}
  end;
 
 IMPLEMENTATION
-uses SysUtils;
 
 procedure tTCS.Init(const iremote:tNetAddr);
  begin
@@ -73,7 +72,7 @@ procedure tTCS.Init(const iremote:tNetAddr);
  SetMsgHandler(opcode.tceack,remote,@OnAck);
  Limit.Rate:=2*1024*1024*1024; {2GB}
  Limit.Size:=4096;
- Limit.RateIF:=1;
+ Limit.RateIF:=4;
  Limit.SizeIF:=2;
  Initial.Rate:={20*}1024;
  Initial.Size:=32+5;
@@ -126,7 +125,7 @@ procedure tTCS.Send(var s:tMemoryStream);
  begin
  ServerLoop.SendMessage(s.base^,s.length,remote);
  if MarkData=0 then begin
-  MarkStart:=Now;
+  MarkStart:=mNow;
   MarkData:=1;
  end else MarkData:=MarkData+s.length;
  txLastSize:=s.length;
@@ -134,7 +133,6 @@ procedure tTCS.Send(var s:tMemoryStream);
 end;
 
 procedure tTCS.OnCont(msg:ServerLoop.tSMsg);
- var rnow:tDateTime;
  var RateFill:single;
  var txRate:real;
  var rxRate:real;
@@ -147,9 +145,8 @@ procedure tTCS.OnCont(msg:ServerLoop.tSMsg);
  assert(opcode=5);
  rrate:=msg.stream.ReadWord(4);
  if (rmark=Mark) then begin
-  rnow:=Now;
   rxRate:=(rrate*64); {B/s}
-  txRate:=MarkData/((rnow-MarkStart)*SecsPerDay);
+  txRate:=MarkData/((mNow-MarkStart)/1000{*SecsPerDay});
   RateFill:=rxRate/txRate;
   write('speed: ',(rxRate/1024):1:3,'kB/s (',(RateFill*100):3:1,'% of ',txRate/1024:1:3,'), ');
   UnShedule(@Timeout); 
@@ -229,7 +226,7 @@ procedure tTCS.TransmitDelay;
   if txLastSize=0 then exit; {pause}
   if (isTimeout>0) then exit; {no burst, no shedule next}
   //txwait:=txwait+(txLastSize/cur.rate);
-  txwait:=(MarkData/cur.Rate)-((Now-MarkStart)*SecsPerDay);
+  txwait:=(MarkData/cur.Rate)-((mNow-MarkStart)/1000{*SecsPerDay});
   inc(burst);
   siNow:=false;
  until (txwait>0.02)or(burst>200);
