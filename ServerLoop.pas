@@ -73,6 +73,7 @@ var ShedTop: ^tSheduled;
 var ShedUU: ^tSheduled;
 var LastShed: UnixType.timeval;
 var PollTimeout:LongInt;
+var umNow:integer;
 
 procedure SC(fn:pointer; retval:cint);
  begin
@@ -236,15 +237,21 @@ procedure ShedRun;
  var pcur:^pointer;
  var now:UnixType.timeval{ absolute iNow};
  var delta:LongWord;
+ var delta_us:LongInt;
  var tasks:word;
  begin
  {Sheduling}
  {gmagic with delta-time, increment mNow, ...}
  fpgettimeofday(@Now,nil);
  delta:=(Now.tv_sec-LastShed.tv_sec);
- if delta>6 then delta:=5000 else delta:=(delta*1000)+((Now.tv_usec-LastShed.tv_usec) div 1000);
+ delta_us:=Now.tv_usec-LastShed.tv_usec;
+ delta:=(delta*1000)+(delta_us div 1000);
+ umNow:=umNow+(delta_us mod 1000);
+ if delta>6000 then delta:=5000;
  LastShed:=Now;
  mNow:=mNow+Delta;
+ if umNow>1000 then begin inc(mNow); dec(umNow,1000) end;
+ if umNow<-1000 then begin dec(mNow); inc(umNow,1000) end;
  //writeln('DeltaTime: ',delta);
  {first tick all tasks}
  tasks:=0;
@@ -395,6 +402,7 @@ end;
 var i:byte;
 BEGIN
  mNow:=0;
+ umNow:=0;
  Randomize;
  fpSignal(SigInt,@SignalHandler);
  fpSignal(SigTerm,@SignalHandler);
