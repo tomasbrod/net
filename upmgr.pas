@@ -148,7 +148,7 @@ end;
 procedure tPrv.Cont;
  var s:tMemoryStream;
  var sz:LongWord;
- var buf:array [1..2048] of byte;
+ var buf:array [1..4096] of byte;
  begin
  //writeln('upmgr: CONT! ',chan);
  Assert(Active and isOpen);
@@ -280,6 +280,7 @@ procedure tAggr.Init(const source:tNetAddr);
  tcs.CanSend:=@Cont;
  tcs.maxTimeout:=8;
  tcs.OnTimeout:=@TCTimeout;
+ tcs.Limit.Rate:=20*1024*1024; {20MB}
  prv:=nil;
  cnt:=0;
 end;
