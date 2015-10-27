@@ -18,7 +18,6 @@ type
     ButtonDelete: TfpgButton;
     ButtonLookup: TfpgButton;
     EditSRC: TfpgEdit;
-    CheckStart: TfpgCheckBox;
     Label1: TfpgLabel;
     Label2: TfpgLabel;
     GroupBox2: TfpgGroupBox;
@@ -29,6 +28,10 @@ type
     Label3: TfpgLabel;
     Label4: TfpgLabel;
     Label5: TfpgLabel;
+    LabelError: TfpgLabel;
+    ButtonStart: TfpgButton;
+    ButtonAbort: TfpgButton;
+    CheckAttach: TfpgCheckBox;
     {@VFD_HEAD_END: FormTestFS}
   public
     procedure AfterCreate; override;
@@ -138,19 +141,6 @@ begin
     Text := '//ip4/127.162.32.220/7778';
   end;
 
-  CheckStart := TfpgCheckBox.Create(GroupBox1);
-  with CheckStart do
-  begin
-    Name := 'CheckStart';
-    SetPosition(24, 132, 60, 19);
-    FontDesc := '#Label1';
-    Hint := 'Check to start, uncheck to stop.';
-    ParentShowHint := False;
-    ShowHint := True;
-    TabOrder := 5;
-    Text := 'Start';
-  end;
-
   Label1 := TfpgLabel.Create(GroupBox1);
   with Label1 do
   begin
@@ -227,9 +217,10 @@ begin
     Color := TfpgColor($BFBFBEC4);
     FirstColor := TfpgColor($BF000000);
     Hint := '%Total Bytes';
-    ShowHint := True;
+    ParentShowHint := False;
     Progress := 0;
     SecondColor := TfpgColor($BF434FFF);
+    ShowHint := True;
   end;
 
   Label3 := TfpgLabel.Create(GroupBox2);
@@ -260,6 +251,54 @@ begin
     FontDesc := '#Label1';
     Hint := '';
     Text := 'Total:';
+  end;
+
+  LabelError := TfpgLabel.Create(GroupBox2);
+  with LabelError do
+  begin
+    Name := 'LabelError';
+    SetPosition(180, 20, 80, 50);
+    FontDesc := '#Label1';
+    Hint := '';
+    Text := 'ok';
+  end;
+
+  ButtonStart := TfpgButton.Create(GroupBox1);
+  with ButtonStart do
+  begin
+    Name := 'ButtonStart';
+    SetPosition(12, 130, 80, 23);
+    Text := 'Start';
+    FontDesc := '#Label1';
+    Hint := '';
+    ImageName := '';
+    TabOrder := 7;
+  end;
+
+  ButtonAbort := TfpgButton.Create(GroupBox1);
+  with ButtonAbort do
+  begin
+    Name := 'ButtonAbort';
+    SetPosition(100, 130, 80, 23);
+    Text := 'Abort';
+    Enabled := False;
+    FontDesc := '#Label1';
+    Hint := '';
+    ImageName := '';
+    TabOrder := 8;
+  end;
+
+  CheckAttach := TfpgCheckBox.Create(GroupBox1);
+  with CheckAttach do
+  begin
+    Name := 'CheckAttach';
+    SetPosition(163, 60, 76, 19);
+    BoxLayout := tbRightBox;
+    Enabled := False;
+    FontDesc := '#Label1';
+    Hint := '';
+    TabOrder := 10;
+    Text := 'Attached:';
   end;
 
   {@VFD_BODY_END: FormTestFS}
