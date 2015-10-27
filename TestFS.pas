@@ -33,7 +33,6 @@ procedure t.ST1(msg:tSMsg; data:boolean);
    writeln('INFO size=',r.ReadWord(4),' final=',r.readbyte,' seg=',r.readword(4));
    ch.Callback:=@ST2;
    UnShedule(@HardTimeout);
-   halt(99);
   end else if op=upClose then writeln('CLOSE')
   else writeln('unknown');
  end;
@@ -51,6 +50,7 @@ procedure t.ST2(msg:tSMsg; data:boolean);
   if op=upCLOSE then writeln('CLOSE ')
   else if op=upDONE then begin
    writeln('DONE');
+   halt(99);
    ch.streaminit(s,1);
    s.WriteByte(opcode.upClose);
    ch.Send(s);
