@@ -8,6 +8,7 @@ uses cthreads,ServerLoop
 	,dhtBootStatic
 	,dhtPersist
 	,ECC
+	,Ctrl
   ,dhlt
   ,TestPRC
   ,TestPRL

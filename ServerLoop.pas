@@ -4,6 +4,7 @@ INTERFACE
 uses MemStream,NetAddr,UnixType,Sockets;
 
 procedure Main;
+procedure RequestTerminate;
 
 {#Message handling#}
 type tSMsg=object
@@ -48,6 +49,7 @@ var mNow:tMTime; { miliseconds since start }
                   {overflows in hunderd hours }
 function GetMTime:tMTime;
 procedure SetThreadName(name:pchar);
+procedure SC(fn:pointer; retval:cint);
 
 IMPLEMENTATION
 
@@ -421,6 +423,8 @@ function OptParamCount(o:word):word;
   else break;
  end;
 end;
+procedure RequestTerminate;
+begin Terminated:=true end;
 
 var i:byte;
 var nb:array [0..0] of byte;
