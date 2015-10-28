@@ -12,7 +12,7 @@ type tMemoryStream=object
  procedure Read(var buf; cnt:Word);
  function  ReadByte:byte;
  function  ReadWord(cnt:byte): LongWord;
- procedure Rewind;
+ procedure Trunc;
  procedure Append;
  function  Tell:LongWord;
  procedure Write(var buf; cnt:word);
@@ -72,8 +72,8 @@ function  tMemoryStream.ReadWord(cnt:byte): LongWord;
  ReadWord:=LongWord(pointer(@tm)^);
 end;
  
-procedure tMemoryStream.Rewind;
- begin position:=0; end;
+procedure tMemoryStream.Trunc;
+ begin length:=position; end;
 procedure tMemoryStream.Append;
  begin position:=length; end;
 function tMemoryStream.Tell:LongWord;
