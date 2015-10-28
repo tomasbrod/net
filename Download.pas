@@ -96,7 +96,7 @@ procedure tAggr.MsgDATA(sz:Word; mark:byte);
  delta:=(mNow-StartT){*MSecsPerDay};
  if delta<400 then exit;
  rate:=(ByteCnt/delta)*1000;
- writeln('Rate: ',(rate/1024):7:1, '(',ByteCnt,')');
+ writeln('Download: rate ',(rate/1024):7:1, 'kB/s');
  rateb:=round((rate)/64);
  StartT:=mNow;
  ByteCnt:=1;
@@ -113,7 +113,7 @@ procedure tAggr.Periodic;
   DgrCntCheck:=0;
   Shedule(5000,@Periodic);
  exit end;
- writeln('Periodic check failed');
+ writeln('Download: Periodic check failed, unimplemented!');
  //todo do
 end;
 

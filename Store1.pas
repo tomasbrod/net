@@ -14,7 +14,7 @@ tStoreObjectInfo=object
  
  procedure Open(const fid:tfid);
  procedure Close;
- procedure SegSeek(ofs:LongWord);
+ procedure SegSeek(ofs:LongWord); unimplemented;
  procedure ReadAhead(cnt:Word; into:pointer);
  procedure WaitRead; {wait for read to finish, rc}
  private

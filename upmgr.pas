@@ -258,7 +258,7 @@ procedure tPrv.Init(ag:tAggr_ptr; var nchat:tChat; msg: tSMsg);
  aggr:=ag;
  next:=nil;
  prev:=nil;
- chan:=msg.stream.readbyte;
+ chan:=msg.stream.readbyte; {todo: except}
  writeln('upmgr: prv init chan=',chan);
  weight:=100;
  wcur:=0;

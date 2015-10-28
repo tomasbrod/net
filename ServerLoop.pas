@@ -132,7 +132,6 @@ procedure SignalHandler(sig:cint);CDecl;
   writeln;
   if terminated then raise eControlC.Create('CtrlC DoubleTap') ;
   Terminated:=true;
-  writeln('Shutdown requested');
  end;
 
 {index=iphash+opcode}
@@ -287,7 +286,6 @@ procedure ShedRun;
   pcur:=@cur^.next;
   cur:=cur^.next;
  end;
- if delta >4990 then writeln('ServerLoop: tasks=',tasks);
 end;
 
 procedure Main;
