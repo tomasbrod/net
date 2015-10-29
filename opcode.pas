@@ -7,6 +7,7 @@ const {dgram opcode}
  tccont=5;
  tceack=7;
  tcdata_no_report=8 unimplemented;
+ {10-16 reserver for dht}
 const {chat init}
  upFileServer=2;
 const {FS opcodes}
