@@ -155,8 +155,6 @@ begin
  end;
 end;
 
-{$I NetAddr-str.pas}
-
 procedure t.ToString( var str :String );
  begin
  case data.Family of
