@@ -8,6 +8,11 @@ const {dgram opcode}
  tceack=7;
  tcdata_no_report=8 unimplemented;
  {10-16 reserver for dht}
+ dhtping=10;
+ dhtpong=11;
+ dhtfind=12;
+ dhtnodes=13;
+ dhtvalues=14;
 const {chat init}
  upFileServer=2;
 const {FS opcodes}
