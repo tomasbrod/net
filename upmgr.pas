@@ -167,6 +167,7 @@ procedure tPrv.Cont;
  //FreeMem(s.base,s.size);
  SegLen:=SegLen-sz;
  dec(wcur);
+ //FIXME: wait for ack of previous message!
  if SegLen=0 then begin
   ch^.StreamInit(s,2);
   s.WriteByte(upDONE);
@@ -259,7 +260,7 @@ procedure tPrv.Init(ag:tAggr_ptr; var nchat:tChat; msg: tSMsg);
  next:=nil;
  prev:=nil;
  chan:=msg.stream.readbyte; {todo: except}
- writeln('upmgr: prv init chan=',chan);
+ writeln('upmgr: prv init ',string(msg.source^),' chan=',chan);
  weight:=100;
  wcur:=0;
  isOpen:=false; Active:=false;
