@@ -11,6 +11,7 @@ tStoreObjectInfo=object
  rc:Word; {0=no error 1=not found, other}
  length:LongWord;  {the whole file}
  seglen:longword;  {from cur to end of segment}
+ offset:LongWord;  {only valid when reading}
  
  procedure Open(const fid:tfid);
  procedure Close;
@@ -18,7 +19,7 @@ tStoreObjectInfo=object
  procedure ReadAhead(cnt:Word; into:pointer);
  procedure WaitRead; {wait for read to finish, rc}
  procedure EnableWrite(const fid:tFID);
- procedure SetLength(len:LongWord);
+ procedure SetFLength(len:LongWord);
  procedure WriteSeg(ofs:LongWord;len:word;data:pointer);
  procedure GetMiss(out ofs:LongWord; out len:LongWord; var state:pointer);
  procedure GetMiss(out ofs:LongWord; out len:LongWord);
@@ -112,6 +113,7 @@ procedure tStoreObjectInfo.Open(const fid:tfid);
  begin
  mkfilen(filename,'f',fid);
  segi:=nil;
+ Offset:=0;
  dh:=FileOpen(filename,fmOpenRead or fmShareDenyWrite);
  if dh<>-1 then begin
   rc:=0;
@@ -137,10 +139,14 @@ end;
 
 procedure tStoreObjectInfo.EnableWrite(const fid:tFID);
  begin
+ writeln('Store1: enaling write');
  assert((dh=-1)or(not final));
  if dh=-1 then begin
   {file was close, create}
   dh:=FileCreate(filename);
+  if dh=-1 then begin
+   Writeln('Store1: create failed for file ',filename,', ioresult=',IOResult);
+   rc:=3; exit end;
   {init length and segments}
   length:=0;
   segi:=GetSegInfo(fid);
@@ -152,9 +158,10 @@ procedure tStoreObjectInfo.EnableWrite(const fid:tFID);
  end;
  if dh=-1 then rc:=2 else rc:=0;
 end;
-procedure tStoreObjectInfo.SetLength(len:LongWord);
+procedure tStoreObjectInfo.SetFLength(len:LongWord);
  begin
- assert( (length=0)and(not final)and(dh<>-1) );
+ assert(not final);
+ writeln('Store1: SetFLength ',len);
  length:=len;
  {todo: errors!!!}
  FileSeek(dh,len,fsFromBeginning);
@@ -164,12 +171,32 @@ procedure tSegInfo.SetSeg(ofs,len:LongWord; state:boolean);
  var cp:^tSeg;
  var pcp:^pointer;
  var after:LongWord;
+ var op:boolean;
+ procedure Dump(c:char);
+  begin
+  cp:=cache;
+  writeln('Store1: dumpCache ',c,' ',LongWord(@self));
+  while assigned(cp) do begin
+   writeln(cp^.first,'-',cp^.after);
+   cp:=cp^.next;
+  end;
+ end;
  begin
  assert(state);
  after:=ofs+len;
+ //Dump('a');
  pcp:=@cache;
  cp:=cache;
+ //writeln('Store1: Add: ',ofs,'-',after);
  while assigned(cp) do begin
+  op:=false;
+  if (ofs<=cp^.first)and(after>=cp^.after) then begin
+   {merge complete-encase}
+   pcp^:=cp^.next;
+   dispose(cp);
+   cp:=pcp^;
+   continue;
+  end;
   if cp^.after=ofs then begin
    {merge left-matching}
    pcp^:=cp^.next;
@@ -186,15 +213,21 @@ procedure tSegInfo.SetSeg(ofs,len:LongWord; state:boolean);
    cp:=pcp^;
    continue;
   end;
-  pcp:=@cp^.next;
+  if (after>cp^.first)and(ofs<=cp^.first)and(after<=cp^.after) then begin writeln('k'); after:=cp^.first; end;
+  if (ofs<cp^.after)and(after>=cp^.after)and(ofs>=cp^.first) then begin writeln('l');  ofs:=cp^.after;end;
+  if not op then pcp:=@cp^.next;
   cp:=pcp^;
  end;
+ //Dump('b');
  {add the merged seg}
+ if ofs<>after then begin
  new(cp);
  cp^.first:=ofs;
  cp^.after:=after;
  cp^.next:=cache;
  cache:=cp;
+ end;
+ //Dump('c');
 end;
 procedure tStoreObjectInfo.WriteSeg(ofs:LongWord;len:word;data:pointer);
  begin
@@ -204,11 +237,30 @@ procedure tStoreObjectInfo.WriteSeg(ofs:LongWord;len:word;data:pointer);
  tSegInfo(segi^).SetSeg(ofs,len,true);
 end;
 procedure tStoreObjectInfo.GetMiss(out ofs:LongWord; out len:LongWord; var state:pointer);
-begin
-with tSegInfo(segi^) do begin
- assert(false);
-end;
-end;
+ var cp,cp1,cp2:^tSeg;
+ begin with tSegInfo(segi^) do begin
+ assert(state=nil);
+ {find seg with lowest base, return 0..base-1}
+ cp1:=nil; cp2:=nil;
+ len:=0;
+ ofs:=0;
+ cp:=cache; while assigned(cp) do begin
+  if (cp1=nil)or(cp^.first<cp1^.first) then cp1:=cp;
+ cp:=cp^.next; end;
+ if assigned(cp1) then begin
+  cp:=cache; while assigned(cp) do begin
+   if ((cp2=nil)or(cp^.first<cp2^.first))and(cp^.first>cp1^.first) then cp2:=cp;
+  cp:=cp^.next; end;
+  if assigned(cp2) then begin
+   ofs:=cp1^.after;
+   len:=cp2^.first-ofs;
+  end else begin
+   ofs:=cp1^.after;
+   len:=self.length-ofs;
+  end;
+ end else len:=self.length;
+ writeln('Store1: report miss ',ofs,'+',len);
+end;end;
 procedure tStoreObjectInfo.GetMiss(out ofs:LongWord; out len:LongWord);
  var state:pointer;
  begin
@@ -224,6 +276,7 @@ procedure tStoreObjectInfo.ReadAhead(cnt:Word; into:pointer);
  assert(seglen>=cnt);
  red:=FileRead(dh,into^,cnt);
  seglen:=seglen-red;
+ offset:=offset+red;
  if red=cnt then rc:=0 else begin
   //todo
   writeln('Store1: read ',red,' out of ',cnt,' requested bytes');
@@ -275,12 +328,15 @@ procedure tStoreObjectInfo.SegSeek(ofs:longword);
  if final then begin
   if ofs<=length then begin
    seglen:=length-ofs;
-   FileSeek(dh,ofs,fsFromBeginning);
-   rc:=0;
+   if FileSeek(dh,ofs,fsFromBeginning)=ofs then begin
+    offset:=ofs;
+    rc:=0;
+   end else rc:=3;
   end else rc:=5;
  end else if assigned(segi) then begin
   seglen:=tSegInfo(segi^).GetSegLen(ofs);
   if seglen=0 then rc:=4 else if FileSeek(dh,ofs,fsFromBeginning)<>ofs then rc:=3 else rc:=0;
+  offset:=ofs;
  end else rc:=7;
 end;
 

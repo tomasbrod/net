@@ -152,12 +152,13 @@ procedure tPrv.Cont;
  begin
  //writeln('upmgr: CONT! ',chan);
  Assert(Active and isOpen);
- sz:=aggr^.tcs.MaxSize(sizeof(buf))-1;
+ sz:=aggr^.tcs.MaxSize(sizeof(buf))-5; {1mark+4base}
  if sz>SegLen then sz:=SegLen;
  //s.Init(GetMem(sz),0,sz);
- Assert((sz+1)<=sizeof(buf));
+ Assert((sz+5)<=sizeof(buf));
  s.Init(@buf,0,sizeof(buf)); aggr^.tcs.WriteHeaders(s);
  s.WriteByte(Chan);
+ s.WriteWord(DWORD(oinfo.Offset),4);
  Assert(sz<=s.WrBufLen);
  oinfo.ReadAhead(sz,s.WrBuf); //todo
  oinfo.WaitRead;

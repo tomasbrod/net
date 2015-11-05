@@ -1,1 +1,11 @@
 To-Do list
+- merge TC and upmgr
+- move file sending to therad
+- move GetMiss to Download
+- handle timeouts in Download
+- skip unavailable segments
+  - upmgr: send avalable subsegment base
+- Chat: send aborts retransmission
+? Download request random subsegment
+  (distribution + exercise for recombinator)
+- ...
