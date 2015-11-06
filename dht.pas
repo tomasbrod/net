@@ -17,6 +17,7 @@ procedure AddNode(const contact:tNetAddr);
 procedure Get(const id:tPID; out result:array of tNetAddr);
 
 IMPLEMENTATION
+uses dhroute;
 
 {communication:
  ping-pong;
