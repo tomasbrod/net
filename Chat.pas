@@ -93,7 +93,10 @@ end;
 
 procedure tChat.Send(s:tMemoryStream);
  begin
- assert(txLen=0);
+ if txLen>0 then begin
+  FreeMem(txPk,txLen);
+  UnShedule(@Resend);
+ end;
  //assert(assigned(callback));
  Inc(txSeq);
  s.Seek(0);

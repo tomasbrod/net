@@ -23,6 +23,7 @@ type tUploadThr=object
  curc:byte;
  buffer:array [0..2047] of byte;
  stop:boolean;
+ wait:boolean;
 
  procedure Main;
  procedure Init(source:tNetAddr);
@@ -56,35 +57,42 @@ procedure tUploadThr.Main;
  delta:=0;
  repeat
  EnterCriticalSection(crit);
- LastTime:=Now;
- pch:=curc;
- txwait:=((MarkData/Rate)*1000)-(MarkTime);
-  {find usable channel}
- while (chans[curc]=nil)or(chans[curc]^.wcur=0)or(chans[curc]^.SegLen=0) do begin
-  if assigned(chans[curc])and(chans[curc]^.WCur=0) then chans[curc]^.WCur:=chans[curc]^.weight;
-  inc(curc);
-  if curc>high(chans) then curc:=0;
-  if curc=pch then stop:=true;
- end;
  if stop then begin
   LeaveCriticalSection(crit);
   exit
  end;
+ LastTime:=SysUtils.Now;
+ pch:=0;
+ {find usable channel}
+ while (chans[curc]=nil)or(chans[curc]^.wcur=0)or(chans[curc]^.SegLen=0) do begin
+  if assigned(chans[curc])and(chans[curc]^.WCur=0) then chans[curc]^.WCur:=chans[curc]^.weight;
+  inc(curc);
+  inc(pch);
+  if curc>high(chans) then curc:=0;
+  if pch>(high(chans)+1) then begin wait:=true; break; end;
+ end;
+ if wait then begin
+  LeaveCriticalSection(crit);
+  sleep(500);
+  continue;
+ end;
  s.Init(@buffer,0,high(buffer));
  {prepare header}
+ if size2>s.size then size2:=0;
  if size2=0 then begin
   sz:=size1; if size1>s.size then sz:=s.size; 
   s.WriteByte(opcode.tcdata);
   s.WriteByte(mark1);
  end else begin
-  sz:=size2; if sz>s.size then sz:=s.size;
+  sz:=size2; if sz>s.size then size2:=s.size;
   s.WriteByte(opcode.tcdataimm);
   s.WriteByte(mark2);
+  size2:=0;
  end;
  s.WriteByte(curc);
  s.WriteWord(chans[curc]^.oi.offset,4);
  dec(sz,s.length);
- if sz>chans[curc]^.SegLen then sz:=chans[curc]^.oi.SegLen;
+ if sz>chans[curc]^.SegLen then sz:=chans[curc]^.SegLen;
  chans[curc]^.oi.ReadAhead(sz,s.WrBuf);
  chans[curc]^.oi.WaitRead;
  Assert(chans[curc]^.oi.rc=0);
@@ -93,8 +101,11 @@ procedure tUploadThr.Main;
  Dec(chans[curc]^.WCur);
  LeaveCriticalSection(crit);
  fpSendTo(socket,s.base,s.length,0,@remote,sizeof(remote));
- Sleep(round(txWait));
- Delta:=Delta+((LastTime-Now)*MSecsPerDay);
+ txwait:=((MarkData/Rate)*1000)-(MarkTime);
+ MarkData:=MarkData+s.length;
+ if txWait>1000 then begin writeln('!!! txwait=',round(txWait)); txWait:=1000;end;
+ if txWait>0 then Sleep(round(txWait));
+ Delta:=Delta+((SysUtils.Now-LastTime)*MSecsPerDay);
  if Delta>5000 then Delta:=3000;
  if Delta<0 then Delta:=0;
  MarkTime:=MarkTime+trunc(Delta);
@@ -109,8 +120,11 @@ function thrfunc(p:pointer):PtrInt;
 end;
 procedure tUploadThr.Start;
  begin
+ wait:=false;
  if not stop then exit;
  stop:=false;
+ MarkData:=0;
+ MarkTime:=0;
  thrid:=BeginThread(@ThrFunc,@self);
 end;
 
@@ -119,7 +133,9 @@ procedure tUploadThr.Done;
  EnterCriticalSection(crit);
  stop:=true;
  LeaveCriticalSection(crit);
+ writeln('UploadThread: wait to terminate');
  WaitForThreadterminate(thrid,999999);
+ writeln('UploadThread: doned');
  DoneCriticalSection(crit);
 end;
 END.

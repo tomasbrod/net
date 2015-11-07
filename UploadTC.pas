@@ -3,35 +3,50 @@ procedure tAggr.CalcRates(rxRate:Single);
  var txRate:Single;
  var RateFill:Single;
  var pMark:byte;
- const limRateIF=3;
+ const limRateIF=1;
  begin
  EnterCriticalSection(thr.crit);
  pMark:=thr.mark1;
- if thr.MarkTime=0
- then begin txRate:=rxRate; thr.Rate:=rxRate end
- else txRate:=thr.MarkData/((thr.MarkTime)/1000{*SecsPerDay});
+ if thr.MarkTime=0 then thr.MarkTime:=1;
+ if thr.MarkData=0
+ then begin
+  writeln('RESET INITIAL');
+  thr.Mark1:=random(255)+1; thr.MarkData:=0; thr.MarkTime:=0; txRate:=rxRate; thr.Rate:=4096;
+ end else txRate:=thr.MarkData/(thr.MarkTime/1000);
+ if rxRate=0 then rxRate:=1;
+ if txRate=0 then txRate:=1;
  RateFill:=rxRate/txRate;
- write('speed: ',(rxRate/1024):1:3,'kB/s (',(RateFill*100):3:1,'% of ',txRate/1024:1:3,'), ');
- if RateFill<0.85 then begin
-  writeln('limit');
-  if RateFill<0.5 then thr.size1:=128;
+ write('speed: ',(rxRate/1024):8:2,'kB/s (',(RateFill*100):3:0,'% of ',txRate/1024:8:2,'), ');
+ if RateFill<0.95 then begin
+  write('limit');
+  if RateFill<0.5 then thr.size1:=round(thr.size1*0.75);
   thr.Rate:=rxRate;
-  RateIF:=RateIF/2;
-  repeat thr.mark1:=Random(256) until (thr.mark1<>pMark);
-  thr.MarkData:=0; {include on-the-wire data if increasing}
+  RateIF:=RateIF*0.1*RateFill;
  end else
  if (txRate/thr.Rate)>0.7 then begin
-  writeln('pass');
+  write('pass');
   thr.Rate:=1+txRate*(RateIF+1);
   if thr.Rate>limRate then thr.Rate:=limRate
-  else RateIF:=RateIF*2;
+  else RateIF:=RateIF+0.1;
   if RateIF>limRateIF then RateIF:=LimRateIF;
- end;
- if (thr.Rate/thr.size1)<4 then thr.size1:=round(thr.Rate/5);
+ end else write('3hard');
+ repeat thr.mark1:=Random(255)+1 until (thr.mark1<>pMark);
+ thr.MarkData:=0;
+ thr.MarkTime:=0;
  if thr.size1<120 then thr.size1:=128;
- sizeIF:=sizeIF/2;
- thr.size2:=round(thr.size1*(1+SizeIF));
- thr.mark2:=Random(256);
+ {no ack to size inc packet, back up}
+ sizeIF:=sizeIF/8;
+ {but at least 1 byte increase}
+ if (thr.size1*SizeIF)<1 then SizeIF:=1/thr.Size1;
+ {freq...}
+ if (thr.Size1/thr.Rate)>0.11 then begin thr.size1:=100; thr.rate:=4096; end;
+ write(', if=',RateIF:6:4);
+ write(', size=',thr.size1:5,'+',SizeIF:6:4);
+ {request ack, also triggers MTU discovery}
+ thr.size2:=thr.size1;
+ thr.size1:=thr.size2-1;
+ thr.mark2:=thr.Mark1;
+ writeln;
  LeaveCriticalSection(thr.crit);
 end;
 
@@ -49,7 +64,7 @@ procedure tAggr.OnCont(msg:tSMsg);
   CalcRates(rRate*64);
  end;
 end;
- 
+
 procedure tAggr.OnAck(msg:tSMsg);
  var op,rmark:byte;
  var rSize:LongWord;
@@ -62,12 +77,21 @@ procedure tAggr.OnAck(msg:tSMsg);
  if (rmark<>thr.mark2)and(rmark<>thr.mark1) then exit;
  inc(acks);
  Timeout:=0;
- if rsize<thr.size1 then exit;
- SizeIF:=((rSize/thr.Size1)-1)*2;
- if SizeIF>limSizeIF then SizeIF:=limSizeIF;
+ {do nothing if timeout recovery or not increase}
+ if (rsize<=thr.size1)or(timeout>0) then exit;
  EnterCriticalSection(thr.crit);
- thr.size1:=rSize;
- thr.size2:=round(thr.size1*(1+SizeIF));
- thr.mark2:=Random(256);
+ {try to maintain frequency}
+ if (rSize/thr.Rate)<0.11
+  then thr.size1:=rSize {use the new size as main size}
+  else sizeIF:=0;
+ {increase increase fastor}
+ SizeIF:=SizeIF*2; if SizeIF>limSizeIF then SizeIF:=limSizeIF;
+ assert(thr.size2=0);
+ {calc new packet size}
+ thr.size2:=round(thr.Size1*(1+SizeIF));
+ {do nothing if they are equal}
+ if thr.size1=thr.size2 then thr.size2:=0
+ {else writeln('Set size2: ',thr.size2,' ',thr.size1)};
+ thr.mark2:=thr.mark1;
  LeaveCriticalSection(thr.crit);
 end;

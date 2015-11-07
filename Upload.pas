@@ -16,8 +16,9 @@ tPrv=object
  us:tUploadSegment;
  ch:^tChat;
  isOpen,Active:boolean;
- procedure Init(nchat:tChat);
+ procedure Init(var nchat:tChat);
  procedure OnMSG(msg:tSMsg;data:boolean);
+ procedure NotifyDOne;
  procedure DoGET(const fid:tfid; base,limit:LongWord);
  procedure DoSEG(base,limit:LongWord);
  procedure Stop;
@@ -49,7 +50,7 @@ end;
 var Peers:^tAggr;
 
 
-procedure tPrv.Init(nchat:tChat);
+procedure tPrv.Init(var nchat:tChat);
  begin
  ch:=@nchat;
  ch^.Callback:=@OnMsg;
@@ -57,6 +58,7 @@ procedure tPrv.Init(nchat:tChat);
  us.weight:=100;
  isOpen:=false; Active:=false;
  Shedule(5000,@Close);
+ writeln('Upload: prv for ',string(ch^.remote),'/',chan,' init');
 end;
 
 procedure tPrv.DoGET(const fid:tfid; base,limit:LongWord);
@@ -116,13 +118,23 @@ procedure tPrv.DoSEG(base,limit:LongWord);
  end;
 end;
 
+procedure tPrv.NotifyDone;
+ var err:tmemorystream;
+ begin
+ Stop;
+ ch^.StreamInit(err,2);
+ err.WriteByte(upDONE);
+ ch^.Send(err);
+end;
+
 procedure tPrv.Stop;
  begin
  if active then begin
   active:=False;
-  Shedule(8000,@Close);
+  Shedule(20000,@Close);
   aggr^.Stop(chan);
  end;
+ writeln('Upload: prv for ',string(ch^.remote),'/',chan,' stop');
 end;
 procedure tPrv.Start;
  begin
@@ -130,11 +142,11 @@ procedure tPrv.Start;
  if not active then UnShedule(@Close);
  active:=true;
  aggr^.Start(chan);
+ writeln('Upload: prv for ',string(ch^.remote),'/',chan,' start');
 end;
 
 procedure tAggr.Init(const source:tNetAddr);
  begin
- writeln('upmgr: init');
  next:=Peers;
  prev:=nil;
  if assigned(Peers) then Peers^.prev:=@self;
@@ -144,10 +156,14 @@ procedure tAggr.Init(const source:tNetAddr);
  timeout:=0;
  rateIF:=1;
  sizeIF:=1;
- limRate:=20*1024*1024;
+ limRate:=2000*1024*1024;
  limSize:=4096;
- thr.Init(source);
  remote:=source;
+ writeln('Upload: aggr for ',string(remote),' init');
+ thr.Init(source);
+ CalcRates(2048);
+ SetMsgHandler(opcode.tccont,remote,@OnCont);
+ SetMsgHandler(opcode.tceack,remote,@OnAck);
 end;
 
 function FindAggr({const} addr:tNetAddr): tAggr_ptr;
@@ -204,24 +220,32 @@ procedure tAggr.Free(ac:byte);
 end;
 procedure tAggr.Done;
  begin
+ writeln('Upload: aggr for ',string(remote),' done');
  thr.Done;
  UnShedule(@Periodic);
+ if assigned(prev) then prev^.next:=next else Peers:=next;
+ if assigned(next) then next^.prev:=prev;
+ SetMsgHandler(opcode.tccont,remote,nil);
+ SetMsgHandler(opcode.tceack,remote,nil);
  FreeMem(@Self,sizeof(self));
 end;
 
 procedure tAggr.Start(ac:byte);
  begin
+ writeln('Upload: aggr for ',string(remote),' start');
  assert(assigned(chan[ac]));
  EnterCriticalSection(thr.crit);
  assert(not assigned(thr.chans[ac]));
  thr.chans[ac]:=@chan[ac]^.us;
- if thr.stop then Shedule(2000,@Periodic);
+ chan[ac]^.us.wcur:=chan[ac]^.us.weight;
+ if (thr.stop)or(thr.wait) then Shedule(700,@Periodic);
  thr.Start;
  LeaveCriticalSection(thr.crit);
 end;
  
 procedure tAggr.Stop(ac:byte);
  begin
+ writeln('Upload: aggr for ',string(remote),' stop');
  assert(assigned(chan[ac]));
  EnterCriticalSection(thr.crit);
  assert(assigned(thr.chans[ac]));
@@ -232,13 +256,14 @@ end;
 procedure tPrv.ChatTimeout(willwait:LongWord);
  begin
  if WillWait<8000 then exit;
- writeln('Upload: Chat timeout');
+ writeln('Upload: prv for ',string(ch^.remote),'/',chan,' ChatTimeout');
  Close;
 end;
 procedure tPrv.Close;
  var err:tMemoryStream;
  begin
  assert(assigned(ch));
+ writeln('Upload: prv for ',string(ch^.remote),'/',chan,' close');
  ch^.StreamInit(err,1);
  err.WriteByte(upClose);
  ch^.Send(err);
@@ -254,18 +279,27 @@ end;
 
 procedure tAggr.Periodic;
  var i:byte;
+ var e:boolean;
  begin
- if thr.stop then exit;
+ if (thr.stop)or(thr.wait) then begin
+  for i:=0 to high(chan) do if assigned(chan[i]) then with chan[i]^ do begin
+   if not active then continue;
+   EnterCriticalSection(thr.crit);
+   e:=us.SegLen=0;
+   LeaveCriticalSection(thr.crit);
+   if e then NotifyDone;
+  end;
+ exit end;
  if acks=0 then begin
   inc(Timeout);
-  if timeout>=5 then begin
+  if timeout>=10 then begin
    refc:=255;
    for i:=0 to high(chan) do if assigned(chan[i]) then chan[i]^.Close;
   Done;exit;end;
-  CalcRates(512);
+  if timeout>3 then CalcRates(512);
  end else timeout:=0;
  acks:=0;
- Shedule(2000,@Periodic);
+ Shedule(700,@Periodic);
 end;
 
 procedure tPrv.OnMSG(msg:tSMsg;data:boolean);
@@ -279,7 +313,7 @@ procedure tPrv.OnMSG(msg:tSMsg;data:boolean);
  if not data then exit; //todo
  if msg.stream.RdBufLen<1 then goto malformed;
  op:=msg.stream.ReadByte;
- writeln('Upload: opcode=',op,' sz=',msg.stream.RdBufLen);
+ writeln('Upload: ',string(ch^.remote),' opcode=',op,' sz=',msg.stream.RdBufLen);
  case op of
   upClose: begin
            ch^.Ack;
@@ -313,5 +347,6 @@ end;
 {$I UploadTC.pas}
 
 BEGIN
+ Peers:=nil;
  SetChatHandler(opcode.upFileServer,@ChatHandler);
 END.

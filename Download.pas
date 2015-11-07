@@ -218,6 +218,7 @@ procedure tJob.ReplyGET(msg:tSMsg; data:boolean);
    if (rsize<>so.length) then writeln('Download: length mismatch ',so.length,'->',rsize);
    total:=rsize;
    so.SetFLength(total);
+   taggr(aggr^).StartT:=mNow; {FIXME}
    //UnShedule(@HardTimeout);
   end else if op=opcode.upDONE then begin
    writeln('DONE');
@@ -257,6 +258,11 @@ procedure tJob.MsgDATA(base,length:LongWord; data:pointer);
  begin
  so.WriteSeg(base,length,data);
  done:=done+length;
+ (*
+ if rlen=length then begin
+  ...
+ else if rlen>length then dec(rlen,length);
+ *)
 end;
 
 procedure tAggr.Init(const src:tNetAddr);
@@ -317,6 +323,7 @@ procedure tAggr.MsgDATA(sz:Word; mark:byte);
   end else begin Inc(ByteCnt,sz); Inc(DgrCnt) end;
   inc(DgrCntCheck);
  end;
+ //writeln('Download: got ',DgrCnt,'dg,',ByteCnt,'B in ',delta,'ms');
  if DgrCnt<8 then exit;
  delta:=(mNow-StartT){*MSecsPerDay};
  if delta<400 then exit;
