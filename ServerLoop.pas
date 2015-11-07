@@ -1,7 +1,7 @@
 UNIT ServerLoop;
 
 INTERFACE
-uses MemStream,NetAddr,UnixType;
+uses MemStream,NetAddr,UnixType,Sockets;
 
 procedure Main;
 
@@ -17,6 +17,7 @@ type tMessageHandler=procedure(msg:tSMsg);
 procedure SetMsgHandler(OpCode:byte; handler:tMessageHandler);
 procedure SetHiMsgHandler(handler:tMessageHandler);
 
+function GetSocket(const rcpt:tNetAddr):tSocket;
 procedure SendMessage(const data; len:word; const rcpt:tNetAddr );
 {procedure SendReply(const data; len:word; const rcpt:tSMsg );}
 procedure SendMessage(const data; len:word; const rcpt:tNetAddr; channel:word );
@@ -45,7 +46,7 @@ var mNow:tMTime; { miliseconds since start }
 
 IMPLEMENTATION
 
-USES SysUtils,Sockets,BaseUnix
+USES SysUtils,BaseUnix
      ,Unix
      ;
 
@@ -111,6 +112,10 @@ procedure s_SetupInet;
 
 var Terminated:boolean=false;
 
+function GetSocket(const rcpt:tNetAddr):tSocket;
+ begin
+ result:=s_inet;
+end;
 procedure SendMessage(const data; len:word; const rcpt:tSockAddrL );
  begin
  {SC(@fpsendto,}fpsendto(s_inet,@data,len,0,@rcpt,sizeof(sockaddr_in)){)};

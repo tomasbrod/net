@@ -6,7 +6,7 @@ uses ServerLoop
 	,TestTC
 	,TestChat
 	,AsyncProcess
-	,upmgr
+	,Upload
 	,TestFS
 	,Download
 	;

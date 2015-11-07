@@ -5,57 +5,40 @@ INTERFACE
 USES Chat,opcode,ServerLoop,MemStream,NetAddr,Store1;
 
 IMPLEMENTATION
+uses UploadThread;
 
 type
 tAggr_ptr=^tAggr;
 tPrv_ptr=^tPrv;
 tPrv=object
+ chan:byte;
  aggr:tAggr_ptr;
- ch: ^tChat;
- chan: byte;
- next,prev: tPrv_ptr;
- weight,wcur:Word;
+ us:tUploadSegment;
+ ch:^tChat;
  isOpen,Active:boolean;
- seglen:LongWord;
- oinfo:tStoreObjectInfo;
- {procedure Init(ag:tAggr_ptr; var nchat:tChat; msg: tSMsg);
- procedure OnMsg(msg:tSMsg; data:boolean);
- procedure Cont;
+ procedure Init(nchat:tChat);
+ procedure OnMSG(msg:tSMsg;data:boolean);
  procedure DoGET(const fid:tfid; base,limit:LongWord);
  procedure DoSEG(base,limit:LongWord);
- procedure DoClose;
- procedure Start;
  procedure Stop;
+ procedure Start;
+ procedure Close;
  procedure ChatTimeout(willwait:LongWord);
- procedure Close;}
-end;
-tAggrThr=object
- thrid:tThreadID;
- crit:tRtlCriticalSection;
- stop:ByteBool;
- remote:tSockAddrL;
- prv1:^tPrv;
- size1,size2:Word;
- mark1,mark2:Byte;
- rate:Single;
- burst:byte;
- MarkData:LongWord;
- MarkStart:tMTime;
 end;
 tAggr=object
- thr:tAggrThr;
+ thr:tUploadThr;
  remote:tNetAddr;
  refc:byte;
- 
+ chan:array[0..11] of ^tPrv;
  acks:Word; {ack counter, for timeouts}
  timeout:word;
  rateIF,sizeIF,
  limRate,limSize:Single;
-
  next,prev: tAggr_ptr;
- procedure Start(sprv:tPrv_ptr);
- procedure Stop(sprv:tPrv_ptr);
- procedure Free;
+ procedure Free(ac:byte);{called by closing prv}
+ procedure Done;
+ procedure Start(ac:byte);
+ procedure Stop(ac:byte);
  procedure Init(const source:tNetAddr);
  procedure CalcRates(rxRate:Single);
  procedure Periodic;
@@ -64,6 +47,90 @@ tAggr=object
 end;
 
 var Peers:^tAggr;
+
+
+procedure tPrv.Init(nchat:tChat);
+ begin
+ ch:=@nchat;
+ ch^.Callback:=@OnMsg;
+ ch^.TMHook:=@ChatTimeout;
+ us.weight:=100;
+ isOpen:=false; Active:=false;
+ Shedule(5000,@Close);
+end;
+
+procedure tPrv.DoGET(const fid:tfid; base,limit:LongWord);
+ var err:tmemorystream;
+ begin
+ Stop;
+ if isOpen then us.oi.Close;
+ isOpen:=false;
+ ch^.Ack;
+ us.oi.Open(fid);
+ {if not oinfo.final then begin
+  oinfo.rc:=200;
+  Close(oinfo.hnd);
+ end;}
+ if us.oi.rc>0 then begin
+  ch^.StreamInit(err,3);
+  err.WriteByte(upFAIL);
+  if us.oi.rc=1 then err.WriteByte(upErrNotFound)
+  else begin err.WriteByte(upErrIO); err.WriteByte(us.oi.rc) end;
+  ch^.Send(err);
+ end else begin
+  isopen:=true;
+  DoSEG(base,limit);
+ end;
+end;
+
+procedure tPrv.DoSEG(base,limit:LongWord);
+ var err:tmemorystream;
+ begin
+ if isOpen then begin
+  Stop;//for thread safety
+  ch^.StreamInit(err,12);
+  us.oi.SegSeek(base);
+  if us.oi.rc>0 then begin
+   err.WriteByte(upFAIL);
+   err.WriteByte(upErrIO);
+   err.WriteByte(us.oi.rc);
+   ch^.Send(err);
+   if Active then Stop;
+  end else begin
+  err.WriteByte(upINFO);
+  err.WriteWord(0,2);
+  err.WriteWord(us.oi.length,4);
+  us.SegLen:=limit;
+  if us.oi.seglen<us.SegLen then us.SegLen:=us.oi.seglen;
+  if us.oi.final
+  then err.WriteByte(1)
+  else err.WriteByte(0);
+  err.WriteWord(us.SegLen,4);
+  ch^.Send(err);
+  Start;
+ end end else begin
+  ch^.StreamInit(err,2);
+  err.WriteByte(upFAIL);
+  err.WriteByte(upErrSegNoGet);
+  ch^.Send(err);
+ end;
+end;
+
+procedure tPrv.Stop;
+ begin
+ if active then begin
+  active:=False;
+  Shedule(8000,@Close);
+  aggr^.Stop(chan);
+ end;
+end;
+procedure tPrv.Start;
+ begin
+ assert(isOpen);
+ if not active then UnShedule(@Close);
+ active:=true;
+ aggr^.Start(chan);
+end;
 
 procedure tAggr.Init(const source:tNetAddr);
  begin
@@ -79,137 +146,8 @@ procedure tAggr.Init(const source:tNetAddr);
  sizeIF:=1;
  limRate:=20*1024*1024;
  limSize:=4096;
- InitCriticalSection(thr.crit);
- source.ToSocket(thr.remote);
+ thr.Init(source);
  remote:=source;
- thr.prv1:=nil;
-end;
-
-function ThrStart(p:pointer):LongInt;
- begin with tAggrThr(p^) do begin
- { ( read; ) send; wait; repeat}
-end end;
-
-procedure tAggr.Start(sprv:tPrv_ptr);
- begin
- if assigned(thr.prv1) then begin
-  sprv^.next:=thr.prv1^.next;
-  sprv^.prev:=thr.prv1;
-  sprv^.prev^.next:=sprv;
-  sprv^.next^.prev:=sprv;
- end else begin
-  sprv^.next:=sprv;
-  sprv^.prev:=sprv;
-  thr.prv1:=sprv;
-  thr.stop:=false;
-  thr.MarkData:=0;
-  thr.MarkStart:=mNow;
-  CalcRates(20480);
-  thr.thrid:=BeginThread(@ThrStart,@thr{,var,stack});
- end;
- sprv^.wcur:=sprv^.weight;
-end;
-
-procedure tAggr.CalcRates(rxRate:Single);
- var txRate:Single;
- var RateFill:Single;
- var pMark:byte;
- const limRateIF=3;
- begin
- EnterCriticalSection(thr.crit);
- pMark:=thr.mark1;
- if thr.MarkStart=0
- then begin txRate:=rxRate; thr.Rate:=rxRate end
- else txRate:=thr.MarkData/((mNow-thr.MarkStart)/1000{*SecsPerDay});
- RateFill:=rxRate/txRate;
- write('speed: ',(rxRate/1024):1:3,'kB/s (',(RateFill*100):3:1,'% of ',txRate/1024:1:3,'), ');
- if RateFill<0.85 then begin
-  writeln('limit');
-  if RateFill<0.5 then thr.size1:=128;
-  thr.Rate:=rxRate;
-  RateIF:=RateIF/2;
-  repeat thr.mark1:=Random(256) until (thr.mark1<>pMark);
-  thr.MarkData:=0; {include on-the-wire data if increasing}
- end else
- if (txRate/thr.Rate)>0.7 then begin
-  writeln('pass');
-  thr.Rate:=1+txRate*(RateIF+1);
-  if thr.Rate>limRate then thr.Rate:=limRate
-  else RateIF:=RateIF*2;
-  if RateIF>limRateIF then RateIF:=LimRateIF;
- end;
- if (thr.Rate/thr.size1)<4 then thr.size1:=thr.Rate/5;
- if thr.size1<120 then thr.size1:=128;
- sizeIF:=sizeIF/2;
- thr.size2:=round(thr.size1*(1+SizeIF));
- thr.mark2:=Random(256);
- LeaveCriticalSection(thr.crit);
-end;
-
-procedure tAggr.Periodic;
- begin
- Shedule(2000,@Periodic);
- if acks=0 then begin
-  inc(Timeout);
-  CalcRates(512);
- end;
- acks:=0;
- Shedule(2000,@Periodic);
-end;
-
-procedure tAggr.OnCont(msg:tSMsg);
- var op,rmark:byte;
- var rRate:LongWord;
- begin
- op:=msg.stream.readbyte;
- assert(op=opcode.tccont);
- rmark:=msg.stream.readbyte;
- if rmark=thr.mark1 then begin
-  inc(acks);
-  timeout:=0;
-  rrate:=msg.stream.readword(4);
-  CalcRates(rRate*64);
- end;
-end;
- 
-procedure tAggr.OnAck(msg:tSMsg);
- var op,rmark:byte;
- var rSize:LongWord;
- const limSizeIF=1;
- begin
- op:=msg.stream.readbyte;
- assert(op=opcode.tceack);
- rmark:=msg.stream.readbyte;
- rsize:=msg.stream.readword(2);
- if (rmark<>thr.mark2)and(rmark<>thr.mark1) then exit;
- inc(acks);
- Timeout:=0;
- if rsize<thr.size1 then exit;
- SizeIF:=((rSize/thr.Size1)-1)*2;
- if SizeIF>limSizeIF then SizeIF:=limSizeIF;
- EnterCriticalSection(thr.crit);
- thr.size1:=rSize;
- thr.size2:=round(thr.size1*(1+SizeIF));
- thr.mark2:=Random(256);
- LeaveCriticalSection(thr.crit);
-end;
-
-procedure tAggr.Stop(sprv:tPrv_ptr);
- begin
-end;
-
-procedure tAggr.Free;
- begin
- Assert(refc>0);
- Dec(refc);
- if refc=0 then begin
-  writeln('upmgr: aggr close');
-  DoneCriticalSection(thr.crit);
-  if assigned(prev) then prev^.next:=next else Peers:=next;
-  if assigned(next) then next^.prev:=prev;
-  FreeMem(@self,sizeof(self));
- end else
- writeln('upmgr: aggr unrefd');
 end;
 
 function FindAggr({const} addr:tNetAddr): tAggr_ptr;
@@ -222,43 +160,157 @@ function FindAggr({const} addr:tNetAddr): tAggr_ptr;
  end;
 end;
 
+procedure SendError(var ch:tChat;e1,e2:byte);
+ var s:tMemoryStream;
+ begin
+ ch.StreamInit(s,3);
+ s.WriteByte(upFAIL);
+ s.WriteByte(e1);
+ s.WriteByte(e2);
+ ch.Send(s);
+ ch.Close;
+end;
+
 procedure ChatHandler(var nchat:tChat; msg:tSMsg);
  var ag:^tAggr;
  var pr:^tPrv;
- var s:tMemoryStream;
- const cMax=16;
+ var chan:byte;
  begin
- writeln('upmgr: ChatHandler');
+ writeln('Upload: ChatHandler');
  msg.stream.skip({the initcode}1);
- if msg.stream.RdBufLen<2 then begin
-  writeln('upmgr: malformed init');
-  nchat.StreamInit(s,16);
-  s.WriteByte(upFAIL);
-  s.writebyte(upErrMalformed);
-  nchat.Send(s);
-  nchat.Close;
-  writeln('upmgr: malformed request stage=0');
- exit end;
- {first get the ag}
+ if msg.stream.RdBufLen<2 then begin SendError(nchat,upErrMalformed,0); exit end;
+ chan:=msg.stream.ReadByte;
+ if chan=high(tAggr.chan) then begin Senderror(nchat,upErrHiChan,0); exit end;
  ag:=FindAggr(msg.source^);
- if assigned(ag) then begin
- {check}
- if ag^.refc>=cMax then begin
-  nchat.StreamInit(s,16);
-  s.WriteByte(upFAIL);
-  s.WriteByte(upErrHiChan);
-  s.WriteByte(cMax);
-  s.WriteByte(ag^.refc);
-  nchat.Send(s);
-  nchat.Close;
- exit end;
- end else begin
+ if not assigned(ag) then begin
   New(ag);
   ag^.init(msg.source^);
- end;
+ end else if assigned(ag^.chan[chan]) then begin SendError(nchat,upErrChanInUse,0); exit end;
  New(pr);
- //pr^.Init(ag,nchat,msg);
+ pr^.aggr:=ag;
+ pr^.chan:=chan;
+ ag^.chan[chan]:=pr;
+ inc(ag^.refc);
+ pr^.Init(nchat);
+ pr^.OnMSG(msg,true);
 end;
+
+procedure tAggr.Free(ac:byte);
+ begin
+ assert(assigned(chan[ac]));
+ chan[ac]:=nil;
+ dec(refc);
+ if refc=0 then Done;
+end;
+procedure tAggr.Done;
+ begin
+ thr.Done;
+ UnShedule(@Periodic);
+ FreeMem(@Self,sizeof(self));
+end;
+
+procedure tAggr.Start(ac:byte);
+ begin
+ assert(assigned(chan[ac]));
+ EnterCriticalSection(thr.crit);
+ assert(not assigned(thr.chans[ac]));
+ thr.chans[ac]:=@chan[ac]^.us;
+ if thr.stop then Shedule(2000,@Periodic);
+ thr.Start;
+ LeaveCriticalSection(thr.crit);
+end;
+ 
+procedure tAggr.Stop(ac:byte);
+ begin
+ assert(assigned(chan[ac]));
+ EnterCriticalSection(thr.crit);
+ assert(assigned(thr.chans[ac]));
+ thr.chans[ac]:=nil;
+ LeaveCriticalSection(thr.crit);
+end;
+
+procedure tPrv.ChatTimeout(willwait:LongWord);
+ begin
+ if WillWait<8000 then exit;
+ writeln('Upload: Chat timeout');
+ Close;
+end;
+procedure tPrv.Close;
+ var err:tMemoryStream;
+ begin
+ assert(assigned(ch));
+ ch^.StreamInit(err,1);
+ err.WriteByte(upClose);
+ ch^.Send(err);
+ Stop;
+ if isOpen then us.oi.Close;
+ isOpen:=false;
+ ch^.Close;
+ ch:=nil;
+ UnShedule(@Close);
+ Aggr^.Free(chan);
+ FreeMem(@self,sizeof(self));
+end;
+
+procedure tAggr.Periodic;
+ var i:byte;
+ begin
+ if thr.stop then exit;
+ if acks=0 then begin
+  inc(Timeout);
+  if timeout>=5 then begin
+   refc:=255;
+   for i:=0 to high(chan) do if assigned(chan[i]) then chan[i]^.Close;
+  Done;exit;end;
+  CalcRates(512);
+ end else timeout:=0;
+ acks:=0;
+ Shedule(2000,@Periodic);
+end;
+
+procedure tPrv.OnMSG(msg:tSMsg;data:boolean);
+ var op:byte;
+ var hash:tfid;
+ var base:LongWord;
+ var limit:LongWord;
+ var err:tmemorystream;
+ label malformed;
+ begin
+ if not data then exit; //todo
+ if msg.stream.RdBufLen<1 then goto malformed;
+ op:=msg.stream.ReadByte;
+ writeln('Upload: opcode=',op,' sz=',msg.stream.RdBufLen);
+ case op of
+  upClose: begin
+           ch^.Ack;
+           Close;
+           end;
+  upGET: begin
+         if msg.stream.RdBufLen<>30 then goto malformed;
+         msg.stream.Read(hash,20);
+         if msg.stream.ReadWord(2)>0 then goto malformed;
+         base:=msg.stream.ReadWord(4);
+         limit:=msg.stream.ReadWord(4);
+         DoGet(hash,base,limit);
+         end;
+  upSEG: begin
+         if msg.stream.RdBufLen<10 then goto malformed;
+         if msg.stream.ReadWord(2)>0 then goto malformed;
+         base:=msg.stream.ReadWord(4);
+         limit:=msg.stream.ReadWord(4);
+         DoSEG(base, limit);
+         end;
+  else goto malformed;
+ end;
+ exit; malformed:
+ ch^.StreamInit(err,2);
+ err.WriteByte(upFAIL);
+ err.WriteByte(upErrMalformed);
+ ch^.Send(err);
+ writeln('Upload: malformed request stage=1');
+end;
+
+{$I UploadTC.pas}
 
 BEGIN
  SetChatHandler(opcode.upFileServer,@ChatHandler);
