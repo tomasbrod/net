@@ -17,7 +17,7 @@ procedure tAggr.CalcRates(rxRate:Single);
  if txRate=0 then txRate:=1;
  RateFill:=rxRate/txRate;
  write('speed: ',(rxRate/1024):8:2,'kB/s (',(RateFill*100):3:0,'% of ',txRate/1024:8:2,'), ');
- if RateFill<0.95 then begin
+ if RateFill<0.90 then begin
   write('limit');
   if RateFill<0.5 then thr.size1:=round(thr.size1*0.75);
   thr.Rate:=rxRate;

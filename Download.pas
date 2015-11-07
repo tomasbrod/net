@@ -195,9 +195,7 @@ procedure tJob.ReplyGET(msg:tSMsg; data:boolean);
  var rfinal:byte;
  begin
  {reply from GET request}
- write('Download: ReplyGET: ');
  if not data then begin
-  writeln('ack');
  end else begin
   ch.Ack;
   op:=msg.stream.ReadByte;
@@ -207,6 +205,7 @@ procedure tJob.ReplyGET(msg:tSMsg; data:boolean);
    error:=r.ReadByte;
    error2:=r.ReadByte;
    except end;
+   write('Download: ReplyGET: ');
    writeln('FAIL ',error,'-',error2);
   end
   else if op=upINFO then begin
@@ -214,13 +213,13 @@ procedure tJob.ReplyGET(msg:tSMsg; data:boolean);
    rsize  :=r.ReadWord(4);
    rfinal :=r.readbyte;
    rseg   :=r.readword(4);
-   writeln('INFO size=',rsize,' final=',rfinal,' seg=',rseg);
+   //writeln('INFO size=',rsize,' final=',rfinal,' seg=',rseg);
    if (rsize<>so.length) then writeln('Download: length mismatch ',so.length,'->',rsize);
    total:=rsize;
    so.SetFLength(total);
-   taggr(aggr^).StartT:=mNow; {FIXME}
    //UnShedule(@HardTimeout);
   end else if op=opcode.upDONE then begin
+   write('Download: ReplyGET: ');
    writeln('DONE');
    assert(so.Length>0);
    so.GetMiss(rofs,rlen);
@@ -229,6 +228,7 @@ procedure tJob.ReplyGET(msg:tSMsg; data:boolean);
     writeln('Download: completed');
    end else StartTransfer(false);
   end else begin
+   write('Download: ReplyGET: ');
    if op=upClose then writeln('CLOSE') else writeln('unknown');
    state:=stError;
    error:=254;
@@ -258,11 +258,13 @@ procedure tJob.MsgDATA(base,length:LongWord; data:pointer);
  begin
  so.WriteSeg(base,length,data);
  done:=done+length;
- (*
  if rlen=length then begin
-  ...
- else if rlen>length then dec(rlen,length);
- *)
+  so.GetMiss(rofs,rlen);
+  if rlen=0 then begin
+   state:=stDone;
+   writeln('Download: completed');
+  end else StartTransfer(false);
+ end else if rlen>length then dec(rlen,length);
 end;
 
 procedure tAggr.Init(const src:tNetAddr);
@@ -328,7 +330,7 @@ procedure tAggr.MsgDATA(sz:Word; mark:byte);
  delta:=(mNow-StartT){*MSecsPerDay};
  if delta<400 then exit;
  rate:=(ByteCnt/delta)*1000;
- writeln('Download: rate ',(rate/1024):7:1, 'kB/s');
+ //writeln('Download: rate ',(rate/1024):7:1, 'kB/s');
  rateb:=round((rate)/64);
  StartT:=mNow;
  ByteCnt:=1;

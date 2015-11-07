@@ -161,7 +161,7 @@ end;
 procedure tStoreObjectInfo.SetFLength(len:LongWord);
  begin
  assert(not final);
- writeln('Store1: SetFLength ',len);
+ //writeln('Store1: SetFLength ',len);
  length:=len;
  {todo: errors!!!}
  FileSeek(dh,len,fsFromBeginning);
