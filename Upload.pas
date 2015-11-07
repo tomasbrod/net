@@ -196,7 +196,7 @@ procedure ChatHandler(var nchat:tChat; msg:tSMsg);
  msg.stream.skip({the initcode}1);
  if msg.stream.RdBufLen<2 then begin SendError(nchat,upErrMalformed,0); exit end;
  chan:=msg.stream.ReadByte;
- if chan=high(tAggr.chan) then begin Senderror(nchat,upErrHiChan,0); exit end;
+ if chan=>high(tAggr.chan) then begin Senderror(nchat,upErrHiChan,chan); exit end;
  ag:=FindAggr(msg.source^);
  if not assigned(ag) then begin
   New(ag);
