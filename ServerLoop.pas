@@ -1,7 +1,7 @@
 UNIT ServerLoop;
 
 INTERFACE
-uses MemStream,NetAddr,UnixType;
+uses MemStream,NetAddr,UnixType,Sockets;
 
 procedure Main;
 
@@ -17,6 +17,7 @@ type tMessageHandler=procedure(msg:tSMsg);
 procedure SetMsgHandler(OpCode:byte; handler:tMessageHandler);
 procedure SetHiMsgHandler(handler:tMessageHandler);
 
+function GetSocket(const rcpt:tNetAddr):tSocket;
 procedure SendMessage(const data; len:word; const rcpt:tNetAddr );
 {procedure SendReply(const data; len:word; const rcpt:tSMsg );}
 procedure SendMessage(const data; len:word; const rcpt:tNetAddr; channel:word );
@@ -45,7 +46,7 @@ var mNow:tMTime; { miliseconds since start }
 
 IMPLEMENTATION
 
-USES SysUtils,Sockets,BaseUnix
+USES SysUtils,BaseUnix
      ,Unix
      ;
 
@@ -111,6 +112,10 @@ procedure s_SetupInet;
 
 var Terminated:boolean=false;
 
+function GetSocket(const rcpt:tNetAddr):tSocket;
+ begin
+ result:=s_inet;
+end;
 procedure SendMessage(const data; len:word; const rcpt:tSockAddrL );
  begin
  {SC(@fpsendto,}fpsendto(s_inet,@data,len,0,@rcpt,sizeof(sockaddr_in)){)};
@@ -303,7 +308,7 @@ procedure Main;
    if DoSock(PollArr[0]) then
    if assigned(curhndo) then curhndo(msg)
    else if assigned(curhnd) then curhnd(msg)
-   else raise eXception.Create('No handler for opcode '+IntToStr(Buffer[1]));
+   else {raise eXception.Create('}writeln('ServerLoop: No handler for opcode '+IntToStr(Buffer[1]));
    {INET6...}
    {Generic}
    for tp:=1 to pollTop do if PollArr[tp].revents>0 then begin
@@ -312,9 +317,7 @@ procedure Main;
    end;
   end;
  end;
- write('Loop broken [');
  CloseSocket(s_inet);
- writeln(']');
 end;
 
 procedure SetMsgHandler(OpCode:byte; handler:tMessageHandler);
