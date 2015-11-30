@@ -6,6 +6,7 @@ uses NetAddr,
      ServerLoop,opcode,MemStream
     ,Store1
     ,Chat
+    ,Sha1
     ;
 {
  Same idea here as upmgr. Have an tAggr for each peer reporting speed and 
@@ -22,71 +23,46 @@ type
  tDownloadJob=object
   total,done:LongWord;
   missc:LongWord;
-  state:(stStop,stActive,stDone,stError);
+  state:(stStop,stActive,stDone,stError,stLocalError);
   error:byte;
   error2:byte;
   fid:tFID;
   procedure Start;
+  procedure Free;
   procedure Abort;
+  protected
+  refc:byte;
  end;
 function GetJob(const fid:tFID):pDownloadJob;
 function NewJob(const source:tNetAddr; const fid: tFID):pDownloadJob;
 
 IMPLEMENTATION
+{TODO: cache for chats}
 type
+ tAggr_ptr=^tAggr;
  tJob=object(tDownloadJob)
-  aggr:pointer;
+  aggr:tAggr_ptr;
   ix:byte;
   so:tStoreObjectInfo;
-  ch:tChat;
-  rofs,rlen:LongWord;{b:l of to be requested block}
+  ch:^tChat;
+  active:boolean;
   procedure Init(const source:tNetAddr; const ifid: tFID);
   procedure MsgDATA(base,length:LongWord; data:pointer);
   procedure Start;
-  procedure StartTransfer(preamble:boolean);
+  procedure Free;
   procedure Abort;
-  procedure ReplyGET(msg:tSMsg; data:boolean);
-  procedure ReplyClose(msg:tSMsg; data:boolean);
+  procedure Close;
+  private
+  HighestRequestBase, RemoteSkipTo :LongWord;
+  procedure ReplyOPEN(msg:tSMsg; data:boolean);
+  procedure ReplyLSEG(msg:tSMsg; data:boolean);
+  procedure HandleFAIL(r:tMemoryStream);
+  procedure HandleEPROTO(r:tMemoryStream);
+  procedure ReplyDONE(msg:tSMsg; data:boolean);
+  procedure MakeRequest;
  end;
- tAggr_ptr=^tAggr;
- tAggr=object
-  Rate:Real;
-  ByteCnt:LongWord;
-  DgrCnt:LongWord;
-  CurMark,PrvMark:byte;
-  StartT:tMTime;
-  Jobs: array [0..15] of ^tJob;
-  refs:byte;
-  ChanOfs:byte;
-  DgrCntCheck:LongWord;
-  remote:tNetAddr;
-  next:tAggr_ptr;
-  procedure Init(const src:tNetAddr);
-  procedure MsgDATA(sz:Word;mark:byte);
-  procedure MsgIMME(sz:Word;mark:byte);
-  procedure Recv(msg:tSMsg);
-  procedure Periodic;
-  procedure Done;
- end;
-var AggrChain:^tAggr;
+{$I DownloadTC.pas}
 
-function GetAggr(const remote:tNetAddr):tAggr_ptr;
- var a:^tAggr;
- var p:^pointer;
- begin
- p:=@AggrChain;
- a:=AggrChain;
- while assigned(a) do begin
-  if a^.remote=remote then begin
-   GetAggr:=a;
-   p^:=a^.next;
-   a^.next:=AggrChain;
-   AggrChain:=a^.next;
-   exit;
-  end;
- end;
- GetAggr:=nil;
-end;
 function GetJob(const fid:tFID):pDownloadJob;
  var a:^tAggr;
  var i:byte;
@@ -95,17 +71,16 @@ function GetJob(const fid:tFID):pDownloadJob;
  p:=@AggrChain;
  a:=AggrChain;
  while assigned(a) do begin
-  for i:=0 to high(tAggr.Jobs) do begin
+  for i:=0 to high(tAggr.Jobs) do if assigned(a^.Jobs[i]) then begin
    if CompareWord(a^.Jobs[i],fid,10)=0 then begin
     GetJob:=a^.Jobs[i];
+    Inc(a^.refs);
     assert(a^.Jobs[i]^.ix=i);
     assert(a^.Jobs[i]^.aggr=a);
-    p^:=a^.next;
-    a^.next:=AggrChain;
-    AggrChain:=a^.next;
     exit;
-   end;
+   end else break{for};
   end;
+  p:=@a^.next; a:=p^;
  end;
  GetJob:=nil;
 end;
@@ -121,32 +96,26 @@ end;
 procedure tJob.Init(const source:tNetAddr; const ifid: tFID);
  var dw:^tAggr;
  begin
+ refc:=1;
  error:=0;
  error2:=0;
  fid:=ifid;
+ active:=false;
  so.Open(fid);
  done:=0;
  missc:=0;
  if so.final then begin
   done:=total;
   state:=stDone;
-  rlen:=0;
+  aggr:=nil;
+  so.Close;
  exit end;
- state:=stStop{,stActive,stDone,stError)};
- if so.rc=0 then begin
-  writeln('Download: resuming');
-  total:=so.Length;
-  so.GetMiss(rofs,rlen);
- end else begin
-  writeln('Download: start from zero');
-  total:=0;
-  rofs:=0;
-  rlen:=8192;
- end;
+ state:=stStop;
+ {todo: initialize Done}
  so.EnableWrite(fid);
  if so.rc<>0 then begin
-  state:=stError;
-  error:=253;
+  state:=stLocalError;
+  error:=255;
   error2:=so.rc;
  exit end;
  dw:=GetAggr(source);
@@ -160,191 +129,208 @@ procedure tJob.Init(const source:tNetAddr; const ifid: tFID);
  end;
  aggr:=dw;
  dw^.Jobs[ix]:=@self;
- ch.Init(source);
- assert( ((state=stStop)and(rlen>0))or((state=stDone)and(rlen=0)) );
-end;
-procedure tJob.Start;
- begin
- assert( (state=stStop)and(rlen>0) );
- StartTransfer(true);
- //Shedule(20000,@HardTimeout);
- state:={stStop,}stActive{,stDone,stError};
-end;
-procedure tJob.StartTransfer(preamble:boolean);
- var s:tMemoryStream;
- begin
- assert( rlen>0 );
- ch.Callback:=@ReplyGET;
- ch.streaminit(s,33);
- if preamble then begin
- {service}s.WriteByte(opcode.upFileServer);
- {channel}s.WriteByte(ix);
- {opcode }s.WriteByte(opcode.upGET);
- {file   }s.Write(fid,20);
- end else
- {opcode }s.WriteByte(opcode.upSEG);
- {basehi }s.WriteWord(0,2);
- {base   }s.WriteWord(rofs,4);
- {limit  }s.WriteWord(rlen,4);
- ch.Send(s);
-end;
-procedure tJob.ReplyGET(msg:tSMsg; data:boolean);
- var r:tMemoryStream absolute msg.stream;
- var op:byte;
- var rsize,rseg:LongWord;
- var rfinal:byte;
- begin
- {reply from GET request}
- write('Download: ReplyGET: ');
- if not data then begin
-  writeln('ack');
- end else begin
-  ch.Ack;
-  op:=msg.stream.ReadByte;
-  if op=upFAIL then begin
-   state:=stError;
-   try
-   error:=r.ReadByte;
-   error2:=r.ReadByte;
-   except end;
-   writeln('FAIL ',error,'-',error2);
-  end
-  else if op=upINFO then begin
-   {rsizehi}r.skip(2);
-   rsize  :=r.ReadWord(4);
-   rfinal :=r.readbyte;
-   rseg   :=r.readword(4);
-   writeln('INFO size=',rsize,' final=',rfinal,' seg=',rseg);
-   if (rsize<>so.length) then writeln('Download: length mismatch ',so.length,'->',rsize);
-   total:=rsize;
-   so.SetFLength(total);
-   //UnShedule(@HardTimeout);
-  end else if op=opcode.upDONE then begin
-   writeln('DONE');
-   assert(so.Length>0);
-   so.GetMiss(rofs,rlen);
-   if rlen=0 then begin
-    state:=stDone;
-    writeln('Download: completed');
-   end else StartTransfer(false);
-  end else begin
-   if op=upClose then writeln('CLOSE') else writeln('unknown');
-   state:=stError;
-   error:=254;
-   error2:=op;
-  end;
+ inc(dw^.refs);
+ if state=stStop then begin
+  New(CH);
+  ch^.Init(source);
  end;
+ //assert( ((state=stStop)and(rlen>0))or((state=stDone)and(rlen=0)) );
 end;
 
-procedure tJob.Abort;
+procedure tJob.Start;
  var s:tMemoryStream;
  begin
- assert(state=stActive);
- ch.Callback:=@ReplyClose;
- //Shedule(20000,@HardTimeout);
- ch.streaminit(s,2);
- {opcode }s.WriteByte(opcode.upClose);
- ch.Send(s);
- state:=stError;
- error:=255;
+ writeln('Download: job start');
+ assert( state=stStop );
+ state:=stActive;
+ ch^.Callback:=@ReplyOPEN;
+ ch^.streaminit(s,33);
+ {service}s.WriteByte(opcode.upFileServer);
+ {channel}s.WriteByte(ix);
+ {opcode }s.WriteByte(opcode.upOPEN);
+ {file   }s.Write(fid,20);
+ {todo: request first segment}
+ ch^.Send(s);
 end;
-procedure tJob.ReplyClose(msg:tSMsg; data:boolean);
+procedure tJob.ReplyOPEN(msg:tSMsg; data:boolean);
+ var r:tMemoryStream absolute msg.stream;
+ var op:byte;
+ var rsize:LongWord;
+ var rfinal:byte;
  begin
- writeln('Download: ReplyClose');
+ if not data then exit;
+ op:=msg.stream.ReadByte;
+ {valid responses: INFO FAIL EPROTO}
+ if op=upFAIL then HandleFAIL(r)
+ else if op=upINFO then begin
+  rsize  :=r.ReadWord(4);
+  rfinal :=r.readbyte;
+  writeln('INFO size=',rsize,' final=',rfinal);
+  self.total:=rsize;
+  if so.length<>rsize then begin
+   if so.length>0 then writeln('Download: warning: size mismatch!');
+   so.SetFLength(rsize);
+  end;
+  MakeRequest;
+ end
+ else HandleEPROTO(r);
+end;
+{Strategy for fixing holes without waiting for DONE message:
+ * stuff all small segments to LSEG
+ * put large one at end
+ * when datagrams from the large arrive, Repeat
+}
+
+procedure tJob.MakeRequest;
+ var s:tMemoryStream;
+ var b,l,trl:LongWord;
+ var cnt:byte;
+ var mst:Pointer;
+ const clim=83886080;
+ begin
+ write('Download: job MakeRequest');
+ mst:=nil;
+ trl:=0;
+ cnt:=0;
+ ch^.Callback:=@ReplyLSEG;
+ ch^.streaminit(s,180);
+ s.WriteByte(upLSEG);
+ repeat
+  {todo: skipto}
+  so.GetMiss(b,l,mst);
+  if l=0 then break;
+  if (trl+l)>clim then l:=clim-trl;
+  write(' ',b,'+',l);
+  s.WriteWord(b,4);
+  s.WriteWord(l,4);
+  inc(trl,l);
+  inc(cnt);
+ until (s.WrBufLen<8)or(trl>=clim);
+ writeln(' for ',trl,'B in ',cnt,' ',s.Length);
+ if trl=0 then begin
+  state:=stDone;
+  writeln('Verifu!!!!!');
+  so.VerifyAndReset;
+  if not so.final then begin
+   state:=stLocalError;
+   error:=254;
+   writeln('Verifu Faialed!!!!!');
+  end;
+  Aggr^.Stop(ix);
+  Close;
+ exit end;
+ ch^.Send(s);
+ if cnt>1 then HighestRequestBase:=b else HighestRequestBase:=$FFFFFFFF;
+end;
+procedure tJob.ReplyLSEG(msg:tSMsg; data:boolean);
+ var r:tMemoryStream absolute msg.stream;
+ var op:byte;
+ var avail:LongWord;
+ begin
+ if not data then exit;
+ op:=msg.stream.ReadByte;
+ {valid responses: SEGOK UNAVL FAIL}
+ if op=upFAIL then HandleFAIL(r)
+ else if op=upUNAVL then begin
+  avail:=msg.stream.ReadWord(4);
+  writeln('Download: job ReplyLSEG: UNAVL avail=',avail);
+  if avail=0 then begin
+   state:=stLocalError;
+   error:=253;
+   Close;
+  end else begin
+   RemoteSkipTo:=avail;
+   MakeRequest;
+  end;
+ end
+ else if op=upSEGOK then begin
+  avail:=msg.stream.ReadWord(4);
+  MissC:=avail;
+  writeln('Download: job ReplyLSEG: SEGOK avail=',avail);
+  aggr^.Start(ix);
+  ch^.Callback:=@ReplyDONE;
+  ch^.Ack;
+ end
+ else if op=upDONE then begin
+ end {ignore, done is sent async so it can hang in-flight a bit}
+ else HandleEPROTO(r);
+end;
+procedure tJob.ReplyDONE(msg:tSMsg; data:boolean);
+ var r:tMemoryStream absolute msg.stream;
+ var op:byte;
+ begin
+ if not data then exit;
+ op:=msg.stream.ReadByte;
+ {valid responses: DONE}
+ if op=upDONE then begin
+  writeln('Download: ReplyDONE: DONE, miss=',MissC);
+  MakeRequest;
+ end else HandleEPROTO(r);
+end;
+procedure tJob.HandleFAIL(r:tMemoryStream);
+ begin
+ writeln('Download: FAIL');
+ state:=stError;
+ try
+  error:=r.readByte;
+  error2:=r.readByte;
+ except end;
+ Close;
+end;
+procedure tJob.HandleEPROTO(r:tMemoryStream);
+ begin
+ r.Seek(r.position-1);
+ try error2:=r.ReadByte; except end;
+ writeln('Download: EPROTO ',error2);
+ state:=stLocalError;
+ error:=252;
+ Close;
+end;
+
+procedure tJob.Close;
+ var s:tMemoryStream;
+ begin
+ ch^.streaminit(s,2);
+ {opcode }s.WriteByte(opcode.upClose);
+ ch^.Send(s);
+ ch^.Close;
+ writeln('chat close');
+ aggr^.Stop(ix);
+end;
+procedure tJob.Abort;
+ begin
+ assert(state=stActive);
+ state:=stLocalError;
+ error:=251;
+ Close;
 end;
 
 procedure tJob.MsgDATA(base,length:LongWord; data:pointer);
  begin
  so.WriteSeg(base,length,data);
  done:=done+length;
+ if MissC<=length
+ then MakeRequest
+ else dec(MissC,length);
+ if base>=HighestRequestBase then {TODO, last segment in list, MakeRequest};
 end;
 
-procedure tAggr.Init(const src:tNetAddr);
+procedure tJob.Free;
  begin
- Rate:=0;
- ByteCnt:=0;
- DgrCnt:=0;
- CurMark:=0;PrvMark:=0;
- StartT:=mNow;
- refs:=high(Jobs); while refs>0 do begin Jobs[refs]:=nil; dec(refs) end;
- ChanOfs:=Random(255-high(Jobs));
- DgrCntCheck:=0;
- Shedule(5000,@Periodic);
- remote:=src;
- SetMsgHandler(opcode.tcdata,src,@Recv);
- SetMsgHandler(opcode.tcdataimm,src,@Recv);
-end;
- 
-procedure tAggr.Recv(msg:tSMsg);
- var op:byte;
- var chan:byte;
- var mark:byte;
- var base:DWORD;
- begin
- op:=msg.stream.readbyte;
- mark:=msg.stream.readbyte;
- if op=opcode.tcdataimm then MsgIMME(msg.length,mark);
- MsgDATA(msg.length,mark);
- chan:=msg.stream.readbyte;
- base:=msg.stream.ReadWord(4);
- if (chan<=high(Jobs))and assigned(Jobs[chan]) then Jobs[chan]^.MsgDATA(base,msg.stream.RDBufLen,msg.stream.RDBuf);
-end;
-
-procedure tAggr.MsgIMME(sz:Word; mark:byte);
- var r:tMemoryStream;
- var buf:array [1..4] of byte;
- begin
- r.Init(@buf,0,sizeof(buf));
- r.WriteByte(opcode.tceack);
- r.WriteByte(mark);
- r.WriteWord(sz,2);
- SendMessage(r.base^,r.length,remote);
-end;
-
-procedure tAggr.MsgDATA(sz:Word; mark:byte);
- var r:tMemoryStream;
- var rateb: DWord; {BytesPerSecond shr 6 (=64)}
- var buf:array [1..6] of byte;
- var delta:tMTime;
- begin
- if mark<>PrvMark then begin
-  if mark<>CurMark then begin
-   PrvMark:=CurMark;
-   CurMark:=mark;
-   StartT:=mNow;
-   ByteCnt:=1;
-   DgrCnt:=1;
-  end else begin Inc(ByteCnt,sz); Inc(DgrCnt) end;
-  inc(DgrCntCheck);
- end;
- if DgrCnt<8 then exit;
- delta:=(mNow-StartT){*MSecsPerDay};
- if delta<400 then exit;
- rate:=(ByteCnt/delta)*1000;
- writeln('Download: rate ',(rate/1024):7:1, 'kB/s');
- rateb:=round((rate)/64);
- StartT:=mNow;
- ByteCnt:=1;
- r.Init(@buf,0,sizeof(buf));
- r.WriteByte(opcode.tccont);
- r.WriteByte(mark);
- r.WriteWord(rateb,4);
- SendMessage(r.base^,r.length,remote);
-end;
-
-procedure tAggr.Periodic;
- begin
- if DgrCntCheck>1 then begin
-  DgrCntCheck:=0;
-  Shedule(5000,@Periodic);
- exit end;
- writeln('Download: Periodic check failed, unimplemented!');
- //todo do
-end;
-
-procedure tAggr.Done;
- begin
- UnShedule(@Periodic);
+ Dec(refc);
+ if refc=0 then begin
+  writeln('Download: job closing');
+  if state=stStop then Close
+  else if state=stActive then Abort;
+  {tu ja EAV, nieco s pointermi}
+  if assigned(aggr) then begin
+   aggr^.Jobs[ix]:=nil;
+   dec(aggr^.refs);
+   if aggr^.refs=0 then aggr^.Done;
+  end;
+  if state<>stDone then so.Close;
+  FreeMem(@self,sizeof(tJob));
+ end else writeln('not closing ',refc);
 end;
 
 procedure tDownloadJob.Start;
@@ -355,5 +341,8 @@ procedure tDownloadJob.Abort;
  begin
  tJob(pointer(@self)^).Abort;
 end;
-
+procedure tDownloadJob.Free;
+ begin
+ tJob(pointer(@self)^).Free;
+end;
 END.

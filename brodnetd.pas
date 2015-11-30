@@ -5,6 +5,8 @@ uses cthreads,ServerLoop
 	,TestWatch
 	,TestChat
 	,AsyncProcess
+	,Upload
+	,Download
 	;
 
 BEGIN
