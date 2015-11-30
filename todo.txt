@@ -1,11 +1,18 @@
 To-Do list
-- merge TC and upmgr
-- move file sending to therad
-- move GetMiss to Download
+- Chat: OnTimeout, ExceptReply
 - handle timeouts in Download
+- limit request size
+- do not send DONE
+- combine SEG reqests up to 32
+  - send info only for first
+  - move seeking to aggr.thr
+    - prepare seglist before start
+      - separate store1.SegSeek -> SegAvail; ReadSeg(base,length,into,rc);
+    - ignore errors
+- reset Mark on resume
+- do not update oi.length if unchanged
 - skip unavailable segments
   - upmgr: send avalable subsegment base
-- Chat: send aborts retransmission
 ? Download request random subsegment
   (distribution + exercise for recombinator)
 - ...
