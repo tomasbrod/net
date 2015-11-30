@@ -7,6 +7,7 @@ uses cthreads,ServerLoop
 	,AsyncProcess
 	,Upload
 	,Download
+	,TestFS
 	;
 
 BEGIN

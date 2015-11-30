@@ -2,7 +2,7 @@ unit TestFS;
 
 INTERFACE
 IMPLEMENTATION
-USES ServerLoop,Chat,SysUtils,MemStream,NetAddr,opcode,Download,Store1;
+USES ServerLoop,Chat,SysUtils,MemStream,NetAddr,opcode,Download,Store1,sha1;
 
 type t=object
  job:^tDownloadJob;
@@ -15,14 +15,16 @@ end;
 procedure t.Periodic;
  begin
  write('TestFS: ',job^.state);
- if job^.state=stError then write(job^.error,'-',job^.error2);
- writeln(' total=',job^.total,' done=',job^.done);
+ if job^.state>=stError then write(job^.error,'-',job^.error2);
+ writeln(' total=',job^.total,' done=',job^.done,' miss=',job^.missc);
+ if job^.state<>stActive then Rekt else
  Shedule(800,@Periodic);
 end;
 
 procedure t.Rekt;
  begin
  writeln('TestFS: rekt');
+ Job^.Free;
  UnShedule(@HardTimeout);
  UnShedule(@Periodic);
  FreeMem(@self,sizeof(self));
@@ -31,8 +33,7 @@ end;
 procedure t.HardTimeout;
  begin
  writeln('TestFS: hardtimeout');
- //ch.DisposeHook:=@Rekt;
- //ch.Close;
+ Rekt;
 end;
 
 procedure init;
@@ -44,12 +45,12 @@ procedure init;
  begin
  oi:=OptIndex(opt);
  if oi>0 then begin
-  assert(OptParamCount(oi)=1,opt+'(rcpt:tNetAddr)');
-  writeln('TestFS: rcpt '+paramstr(oi+1));
+  assert(OptParamCount(oi)=2,opt+'(rcpt:tNetAddr fid:sha1)');
+  fid:=tFID(paramstr(oi+2));
+  writeln('TestFS: rcpt '+paramstr(oi+1),' ',sha1print(fid));
   new(o); with o^ do begin
-   Shedule(20000,@HardTimeout);
+   //Shedule(15000,@HardTimeout);
    Shedule(20,@Periodic);
-   FillChar(fid,sizeof(fid),0);
    job:=NewJob(paramstr(oi+1),fid);
    if job^.state=stStop then job^.Start;
   end;
