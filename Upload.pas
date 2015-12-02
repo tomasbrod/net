@@ -181,11 +181,9 @@ procedure ChatHandler(var nchat:tChat; msg:tSMsg);
  var pr:^tPrv;
  var chan:byte;
  begin
- writeln('Upload: ChatHandler');
  msg.stream.skip({the initcode}1);
  if msg.stream.RdBufLen<2 then begin SendError(nchat,upErrMalformed,0); exit end;
  chan:=msg.stream.ReadByte;
- writeln(chan);
  if chan>high(tAggr.chan) then begin Senderror(nchat,upErrHiChan,chan); exit end;
  ag:=FindAggr(msg.source^);
  if not assigned(ag) then begin
@@ -215,7 +213,6 @@ procedure tPrv.OnMSG(msg:tSMsg;data:boolean);
  if not data then exit; //todo
  if msg.stream.RdBufLen<1 then goto malformed;
  op:=msg.stream.ReadByte;
- writeln('Upload: ',string(ch^.remote),' opcode=',op,' sz=',msg.stream.RdBufLen);
  case op of
   upClose: begin
          ch^.Ack;
@@ -248,7 +245,6 @@ procedure tPrv.OnMSG(msg:tSMsg;data:boolean);
  err.WriteByte(upEPROTO);
  err.WriteByte(upErrMalformed);
  ch^.Send(err);
- writeln('Upload: malformed request stage=1');
 end;
 
 procedure tPrv.Init(var nchat:tChat);
@@ -259,7 +255,6 @@ procedure tPrv.Init(var nchat:tChat);
  uc.weight:=100;
  isOpen:=false; Active:=false;
  Shedule(5000,@Close);
- writeln('Upload: prv for ',string(ch^.remote),'/',chan,' init');
 end;
 
 procedure tPrv.NotifyDone;
@@ -278,7 +273,6 @@ procedure tPrv.Stop;
   Shedule(20000,@Close);
   aggr^.Stop(chan);
  end;
- writeln('Upload: prv for ',string(ch^.remote),'/',chan,' stop');
 end;
 procedure tPrv.Start;
  begin
@@ -286,14 +280,12 @@ procedure tPrv.Start;
  if not active then UnShedule(@Close);
  active:=true;
  aggr^.Start(chan);
- writeln('Upload: prv for ',string(ch^.remote),'/',chan,' start');
 end;
 
 procedure tPrv.Close(tell:boolean);
  var err:tMemoryStream;
  begin
  assert(assigned(ch));
- writeln('Upload: prv for ',string(ch^.remote),'/',chan,' close');
  if tell then begin
   ch^.StreamInit(err,1);
   err.WriteByte(upClose);
@@ -336,7 +328,7 @@ procedure tAggr.Init(const source:tNetAddr);
  limRate:=2000*1024*1024;
  limSize:=4096;
  remote:=source;
- writeln('Upload: aggr for ',string(remote),' init');
+ writeln('Upload: ',string(remote),' aggr init');
  thr.Init(source);
  CalcRates(2048);
  SetMsgHandler(opcode.tccont,remote,@OnCont);
@@ -373,7 +365,7 @@ procedure tAggr.Free(ac:byte);
 end;
 procedure tAggr.Done;
  begin
- write('Upload: aggr for ',string(remote),' done');
+ write('Upload: ',string(remote),' aggr done');
  thr.Done; writeln(' thrdone');
  UnShedule(@Periodic);
  if assigned(prev) then prev^.next:=next else Peers:=next;
@@ -385,7 +377,7 @@ end;
 
 procedure tAggr.Start(ac:byte);
  begin
- writeln('Upload: aggr for ',string(remote),' start chan ',ac);
+ //writeln('Upload: aggr for ',string(remote),' start chan ',ac);
  assert(assigned(chan[ac]));
  EnterCriticalSection(thr.crit);
  assert(not assigned(thr.chans[ac]));
@@ -400,7 +392,7 @@ end;
  
 procedure tAggr.Stop(ac:byte);
  begin
- writeln('Upload: aggr for ',string(remote),' stop chan ',ac);
+ //writeln('Upload: aggr for ',string(remote),' stop chan ',ac);
  assert(assigned(chan[ac]));
  EnterCriticalSection(thr.crit);
  assert(assigned(thr.chans[ac]));
