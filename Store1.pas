@@ -38,7 +38,6 @@ operator :=(a:string) r:tFID;
 
 IMPLEMENTATION
 uses SHA1;
-const prefix='object';
 
 type
 tSegStatic=packed object
@@ -55,14 +54,15 @@ tSegInfo=object
  name:tFID;
  refc:byte;
  next:tSegInfo_ptr;
+ finalized:boolean;
  procedure SetSeg(ofs,len:LongWord; state:boolean);
  function GetSegLen(ofs:LongWord):LongWord;
  procedure Free;
  end;
 var SegInfoChain:^tSegInfo;
 
-
-procedure mkfilen(var d:string; flag:char; const fid:tfid);
+type tFileNameVar=(fvFinal,fvPart,fvInfo);
+procedure mkfilen(var d:string; flag:tFileNameVar; const fid:tfid);
  function hc(b:byte):char;
   begin
   if b<10 then hc:=char(ord('0')+b)
@@ -70,13 +70,18 @@ procedure mkfilen(var d:string; flag:char; const fid:tfid);
   end;
  var b,i:byte;
  begin
- d:=prefix+flag+'/';
+ d:='obj/';
  b:=system.length(d);
  SetLength(d,b+40);
  inc(b);
  for i:=0 to 19 do begin
   d[b+(i*2)]:=hc(fid[i] shr 4);
   d[b+(i*2)+1]:=hc(fid[i] and $F);
+ end;
+ case flag of
+  fvPart: d:=d+'.prt';
+  fvInfo: d:=d+'.seg';
+  fvFinal:;
  end;
 end;
 
@@ -91,7 +96,7 @@ function GetSegInfo(const fid:tFID):tSegInfo_ptr;
   if CompareWord(result^.name,fid,10)=0 then goto nocr;
   result:=result^.next;
  end;
- mkfilen(fn,'i',fid);
+ mkfilen(fn,fvInfo,fid);
  new(result);
  with result^ do begin
   cache:=nil;
@@ -116,7 +121,7 @@ end;
  
 procedure tStoreObjectInfo.Open(const fid:tfid);
  begin
- mkfilen(filename,'f',fid);
+ mkfilen(filename,fvFinal,fid);
  segi:=nil;
  Offset:=0;
  name:=fid;
@@ -127,7 +132,7 @@ procedure tStoreObjectInfo.Open(const fid:tfid);
   length:=FileSeek(dh,0,fsFromEnd);
   FileSeek(dh,0,fsFromBeginning);
  end else begin
-  mkfilen(filename,'p',fid);
+  mkfilen(filename,fvPart,fid);
   final:=false;
   dh:=FileOpen(filename,fmOpenRead or fmShareDenyWrite);
   if dh<>-1 then begin
@@ -136,6 +141,10 @@ procedure tStoreObjectInfo.Open(const fid:tfid);
    length:=FileSeek(dh,0,fsFromEnd);
    FileSeek(dh,0,fsFromBeginning);
    segi:=GetSegInfo(fid);
+   if tSegInfo(segi^).finalized then begin
+    assert(length>0);
+    final:=true;
+   end;
   end else begin
    Writeln('Store1: open failed for file ',filename,', ioresult=',IOResult);
    rc:=2;
@@ -289,35 +298,44 @@ procedure tStoreObjectInfo.ReadSeg(into:pointer; ofs:LongWord; len:word);
  end;
 end;
 procedure tSegInfo.Free;
- var fn:string;
  var fh:file of tSegStatic;
  var cp:^tSeg;
+ var on,nn:string;
  begin
  Dec(refc); if refc>0 then begin writeln('Not saving, ',refc); exit;end;
  {save segs, free segs, free}
+ mkfilen(on,fvInfo,name);
+ Assign(fh,on);
  writeln('Store1: Saving segment info');
- mkfilen(fn,'i',name);
- Assign(fh,fn);
  ReWrite(fh);
  while assigned(cache) do begin
   cp:=cache;
-  write(fh,cp^);
+  if not finalized then write(fh,cp^);
   cache:=cp^.next;
   dispose(cp);
+ end;
+ Close(fh);
+ if finalized then begin
+  writeln('Store1: segi finalized, renaming datafile, erasing infofile');
+  mkfilen(on,fvPart,name);
+  mkfilen(nn,fvFinal,name);
+  RenameFile(on,nn);
+  Erase(fh);
  end;
  FreeMem(@self,sizeof(self));
 end;
 procedure tStoreObjectInfo.Close;
  begin
  if assigned(segi) then tSegInfo(segi^).Free;
+ segi:=nil;
  FileClose(dh);
+ dh:=-1;
 end;
 procedure tStoreObjectInfo.VerifyAndReset;
  var ctx:tSHA1Context;
  var digest:tSHA1Digest;
  var buf: array [1..2048] of byte;
  var red:Integer;
- var on,nn:string;
  begin
  SegSeek(0);
  if seglen<length then begin writeln('Not complete! ',length-seglen); exit;end;
@@ -334,15 +352,15 @@ procedure tStoreObjectInfo.VerifyAndReset;
  SHA1Final( ctx, digest );
  assert(sizeof(digest)=sizeof(tfid));
  if CompareWord(name,digest,10)=0 then begin
-  writeln('Store1: hash match, renaming, not deleting infofile');
+  writeln('Store1: hash match');
+  {todo: mark final-verified in segi, rename on segi done}
   final:=true;
+  assert(assigned(segi));
+  with tSegInfo(segi^) do begin
+   assert( (cache^.first=0) and (cache^.after=length) and (cache^.next=nil) );
+   finalized:=true;
+  end;
   Close;
-  dh:=-1;
-  mkfilen(on,'p',name);
-  mkfilen(nn,'f',name);
-  RenameFile(on,nn);
-  (*mkfilen(on,'i',name);
-  DeleteFile(on);*)
   {set some invalid values to prevent doing anything}
   length:=0; {the object MUST be closed now} seglen:=0;
  end else writeln('Hash not matching ',sha1print(digest),' ',sha1print(name));
