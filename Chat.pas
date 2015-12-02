@@ -93,7 +93,10 @@ end;
 
 procedure tChat.Send(s:tMemoryStream);
  begin
- assert(txLen=0);
+ if txLen>0 then begin
+  FreeMem(txPk,txLen);
+  UnShedule(@Resend);
+ end;
  //assert(assigned(callback));
  Inc(txSeq);
  s.Seek(0);
@@ -129,11 +132,11 @@ procedure tChat.Close;
  assert(not closed);
  Ack;
  closed:=true;
+ callback:=nil; {avoid calling}
+ tmhook:=nil;
  //writeln('Chat: closing');
  if txLen=0 {no packets in flight} then begin
   Shedule(15000{todo},@Done); {wait for something lost}
-  callback:=nil; {avoid calling}
-  tmhook:=nil;
  end;
 end;
 

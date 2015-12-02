@@ -1,1 +1,6 @@
 To-Do list
+- Chat: OnTimeout, ExceptReply
+- handle timeouts in Download
+- correct rate skew due to request lag in download
+- skip unavailable segments
+  - handle in download
