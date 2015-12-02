@@ -15,6 +15,7 @@
   procedure MsgDATA(sz:Word;mark:byte);
   procedure MsgIMME(sz:Word;mark:byte);
   procedure Recv(msg:tSMsg);
+  procedure SendRate;
   procedure Periodic;
   procedure Done;
   procedure Start(ix:byte);
@@ -60,11 +61,17 @@ procedure tAggr.Recv(msg:tSMsg);
  var chan:byte;
  var mark:byte;
  var base:DWORD;
+ var delta:tMTime;
  begin
  op:=msg.stream.readbyte;
  mark:=msg.stream.readbyte;
  if op=opcode.tcdataimm then MsgIMME(msg.length,mark);
  MsgDATA(msg.length,mark);
+ if DgrCnt>=8 then begin
+  delta:=(mNow-StartT){*MSecsPerDay};
+  if delta>=400
+  then SendRate;
+ end;
  chan:=msg.stream.readbyte;
  base:=msg.stream.ReadWord(4);
  if (chan<=high(Jobs))and assigned(Jobs[chan]) then Jobs[chan]^.MsgDATA(base,msg.stream.RDBufLen,msg.stream.RDBuf);
@@ -82,10 +89,6 @@ procedure tAggr.MsgIMME(sz:Word; mark:byte);
 end;
 
 procedure tAggr.MsgDATA(sz:Word; mark:byte);
- var r:tMemoryStream;
- var rateb: DWord; {BytesPerSecond shr 6 (=64)}
- var buf:array [1..6] of byte;
- var delta:tMTime;
  begin
  if mark<>PrvMark then begin
   if mark<>CurMark then begin
@@ -94,13 +97,20 @@ procedure tAggr.MsgDATA(sz:Word; mark:byte);
    StartT:=mNow;
    ByteCnt:=1;
    DgrCnt:=1;
+   //writeln('Mark Reset: ',PrvMark,'->',CurMark);
   end else begin Inc(ByteCnt,sz); Inc(DgrCnt); end;
   inc(DgrCntCheck);
  end;
  //writeln('Download: got ',DgrCnt,'dg,',ByteCnt,'B in ',delta,'ms');
- if DgrCnt<8 then exit;
+end;
+
+procedure tAggr.SendRate;
+ var r:tMemoryStream;
+ var rateb: DWord; {BytesPerSecond shr 6 (=64)}
+ var buf:array [1..6] of byte;
+ var delta:tMTime;
+ begin
  delta:=(mNow-StartT){*MSecsPerDay};
- if delta<400 then exit;
  rate:=(ByteCnt/delta)*1000;
  //writeln('Download: rate ',(rate/1024):7:1, 'kB/s');
  rateb:=round((rate)/64);
@@ -109,7 +119,7 @@ procedure tAggr.MsgDATA(sz:Word; mark:byte);
  DgrCnt:=0;
  r.Init(@buf,0,sizeof(buf));
  r.WriteByte(opcode.tccont);
- r.WriteByte(mark);
+ r.WriteByte(CurMark);
  r.WriteWord(rateb,4);
  SendMessage(r.base^,r.length,remote);
 end;
@@ -154,5 +164,8 @@ procedure tAggr.Stop(ix:byte);
  if not Jobs[ix]^.active then exit;
  dec(acnt);
  Jobs[ix]^.active:=false;
- if acnt=0 then UnShedule(@Periodic);
+ if acnt=0 then begin
+  UnShedule(@Periodic);
+  SendRate;
+ end;
 end;
