@@ -117,7 +117,7 @@ procedure tPrv.DoLSEG(count:byte; base,limit: array of LongWord);
  var l,fb:LongWord;
  var tbytes:LongWOrd;
  begin
- writeln('Upload: ',string(ch^.remote),'/',chan,' LSEG');
+ write('Upload: ',string(ch^.remote),'/',chan,' LSEG ');
  if not isOpen then begin
   ch^.StreamInit(err,3);
   err.WriteByte(upEPROTO);
@@ -166,6 +166,7 @@ procedure tPrv.DoLSEG(count:byte; base,limit: array of LongWord);
  err.WriteWord(tbytes,4);
  err.WriteByte(uc.seg);
  ch^.Send(err);
+ writeln('x',uc.seg);
  Start;
 end;
 
@@ -309,7 +310,7 @@ procedure tPrv.ChatTimeout(willwait:LongWord);
  begin
  if WillWait<8000 then exit;
  writeln('Upload: prv for ',string(ch^.remote),'/',chan,' ChatTimeout');
- Close;
+ Close(false);
 end;
 
 {***AGGREGATOR***}
@@ -377,7 +378,7 @@ end;
 
 procedure tAggr.Start(ac:byte);
  begin
- //writeln('Upload: aggr for ',string(remote),' start chan ',ac);
+ //writeln('Upload: aggr for ',string(remote),'/',ac,' start seg=',chan[ac]^.uc.seg);
  assert(assigned(chan[ac]));
  EnterCriticalSection(thr.crit);
  assert(not assigned(thr.chans[ac]));
@@ -385,7 +386,8 @@ procedure tAggr.Start(ac:byte);
  chan[ac]^.uc.wcur:=chan[ac]^.uc.weight;
  UnShedule(@Periodic);
  Shedule(700,@Periodic);
- if thr.stop or thr.wait then ResetMark else {do not reset if running};
+ {do not reset if resuming from wait}
+ if thr.stop {or thr.wait} then ResetMark else {do not reset if running};
  thr.Start; {wake up, or start if not running}
  LeaveCriticalSection(thr.crit);
 end;
@@ -408,9 +410,11 @@ procedure tAggr.Periodic;
   for i:=0 to high(chan) do if assigned(chan[i]) then with chan[i]^ do begin
    if not active then continue;
    EnterCriticalSection(thr.crit);
+   //writeln('periodic ',thr.stop,thr.wait,uc.seg);
    e:=uc.Seg=0;
    LeaveCriticalSection(thr.crit);
-   if e then NotifyDone;
+   if e
+   then NotifyDone;
   end;
  exit end;
  if acks=0 then begin

@@ -28,6 +28,7 @@ type tUploadThr=object
  buffer:array [0..2047] of byte;
  stop:boolean; {the therad is stopped or stopping}
  wait:boolean; {the therad is waiting for data}
+ waitc:byte;
 
  procedure Main;
  procedure Init(source:tNetAddr);
@@ -75,9 +76,13 @@ procedure tUploadThr.Main;
  end;
  if wait then begin
   LeaveCriticalSection(crit);
+  if waitc>10
+  then stop:=true
+  else inc(waitc);
   sleep(200);
   continue;
  end;
+ waitc:=0;
  LastTime:=SysUtils.Now;
  chan:=chans[curc];
  seg:=@chan^.s[chan^.seg];
@@ -142,7 +147,7 @@ procedure tUploadThr.Done;
  EnterCriticalSection(crit);
  stop:=true;
  LeaveCriticalSection(crit);
- WaitForThreadterminate(thrid,999999);
+ WaitForThreadterminate(thrid,65535);
  DoneCriticalSection(crit);
 end;
 END.
