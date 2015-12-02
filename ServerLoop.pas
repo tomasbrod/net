@@ -381,8 +381,10 @@ procedure UnShedule(h:tOnTimer);
  end;
 end;
 
+var DoShowOpts:boolean=false;
 function OptIndex(o:string):word;
  begin
+ writeln('Option: ',o);
  result:=paramcount;
  while result>0 do begin
   if o=system.paramstr(result) then break;
@@ -414,4 +416,5 @@ BEGIN
  ShedTop:=nil;
  ShedUU:=nil; {todo: allocate a few to improve paging}
  fpgettimeofday(@LastShed,nil);
+ if OptIndex('-h')>0 then DoShowOpts:=true;
 END.
