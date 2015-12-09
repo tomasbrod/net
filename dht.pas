@@ -145,9 +145,10 @@ procedure UpdateNode(const id:tFID; const addr:tNetAddr);
    else if bkt^.peer[i].id=id then begin
     if bkt^.peer[i].addr<>addr then continue;
     {found node in the bucket}
-    writeln('DHT: UpadateNode ',string(id));
+    writeln('DHT: UpdateNode ',string(id));
     // ?? bkt^.ModifyTime:=mNow;
     bkt^.peer[i].LastMsgFrom:=mNow;
+    bkt^.peer[i].ReqDelta:=0;
    exit end else if (fr=0) and (bkt^.peer[i].ReqDelta>=2)
                 then fr:=i {use non-responding as free};
  if fr=0 then begin
