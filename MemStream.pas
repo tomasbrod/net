@@ -10,15 +10,17 @@ type tMemoryStream=object
  procedure Seek(absolute:LongWord);
  procedure Skip(cnt:Word);
  procedure Read(var buf; cnt:Word);
+ function  ReadPtr(cnt:Word):pointer;
  function  ReadByte:byte;
  function  ReadWord(cnt:byte): LongWord;
  procedure Trunc;
  procedure Append;
  function  Tell:LongWord;
- procedure Write(var buf; cnt:word);
+ procedure Write(const buf; cnt:word);
  procedure WriteByte(v:byte);
  procedure WriteWord(v:LongWord; cnt:byte);
  procedure Init(ibuf:pointer; ilen,isize:LongWord);
+ procedure Init(isize:LongWord);
  function WRBuf:pointer;
  function WRBufLen:LongWord;
  procedure WREnd(used:LongWord);
@@ -51,6 +53,12 @@ procedure tMemoryStream.Read(var buf; cnt:Word);
  position:=position+cnt;
 end;
 
+function tMemoryStream.ReadPtr(cnt:Word):pointer;
+ begin
+ result:=base+position;
+ skip(cnt);
+end;
+
 function  tMemoryStream.ReadByte:byte;
  begin Read(result, 1); end;
 
@@ -79,7 +87,7 @@ procedure tMemoryStream.Append;
 function tMemoryStream.Tell:LongWord;
  begin Tell:=position; end;
 
-procedure tMemoryStream.Write(var buf; cnt:word);
+procedure tMemoryStream.Write(const buf; cnt:word);
  begin
  if (position+cnt)>size then raise eInvalidMemStreamAccess.Create('Write out of bounds');
  Move(buf,(base+position)^,cnt);
@@ -111,6 +119,10 @@ procedure tMemoryStream.Init(ibuf:pointer; ilen,isize:LongWord);
  length:=ilen;
  size:=isize;
  seek(0);
+end;
+procedure tMemoryStream.Init(isize:LongWord);
+ begin
+ Init(GetMem(isize),0,isize);
 end;
 
 function tMemoryStream.WRBuf:pointer;
