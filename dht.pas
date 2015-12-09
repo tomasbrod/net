@@ -43,16 +43,22 @@ var Table:^tBucket;
 
 function PrefixLength(const a,b:tFID):byte;
  var i:byte;
+ var by:byte;
  var m:byte;
  begin
- for result:=0 to 20 do
-  if a[result]<>b[result]
-   then break;
+ by:=0;
+ i:=0; while(i<=19) do begin
+  if a[i]<>b[i] then break;
+  inc(i);
+ end;
+ result:=i*8;
+ if i=20 then exit;
  m:=$80;
- for i:=7 downto 0 do
-  if (a[result] and m)<>(b[result] and m)
-   then break else m:=m shr 1;
- result:=result*8+i;
+ while(m>0) do begin
+  if (a[i] and m)<>(b[i] and m) then break;
+  m:=m shr 1;
+  inc(result);
+ end;
 end;
 
 
@@ -65,7 +71,7 @@ function FindBucket(const prefix:tFID):tBucket_ptr;
  var cur:^tBucket;
  begin
  cur:=Table;
- result:=cur;
+ result:=nil;
  while (cur<>nil) and (result=nil) do begin
   if cur^.MatchPrefix(prefix) {first matching is deepest}
    then result:=cur;
@@ -81,7 +87,7 @@ end;
 procedure SplitBucket(ob:tBucket_ptr);
  procedure Toggle(var prefix:tPID; bit:byte);
   begin
-  prefix[bit div 8]:= prefix[bit div 8] xor (bit mod 8);
+  prefix[bit div 8]:= prefix[bit div 8] xor ($80 shr (bit mod 8));
  end;
  var nb:tBucket_ptr;
  var i:byte;
@@ -101,7 +107,7 @@ procedure SplitBucket(ob:tBucket_ptr);
  {create new bucket with toggled bit}
  New(nb);
  nb^:=ob^;
- Toggle(nb^.Prefix,nb^.depth);
+ Toggle(nb^.Prefix,nb^.depth-1);
  nb^.next:=ob;
  {clear nodes that do not belong in bucket}
  for i:=1 to high(tBucket.peer) do begin
@@ -111,7 +117,11 @@ procedure SplitBucket(ob:tBucket_ptr);
    else ob^.peer[i].addr.clear;
  end;
  writeln('-> ',string(ob^.prefix),'/',ob^.depth);
+ for i:=1 to high(tBucket.peer) do if not ob^.peer[i].addr.isnil
+  then writeln('-> -> ',string(ob^.peer[i].id));
  writeln('-> ',string(nb^.prefix),'/',nb^.depth);
+ for i:=1 to high(tBucket.peer) do if not nb^.peer[i].addr.isnil
+  then writeln('-> -> ',string(nb^.peer[i].id));
  if table=nil then table:=nb else begin
   ob:=Table;
   while assigned(ob^.next)and (ob^.next^.depth>nb^.depth) do ob:=ob^.next;
@@ -145,7 +155,7 @@ procedure UpdateNode(const id:tFID; const addr:tNetAddr);
    else if bkt^.peer[i].id=id then begin
     if bkt^.peer[i].addr<>addr then continue;
     {found node in the bucket}
-    writeln('DHT: UpdateNode ',string(id));
+    //writeln('DHT: UpdateNode ',string(id));
     // ?? bkt^.ModifyTime:=mNow;
     bkt^.peer[i].LastMsgFrom:=mNow;
     bkt^.peer[i].ReqDelta:=0;
@@ -159,7 +169,7 @@ procedure UpdateNode(const id:tFID; const addr:tNetAddr);
    end; {the bucket is full!}
         {drop new node and hope nodes in the bucket are good}
  end else begin
-  writeln('DHT: AddNode ',string(id),' to /',bkt^.depth,'#',fr);
+  writeln('DHT: AddNode ',string(id),' to ',string(bkt^.prefix),'/',bkt^.depth,'#',fr);
   bkt^.ModifyTime:=mNow;
   bkt^.peer[fr].ID:=ID;
   bkt^.peer[fr].Addr:=Addr;
@@ -196,6 +206,7 @@ procedure RecvRequest(msg:tSMsg);
   for i:=1 to high(tBucket.peer) do begin
    if bkt^.peer[i].addr.isNil then continue;
    if bkt^.peer[i].addr=msg.source^ then continue;
+   if bkt^.peer[i].ReqDelta>1 then continue;
    writeln('-> Select to ',string(bkt^.peer[i].addr));
    SendMessage(r.base^,r.length,bkt^.peer[i].addr);
   end;
@@ -218,7 +229,6 @@ procedure SendRequest(const contact:tNetAddr; const forid: tPID; caps:byte);
  r.Write(MyID,sizeof(tFID));
  r.Write(ForID,sizeof(tFID));
  r.WriteByte(caps);
- writeln('DHT: Request to ',string(contact));
  SendMessage(r.base^,r.length,contact);
  FreeMem(r.base,r.size);
 end;
@@ -260,13 +270,14 @@ procedure RecvSelect(msg:tSMsg);
  caps:=s.ReadByte;
  addr:=s.ReadPtr(sizeof(tNetAddr));
  rID:=s.ReadPtr(20);
- writeln('DHT: ',string(msg.source^),' Select for ',string(addr^));
+ //writeln('DHT: ',string(msg.source^),' Select for ',string(addr^));
  if rID^=MyID then begin
-  writeln('-> self'); exit end;
+  //writeln('-> self');
+ exit end;
  r.Init(21);
  r.WriteByte(opcode.dhtWazzup);
  r.Write(MyID,20);
- writeln('-> Wazzup to ',string(addr^));
+ //writeln('-> Wazzup to ',string(addr^));
  SendMessage(r.base^,r.length,addr^);
  FreeMem(r.base,r.size);
 end;
@@ -274,15 +285,16 @@ end;
 procedure tBucket.Refresh;
  var my,rtr:boolean;
  var i,ol:byte;
+ var wait:LongWord;
  begin
  my:=MatchPrefix(MyID);
  ol:=0;
  rtr:=false;
  for i:=1 to high(tBucket.peer) do
-  if (not peer[i].Addr.isNil) and (peer[i].ReqDelta<6)  then begin
-   if peer[i].ReqDelta>1 then begin
+  if (not peer[i].Addr.isNil) and (peer[i].ReqDelta<4)  then begin
+   if peer[i].ReqDelta>0 then begin
     {peer is not responding, but try once more}
-    if not rtr then write('DHT: **Refresh (',peer[i].ReqDelta,')**  ');
+    writeln('DHT: Refresh (R',peer[i].ReqDelta,') #',i,' ',string(peer[i].addr));
     SendRequest(peer[i].Addr,prefix,0);
     inc(peer[i].ReqDelta);
     rtr:=true;
@@ -290,14 +302,17 @@ procedure tBucket.Refresh;
    else if (ol=0) or (peer[i].LastMsgFrom<peer[ol].LastMsgFrom)
         then ol:=i;
   end;
+ {TODO: pick ol random}
  if (ol>0) and (not rtr) then begin
-  write('DHT: **Refresh(T)**  ');
+  if not rtr then writeln('DHT: Refresh (T',mNow-peer[ol].LastMsgFrom,') #',ol,' ',string(peer[ol].addr));
   SendRequest(peer[ol].Addr,MyID,0);
   inc(peer[ol].ReqDelta);
  end;
  if my
-  then Shedule(18000+(depth*600),@Refresh)
-  else Shedule(30000,@Refresh);
+  then wait:=18000+(depth*600)
+  else wait:=30000;
+ if rtr then wait:=wait div 3;
+ Shedule(wait,@Refresh);
 end;
 
 
