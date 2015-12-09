@@ -9,6 +9,7 @@ uses cthreads,ServerLoop
 	,Download
 	,TestFS
 	,dht
+	,TestDHT
 	;
 
 BEGIN
