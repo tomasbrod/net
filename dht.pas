@@ -279,7 +279,7 @@ procedure tBucket.Refresh;
  ol:=0;
  rtr:=false;
  for i:=1 to high(tBucket.peer) do
-  if (not peer[i].Addr.isNil) and (peer[i].ReqDelta<3)  then begin
+  if (not peer[i].Addr.isNil) and (peer[i].ReqDelta<6)  then begin
    if peer[i].ReqDelta>1 then begin
     {peer is not responding, but try once more}
     if not rtr then write('DHT: **Refresh (',peer[i].ReqDelta,')**  ');
