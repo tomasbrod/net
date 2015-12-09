@@ -384,7 +384,7 @@ end;
 var DoShowOpts:boolean=false;
 function OptIndex(o:string):word;
  begin
- writeln('Option: ',o);
+ if DoShowOpts then writeln('Option: ',o);
  result:=paramcount;
  while result>0 do begin
   if o=system.paramstr(result) then break;
