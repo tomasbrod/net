@@ -26,6 +26,7 @@ type
    LastMsgFrom,
    LastResFrom  :tMTime;
  end;
+ tPeer_ptr=^tPeer;
  tBucket_ptr=^tBucket;
  tBucket=object
    Prefix: tPID;
@@ -179,6 +180,21 @@ procedure UpdateNode(const id:tFID; const addr:tNetAddr);
  end;
 end;
 
+procedure GetNextNode(var ibkt:tBucket_ptr; var ix:byte; const id:tPID);
+ var bkt:^tBucket;
+ begin
+ bkt:=ibkt;
+ repeat
+  inc(ix);
+  if ix>high(tBucket.peer) then begin
+   ix:=1;
+   bkt:=bkt^.next;
+   if not assigned(bkt) then break;
+  end;
+ until (not bkt^.peer[ix].Addr.isNil)and(bkt^.peer[ix].ReqDelta<3);
+ ibkt:=bkt;
+end;
+
 procedure RecvRequest(msg:tSMsg);
  var s:tMemoryStream absolute msg.stream;
  var hID:^tPID;
@@ -194,6 +210,8 @@ procedure RecvRequest(msg:tSMsg);
  caps:=s.ReadByte;
  writeln('DHT: ',string(msg.source^),' Request for ',string(rID^));
  UpdateNode(hID^,msg.source^);
+ {Select peers only from The bucket,
+  if it is broken, send none, but still Ack}
  bkt:=FindBucket(rID^);
  r.Init(128);
  if assigned(bkt) then begin
@@ -284,8 +302,14 @@ end;
 
 procedure tBucket.Refresh;
  var my,rtr:boolean;
- var i,ol:byte;
+ var i,ol,rv:byte;
  var wait:LongWord;
+ var rvb:^tBucket;
+ procedure lSend(var peer:tPeer; const trg:tPID);
+  begin
+  SendRequest(peer.Addr,trg,0);
+  Inc(peer.ReqDelta);
+ end;
  begin
  my:=MatchPrefix(MyID);
  ol:=0;
@@ -295,18 +319,26 @@ procedure tBucket.Refresh;
    if peer[i].ReqDelta>0 then begin
     {peer is not responding, but try once more}
     writeln('DHT: Refresh (R',peer[i].ReqDelta,') #',i,' ',string(peer[i].addr));
-    SendRequest(peer[i].Addr,prefix,0);
-    inc(peer[i].ReqDelta);
+    lSend(peer[i],prefix);
     rtr:=true;
    end
    else if (ol=0) or (peer[i].LastMsgFrom<peer[ol].LastMsgFrom)
         then ol:=i;
   end;
- {TODO: pick ol random}
+ {now nudge the most quiet peer}
  if (ol>0) and (not rtr) then begin
   if not rtr then writeln('DHT: Refresh (T',mNow-peer[ol].LastMsgFrom,') #',ol,' ',string(peer[ol].addr));
-  SendRequest(peer[ol].Addr,MyID,0);
-  inc(peer[ol].ReqDelta);
+  lSend(peer[ol],MyID);
+ end;
+ if (not rtr)and(ol=0) then begin
+  {no usable nodes in this bucket, try to recover from other buckets}
+  writeln('DHT: Refresh BROKEN BUCKET');
+  rv:=0; rvb:=@self;
+  GetNextNode(rvb,rv,prefix);
+  if assigned(rvb) then begin
+   writeln('DHT: Refresh (RV) #',rv,' ',string(rvb^.peer[rv].addr));
+   lSend(rvb^.peer[rv],prefix);
+  end;
  end;
  if my
   then wait:=18000+(depth*600)
