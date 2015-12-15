@@ -38,6 +38,8 @@ function IsMsgHandled(OpCode:byte; from:tNetAddr):boolean;
 function OptIndex(o:string):word;
 function OptParamCount(o:word):word;
 
+var OnTerminate:procedure;
+
 type tTimeVal=UnixType.timeval;
 type tMTime=DWORD;
 var iNow:tTimeVal;
@@ -317,6 +319,7 @@ procedure Main;
    end;
   end;
  end;
+ if assigned(onTerminate) then onTerminate;
  CloseSocket(s_inet);
 end;
 
@@ -417,4 +420,5 @@ BEGIN
  ShedUU:=nil; {todo: allocate a few to improve paging}
  fpgettimeofday(@LastShed,nil);
  if OptIndex('-h')>0 then DoShowOpts:=true;
+ OnTerminate:=nil;
 END.
