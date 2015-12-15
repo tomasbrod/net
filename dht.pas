@@ -164,7 +164,7 @@ procedure UpdateNode(const id:tFID; const addr:tNetAddr);
   do if (fr=0)and bkt^.peer[i].addr.isNil then fr:=i
    //else if bkt^.peer[i].addr=addr then fr:=i
    else if bkt^.peer[i].id=id then begin
-    if bkt^.peer[i].addr<>addr then continue;
+    if bkt^.peer[i].addr<>addr then exit;
     {found node in the bucket}
     //writeln('DHT: UpdateNode ',string(id));
     // ?? bkt^.ModifyTime:=mNow;
