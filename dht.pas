@@ -5,6 +5,7 @@ unit DHT;
  node belongs to bucket, where at least 'depth' bits match 'prefix'
  old>new,
  new>dead
+ TODO: weight nodes by IP-Address common prefix length.
 }
 
 {used by: messages, fileshare}
@@ -12,16 +13,22 @@ unit DHT;
 INTERFACE
 uses NetAddr,Store1;
 type tPID=Store1.tFID;
+type tPeerPub=object
+   ID   :tPID;
+   Addr :tNetAddr;
+   //function IsGood
+   //function GetAge
+ end;
 var MyID:tPID;
 procedure NodeBootstrap(const contact:tNetAddr);
+procedure GetNextNode(var ibkt:pointer; var ix:byte; out peer:tPeerPub);
+procedure InsertNode(const peer:tPeerPub);
 
 IMPLEMENTATION
 uses ServerLoop,MemStream,opcode;
 
 type
- tPeer=object
-   ID   :tPID;
-   Addr :tNetAddr;
+ tPeer=object(tPeerPub)
    ReqDelta:word;
    LastMsgFrom,
    LastResFrom  :tMTime;
@@ -137,6 +144,7 @@ procedure UpdateNode(const id:tFID; const addr:tNetAddr);
  var i,fr:byte;
  label again;
  begin
+ if id=MyID then exit;
  again:
  bkt:=FindBucket(id);
  if not assigned(bkt) then begin
@@ -180,9 +188,15 @@ procedure UpdateNode(const id:tFID; const addr:tNetAddr);
  end;
 end;
 
+procedure InsertNode(const peer:tPeerPub);
+ begin
+ UpdateNode(peer.id,peer.addr);
+end;
+
 procedure GetNextNode(var ibkt:tBucket_ptr; var ix:byte; const id:tPID);
  var bkt:^tBucket;
  begin
+ if not assigned(ibkt) then exit;
  bkt:=ibkt;
  repeat
   inc(ix);
@@ -193,6 +207,15 @@ procedure GetNextNode(var ibkt:tBucket_ptr; var ix:byte; const id:tPID);
   end;
  until (not bkt^.peer[ix].Addr.isNil)and(bkt^.peer[ix].ReqDelta<3);
  ibkt:=bkt;
+end;
+
+procedure GetNextNode(var ibkt:pointer; var ix:byte; out peer:tPeerPub);
+ begin
+ if ibkt=nil then ibkt:=Table;
+ GetNextNode(ibkt,ix,MyID);
+ if assigned(ibkt)
+ then peer:=tBucket(ibkt^).peer[ix]
+ else peer.addr.clear;
 end;
 
 procedure RecvRequest(msg:tSMsg);
@@ -335,6 +358,10 @@ procedure tBucket.Refresh;
   writeln('DHT: Refresh BROKEN BUCKET');
   rv:=0; rvb:=@self;
   GetNextNode(rvb,rv,prefix);
+  if not assigned(rvb) then begin
+   rv:=0; rvb:=Table; {in extreme cases, try the whole table}
+   GetNextNode(rvb,rv,prefix);
+  end;
   if assigned(rvb) then begin
    writeln('DHT: Refresh (RV) #',rv,' ',string(rvb^.peer[rv].addr));
    lSend(rvb^.peer[rv],prefix);
