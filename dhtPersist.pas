@@ -88,7 +88,6 @@ end;
 procedure t.doSoon;
  begin
  Load;
- LoadID;
 end;
 
 procedure t.doPeriodic;
@@ -99,7 +98,8 @@ end;
 
 procedure t.Init;
  begin
- Shedule(500,@doSoon);
+ LoadID;
+ Shedule(1200,@doSoon);
  Shedule(40000,@doPeriodic);
  pot:=ServerLoop.OnTerminate;
  ServerLoop.OnTerminate:=@doLast;

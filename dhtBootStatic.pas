@@ -43,5 +43,5 @@ end;
 
 var o:t;
 BEGIN
- Shedule(1000,@o.boot);
+ Shedule(700,@o.boot);
 END.
