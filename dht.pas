@@ -41,6 +41,7 @@ type
    peer:   array [1..4] of tPeer;
    ModifyTime: tMTime;
    //ll: ^tll;
+   desperate:word;
    next: tBucket_ptr;
    function MatchPrefix(const tp:tFID):boolean;
    procedure Refresh;
@@ -154,6 +155,7 @@ procedure UpdateNode(const id:tFID; const addr:tNetAddr);
   bkt^.Depth:=0;
   bkt^.ModifyTime:=mNow;
   bkt^.next:=nil;
+  bkt^.desperate:=3;
   for i:=1 to high(bkt^.peer) do bkt^.peer[i].addr.Clear;
   Shedule(2000,@bkt^.Refresh);
  end;
@@ -193,7 +195,7 @@ procedure InsertNode(const peer:tPeerPub);
  UpdateNode(peer.id,peer.addr);
 end;
 
-procedure GetNextNode(var ibkt:tBucket_ptr; var ix:byte; const id:tPID);
+procedure GetNextNode(var ibkt:tBucket_ptr; var ix:byte; const id:tPID; maxrd:word);
  var bkt:^tBucket;
  begin
  if not assigned(ibkt) then exit;
@@ -205,14 +207,14 @@ procedure GetNextNode(var ibkt:tBucket_ptr; var ix:byte; const id:tPID);
    bkt:=bkt^.next;
    if not assigned(bkt) then break;
   end;
- until (not bkt^.peer[ix].Addr.isNil)and(bkt^.peer[ix].ReqDelta<3);
+ until (not bkt^.peer[ix].Addr.isNil)and(bkt^.peer[ix].ReqDelta<maxrd);
  ibkt:=bkt;
 end;
 
 procedure GetNextNode(var ibkt:pointer; var ix:byte; out peer:tPeerPub);
  begin
  if ibkt=nil then ibkt:=Table;
- GetNextNode(ibkt,ix,MyID);
+ GetNextNode(ibkt,ix,MyID,3);
  if assigned(ibkt)
  then peer:=tBucket(ibkt^).peer[ix]
  else peer.addr.clear;
@@ -355,18 +357,18 @@ procedure tBucket.Refresh;
  end;
  if (not rtr)and(ol=0) then begin
   {no usable nodes in this bucket, try to recover from other buckets}
-  writeln('DHT: Refresh BROKEN BUCKET');
   rv:=0; rvb:=@self;
-  GetNextNode(rvb,rv,prefix);
+  GetNextNode(rvb,rv,prefix,desperate);
+  inc(desperate);
   if not assigned(rvb) then begin
    rv:=0; rvb:=Table; {in extreme cases, try the whole table}
-   GetNextNode(rvb,rv,prefix);
+   GetNextNode(rvb,rv,prefix,desperate);
   end;
   if assigned(rvb) then begin
    writeln('DHT: Refresh (RV) #',rv,' ',string(rvb^.peer[rv].addr));
    lSend(rvb^.peer[rv],prefix);
   end;
- end;
+ end else desperate:=3;
  if my
   then wait:=18000+(depth*600)
   else wait:=30000;
