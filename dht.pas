@@ -359,7 +359,6 @@ procedure tBucket.Refresh;
   {no usable nodes in this bucket, try to recover from other buckets}
   rv:=0; rvb:=@self;
   GetNextNode(rvb,rv,prefix,desperate);
-  inc(desperate);
   if not assigned(rvb) then begin
    rv:=0; rvb:=Table; {in extreme cases, try the whole table}
    GetNextNode(rvb,rv,prefix,desperate);
@@ -367,7 +366,7 @@ procedure tBucket.Refresh;
   if assigned(rvb) then begin
    writeln('DHT: Refresh (RV) #',rv,' ',string(rvb^.peer[rv].addr));
    lSend(rvb^.peer[rv],prefix);
-  end;
+  end else inc(desperate);
  end else desperate:=3;
  if my
   then wait:=18000+(depth*600)
