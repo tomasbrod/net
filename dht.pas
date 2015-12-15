@@ -380,22 +380,9 @@ end;
 ping may get lost: separate bootstrap unit :)
 now jut Ass-U-Me wont get lost}
 
-procedure LoadIDFromArgs;
- var oi:word;
- const opt='-id';
- begin
- oi:=OptIndex(opt);
- if oi>0 then begin
-  assert(OptParamCount(oi)=1,opt+'(pid:sha1)');
-  writeln('DHT: set ID to '+paramstr(oi+1));
-  MyID:=tPID(paramstr(oi+1));
- end;
-end;
-
 BEGIN
  SetMsgHandler(opcode.dhtRequest,@recvRequest);
  SetMsgHandler(opcode.dhtSelect,@recvSelect);
  SetMsgHandler(opcode.dhtReqAck,@recvReqAck);
  SetMsgHandler(opcode.dhtWazzup,@recvWazzup);
- LoadIdFromArgs;
 END.

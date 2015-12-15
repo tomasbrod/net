@@ -73,6 +73,30 @@ procedure LoadID;
  close(nd);
 end;
 
+procedure LoadIDFromArgs;
+ var oi:word;
+ const opt='-id';
+ begin
+ oi:=OptIndex(opt);
+ if oi>0 then begin
+  assert(OptParamCount(oi)=1,opt+'(pid:sha1)');
+  writeln('DHT: set ID to '+paramstr(oi+1));
+  MyID:=tPID(paramstr(oi+1));
+ end;
+end;
+procedure LoadIDRandom;
+ var oi:word;
+ const opt='-id-rnd';
+ var b:byte;
+ begin
+ oi:=OptIndex(opt);
+ if oi>0 then begin
+  assert(OptParamCount(oi)=0,opt+'()');
+  for b:=0 to 19 do MyID[b]:=Random(256);
+  writeln('DHT: set ID to ',string(MyID));
+ end;
+end;
+
 type t=object
  pot:procedure;
  procedure Init;
@@ -99,6 +123,8 @@ end;
 procedure t.Init;
  begin
  LoadID;
+ LoadIDFromArgs;
+ LoadIDRandom;
  Shedule(2000,@doSoon);
  Shedule(20000,@doPeriodic);
  {
