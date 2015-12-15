@@ -180,7 +180,7 @@ procedure UpdateNode(const id:tFID; const addr:tNetAddr);
    end; {the bucket is full!}
         {drop new node and hope nodes in the bucket are good}
  end else begin
-  writeln('DHT: AddNode ',string(id),' to ',string(bkt^.prefix),'/',bkt^.depth,'#',fr);
+  writeln('DHT: AddNode ',string(id),string(addr),' to ',string(bkt^.prefix),'/',bkt^.depth,'#',fr);
   bkt^.ModifyTime:=mNow;
   bkt^.peer[fr].ID:=ID;
   bkt^.peer[fr].Addr:=Addr;
@@ -233,7 +233,7 @@ procedure RecvRequest(msg:tSMsg);
  hID:=s.ReadPtr(20);
  rID:=s.ReadPtr(20);
  caps:=s.ReadByte;
- writeln('DHT: ',string(msg.source^),' Request for ',string(rID^));
+ //writeln('DHT: ',string(msg.source^),' Request for ',string(rID^));
  UpdateNode(hID^,msg.source^);
  {Select peers only from The bucket,
   if it is broken, send none, but still Ack}
@@ -250,16 +250,17 @@ procedure RecvRequest(msg:tSMsg);
    if bkt^.peer[i].addr.isNil then continue;
    if bkt^.peer[i].addr=msg.source^ then continue;
    if bkt^.peer[i].ReqDelta>1 then continue;
-   writeln('-> Select to ',string(bkt^.peer[i].addr));
+   //writeln('-> Select to ',string(bkt^.peer[i].addr));
    SendMessage(r.base^,r.length,bkt^.peer[i].addr);
   end;
   r.Seek(0);
   r.Trunc;
  end
-  else writeln('-> empty bucket');
+  //else writeln('-> empty bucket')
+  ;
  r.WriteByte(opcode.dhtReqAck);
  r.Write(MyID,20);
- writeln('-> ReqAck to ',string(msg.Source^));
+ //writeln('-> ReqAck to ',string(msg.Source^));
  SendMessage(r.base^,r.length,msg.source^);
  FreeMem(r.base,r.size);
 end;
@@ -282,7 +283,7 @@ procedure RecvReqAck(msg:tSMsg);
  begin
  s.skip(1);
  hID:=s.ReadPtr(20);
- writeln('DHT: ',string(msg.source^),' is ',string(hID^),' (ReqAck)');
+ //writeln('DHT: ',string(msg.source^),' is ',string(hID^),' (ReqAck)');
  UpdateNode(hID^,msg.source^);
 end;
 
@@ -292,7 +293,7 @@ procedure RecvWazzup(msg:tSMsg);
  begin
  s.skip(1);
  hID:=s.ReadPtr(20);
- writeln('DHT: ',string(msg.source^),' is ',string(hID^),' (Wazzup)');
+ //writeln('DHT: ',string(msg.source^),' is ',string(hID^),' (Wazzup)');
  UpdateNode(hID^,msg.source^);
  //UpdateSearch(hID^,msg.source^);
 end;
@@ -343,7 +344,8 @@ procedure tBucket.Refresh;
   if (not peer[i].Addr.isNil) and (peer[i].ReqDelta<4)  then begin
    if peer[i].ReqDelta>0 then begin
     {peer is not responding, but try once more}
-    writeln('DHT: Refresh (R',peer[i].ReqDelta,') #',i,' ',string(peer[i].addr));
+    if peer[i].ReqDelta=3
+    then writeln('DHT: Refresh (last) ',copy(string(peer[i].id),1,6),string(peer[i].addr));
     lSend(peer[i],prefix);
     rtr:=true;
    end
@@ -352,7 +354,7 @@ procedure tBucket.Refresh;
   end;
  {now nudge the most quiet peer}
  if (ol>0) and (not rtr) then begin
-  if not rtr then writeln('DHT: Refresh (T',mNow-peer[ol].LastMsgFrom,') #',ol,' ',string(peer[ol].addr));
+  //writeln('DHT: Refresh (T',mNow-peer[ol].LastMsgFrom,') #',ol,' ',string(peer[ol].addr));
   lSend(peer[ol],MyID);
  end;
  if (not rtr)and(ol=0) then begin
@@ -364,7 +366,7 @@ procedure tBucket.Refresh;
    GetNextNode(rvb,rv,prefix,desperate);
   end;
   if assigned(rvb) then begin
-   writeln('DHT: Refresh (RV) #',rv,' ',string(rvb^.peer[rv].addr));
+   writeln('DHT: Broken bucket ',string(prefix),'/',depth,' try ',copy(string(rvb^.peer[rv].id),1,6),string(rvb^.peer[rv].addr));
    lSend(rvb^.peer[rv],prefix);
   end else inc(desperate);
  end else desperate:=3;

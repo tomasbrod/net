@@ -25,7 +25,7 @@ procedure Save;
  repeat
   dht.GetNextNode(nnp,nni,node);
   if node.addr.isNil then break;
-  writeln('dhtPersist: save ',string(node.addr));
+  //writeln('dhtPersist: save ',string(node.addr));
   write(nd,node);
  until false;
  finally
@@ -51,7 +51,7 @@ procedure Load;
  for pos:=pos-1 downto 0 do begin
   Seek(nd,pos);
   Read(nd,node);
-  writeln('dhtPersist: load ',string(node.addr));
+  //writeln('dhtPersist: load ',string(node.addr));
   dht.InsertNode(node);
  end;
  close(nd);
@@ -68,7 +68,7 @@ procedure LoadID;
   writeln('dhtPersist: can not open id file ',idfn);
  exit end;
  readln(nd,line);
- writeln('dhtPersist: nodeID ',line);
+ writeln('dhtPersist: set ID to ',line);
  dht.MyID:=line;
  close(nd);
 end;
@@ -80,7 +80,7 @@ procedure LoadIDFromArgs;
  oi:=OptIndex(opt);
  if oi>0 then begin
   assert(OptParamCount(oi)=1,opt+'(pid:sha1)');
-  writeln('DHT: set ID to '+paramstr(oi+1));
+  writeln('dhtPersist: set ID to '+paramstr(oi+1));
   MyID:=tPID(paramstr(oi+1));
  end;
 end;
@@ -93,7 +93,7 @@ procedure LoadIDRandom;
  if oi>0 then begin
   assert(OptParamCount(oi)=0,opt+'()');
   for b:=0 to 19 do MyID[b]:=Random(256);
-  writeln('DHT: set ID to ',string(MyID));
+  writeln('dhtPersist: set ID to ',string(MyID));
  end;
 end;
 
