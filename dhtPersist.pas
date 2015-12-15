@@ -99,10 +99,12 @@ end;
 procedure t.Init;
  begin
  LoadID;
- Shedule(1200,@doSoon);
- Shedule(40000,@doPeriodic);
+ Shedule(2000,@doSoon);
+ Shedule(20000,@doPeriodic);
+ {
  pot:=ServerLoop.OnTerminate;
  ServerLoop.OnTerminate:=@doLast;
+ }
 end;
 
 var o:t;
