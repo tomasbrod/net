@@ -117,7 +117,7 @@ end;
 procedure t.doPeriodic;
  begin
  Save;
- Shedule(40000,@doPeriodic);
+ Shedule(61273,@doPeriodic);
 end;
 
 procedure t.Init;
@@ -126,7 +126,7 @@ procedure t.Init;
  LoadIDFromArgs;
  LoadIDRandom;
  Shedule(2000,@doSoon);
- Shedule(20000,@doPeriodic);
+ Shedule(25000,@doPeriodic);
  {
  pot:=ServerLoop.OnTerminate;
  ServerLoop.OnTerminate:=@doLast;
