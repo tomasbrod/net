@@ -57,7 +57,7 @@ TYPE
     addr: tIn6Addr;
    end; );
    afNil :(
-    pad_pV4IlkA4mKQL :packed array [0..128] of byte;
+    pad_pV4IlkA4mKQL :packed array [0..22] of byte;
    ); 
   end;
  end;

@@ -8,6 +8,9 @@ uses cthreads,ServerLoop
 	,Upload
 	,Download
 	,TestFS
+	,dht
+	,dhtBootStatic
+	,dhtPersist
 	;
 
 BEGIN

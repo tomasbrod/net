@@ -34,6 +34,7 @@ end;
 tObjectInfo=tStoreObjectInfo;
 
 operator :=(a:string) r:tFID;
+operator :=(a:tFID) r:string;
 {Should consult Download on non-final files}
 
 IMPLEMENTATION
@@ -425,6 +426,10 @@ operator :=(a:string) r:tFID;
  end;
  begin
  for i:=0 to 19 do r[i]:=(unhex(a[i*2+1])shl 4)or(unhex(a[i*2+2]));
+end;
+operator :=(a:tFID) r:string;
+ begin
+ r:=sha1print(a);
 end;
 BEGIN
  SegInfoChain:=nil;
