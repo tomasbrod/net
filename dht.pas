@@ -162,16 +162,17 @@ procedure UpdateNode(const id:tFID; const addr:tNetAddr);
  fr:=0;
  for i:=1 to high(bkt^.peer)
   do if (fr=0)and bkt^.peer[i].addr.isNil then fr:=i
-   //else if bkt^.peer[i].addr=addr then fr:=i
-   else if bkt^.peer[i].id=id then begin
-    if bkt^.peer[i].addr<>addr then exit;
+   else if (bkt^.peer[i].ReqDelta<2) then begin
     {found node in the bucket}
-    //writeln('DHT: UpdateNode ',string(id));
-    // ?? bkt^.ModifyTime:=mNow;
-    bkt^.peer[i].LastMsgFrom:=mNow;
-    bkt^.peer[i].ReqDelta:=0;
-   exit end else if (fr=0) and (bkt^.peer[i].ReqDelta>=2)
-                then fr:=i {use non-responding as free};
+    if (bkt^.peer[i].id=id) then begin
+     bkt^.peer[i].LastMsgFrom:=mNow;
+     bkt^.peer[i].ReqDelta:=0;
+     exit
+    end;
+    if bkt^.peer[i].addr=addr then exit;
+   end
+   else if (fr=0)or (bkt^.peer[i].id=id)
+        then fr:=i;
  if fr=0 then begin
   if bkt^.MatchPrefix(MyID)
    then begin
@@ -326,8 +327,9 @@ procedure RecvSelect(msg:tSMsg);
  FreeMem(r.base,r.size);
 end;
 
+const cStichRar=10;
 procedure tBucket.Refresh;
- var my,rtr:boolean;
+ var my,rtr,stich:boolean;
  var i,ol,rv:byte;
  var wait:LongWord;
  var rvb:^tBucket;
@@ -338,27 +340,29 @@ procedure tBucket.Refresh;
  end;
  begin
  my:=MatchPrefix(MyID);
- ol:=0;
- rtr:=false;
- for i:=1 to high(tBucket.peer) do
-  if (not peer[i].Addr.isNil) and (peer[i].ReqDelta<4)  then begin
+ ol:=0; rtr:=false;
+ {1 of 10 times try to contact dead nodes in attempt to recover from network split}
+ stich:=Random(cStichRar)=0;
+ for i:=1 to high(tBucket.peer)
+  do if (not peer[i].Addr.isNil) then begin
    if peer[i].ReqDelta>0 then begin
-    {peer is not responding, but try once more}
-    if peer[i].ReqDelta=3
-    then writeln('DHT: Refresh (last) ',copy(string(peer[i].id),1,6),string(peer[i].addr));
-    lSend(peer[i],prefix);
-    rtr:=true;
+    if (peer[i].ReqDelta<=3)xor stich then begin
+     {this will get rid of half-dead nodes}
+     writeln('DHT: Refresh (R',peer[i].ReqDelta,') ',copy(string(peer[i].id),1,6),string(peer[i].addr));
+     lSend(peer[i],prefix);
+     rtr:=true;
+    end
    end
    else if (ol=0) or (peer[i].LastMsgFrom<peer[ol].LastMsgFrom)
         then ol:=i;
-  end;
- {now nudge the most quiet peer}
- if (ol>0) and (not rtr) then begin
+ end;
+ {now nudge the most quiet peer, but not too often}
+ if (ol>0) and ((mNow-peer[ol].LastMsgFrom)>10000) then begin
   //writeln('DHT: Refresh (T',mNow-peer[ol].LastMsgFrom,') #',ol,' ',string(peer[ol].addr));
   lSend(peer[ol],MyID);
  end;
- if (not rtr)and(ol=0) then begin
-  {no usable nodes in this bucket, try to recover from other buckets}
+ {try to recover bucket full of bad nodes}
+ if (ol=0)and(not rtr) then begin
   rv:=0; rvb:=@self;
   GetNextNode(rvb,rv,prefix,desperate);
   if not assigned(rvb) then begin
@@ -366,7 +370,7 @@ procedure tBucket.Refresh;
    GetNextNode(rvb,rv,prefix,desperate);
   end;
   if assigned(rvb) then begin
-   writeln('DHT: Broken bucket ',string(prefix),'/',depth,' try ',copy(string(rvb^.peer[rv].id),1,6),string(rvb^.peer[rv].addr));
+   writeln('DHT: Recover ',string(prefix),'/',depth,' try ',copy(string(rvb^.peer[rv].id),1,6),string(rvb^.peer[rv].addr));
    lSend(rvb^.peer[rv],prefix);
   end else inc(desperate);
  end else desperate:=3;
