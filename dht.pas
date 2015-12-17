@@ -228,12 +228,14 @@ procedure RecvRequest(msg:tSMsg);
  var caps:byte;
  var r:tMemoryStream;
  var bkt:^tBucket;
- var i:byte;
+ var i,li:byte;
+ var SendCnt:byte;
  begin
  s.skip(1);
  hID:=s.ReadPtr(20);
  rID:=s.ReadPtr(20);
  caps:=s.ReadByte;
+ SendCnt:=0;
  //writeln('DHT: ',string(msg.source^),' Request for ',string(rID^));
  UpdateNode(hID^,msg.source^);
  {Select peers only from The bucket,
@@ -253,6 +255,14 @@ procedure RecvRequest(msg:tSMsg);
    if bkt^.peer[i].ReqDelta>1 then continue;
    //writeln('-> Select to ',string(bkt^.peer[i].addr));
    SendMessage(r.base^,r.length,bkt^.peer[i].addr);
+   li:=i;
+   Inc(SendCnt);
+  end;
+  while SendCnt<4 do begin
+   GetNextNode(bkt,li,rID^,3);
+   if not assigned(bkt) then break;
+   SendMessage(r.base^,r.length,bkt^.peer[li].addr);
+   Inc(SendCnt);
   end;
   r.Seek(0);
   r.Trunc;
