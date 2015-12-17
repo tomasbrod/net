@@ -362,7 +362,7 @@ procedure tBucket.Refresh;
   lSend(peer[ol],MyID);
  end;
  {try to recover bucket full of bad nodes}
- if (ol=0)and(not rtr) then begin
+ if (ol=0){and(not rtr)} then begin
   rv:=0; rvb:=@self;
   GetNextNode(rvb,rv,prefix,desperate);
   if not assigned(rvb) then begin
@@ -377,7 +377,7 @@ procedure tBucket.Refresh;
  if my
   then wait:=18000+(depth*600)
   else wait:=30000;
- if rtr then wait:=wait div 3;
+ if rtr and(not stich) then wait:=wait div 3;
  Shedule(wait,@Refresh);
 end;
 
