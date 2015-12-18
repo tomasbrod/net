@@ -221,9 +221,17 @@ procedure GetNextNode(var ibkt:pointer; var ix:byte; out peer:tPeerPub);
  else peer.addr.clear;
 end;
 
+{Messages:
+ a)Request: op, SendID, TargetID, caps, adt
+ b)Select : op, caps, addr, TargetID, OrigID, adt (66)
+          : op, caps, addr, TatgetID, SendID, adt (66)
+ c)Ack    : op, SenderID
+ d)Wazzup : op, SenderID
+}
+
 procedure RecvRequest(msg:tSMsg);
  var s:tMemoryStream absolute msg.stream;
- var hID:^tPID;
+ var sID:^tPID;
  var rID:^tPID;
  var caps:byte;
  var r:tMemoryStream;
@@ -232,12 +240,12 @@ procedure RecvRequest(msg:tSMsg);
  var SendCnt:byte;
  begin
  s.skip(1);
- hID:=s.ReadPtr(20);
+ sID:=s.ReadPtr(20);
  rID:=s.ReadPtr(20);
  caps:=s.ReadByte;
  SendCnt:=0;
  //writeln('DHT: ',string(msg.source^),' Request for ',string(rID^));
- UpdateNode(hID^,msg.source^);
+ UpdateNode(sID^,msg.source^);
  {Select peers only from The bucket,
   if it is broken, send none, but still Ack}
  bkt:=FindBucket(rID^);
@@ -247,7 +255,7 @@ procedure RecvRequest(msg:tSMsg);
   r.WriteByte(caps);
   r.Write(msg.Source^,sizeof(tNetAddr));
   r.Write(rID^,20);
-  r.Write(hID^,20);
+  r.Write(MyID,20);
   if (s.RdBufLen>0)and(s.RdBufLen<=8) then r.Write(s.RdBuf^,s.RdBufLen);
   for i:=1 to high(tBucket.peer) do begin
    if bkt^.peer[i].addr.isNil then continue;
@@ -318,13 +326,15 @@ procedure RecvSelect(msg:tSMsg);
  var s:tMemoryStream absolute msg.stream;
  var caps:byte;
  var addr:^tNetAddr;
- var rID:^tPID;
+ var rID,sID:^tPID;
  var r:tMemoryStream;
  begin
  s.skip(1);
  caps:=s.ReadByte;
  addr:=s.ReadPtr(sizeof(tNetAddr));
  rID:=s.ReadPtr(20);
+ sID:=s.ReadPtr(20);
+ //UpdateNode(sID^,msg.source^);
  //writeln('DHT: ',string(msg.source^),' Select for ',string(addr^));
  if rID^=MyID then begin
   //writeln('-> self');
