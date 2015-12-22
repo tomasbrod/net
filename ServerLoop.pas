@@ -408,6 +408,7 @@ end;
 var i:byte;
 var nb:array [0..0] of byte;
 BEGIN
+ writeln('ServerLoop: BrodNetD');
  mNow:=0;
  umNow:=0;
  Randomize;

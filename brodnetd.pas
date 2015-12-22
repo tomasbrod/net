@@ -11,6 +11,7 @@ uses cthreads,ServerLoop
 	,dht
 	,dhtBootStatic
 	,dhtPersist
+	,ECC
 	;
 
 BEGIN

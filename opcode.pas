@@ -15,6 +15,7 @@ const {dgram opcode}
  dhtWazzup=13;
 const {chat init}
  upFileServer=2;
+ crAuthReq=3;
 const {FS opcodes}
  {c}upOPEN=7;
  {s}upINFO=8;
