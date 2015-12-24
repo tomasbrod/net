@@ -9,7 +9,7 @@ type t=object
  //procedure UserInput
  procedure Reply(msg:tSMsg; data:boolean);
  procedure Rekt;
- procedure Timeout(willwait:LongWord);
+ procedure Timeout;
  procedure HardTimeout;
 end;
 
@@ -30,13 +30,10 @@ procedure t.Rekt;
  FreeMem(@self,sizeof(self));
 end;
 
-procedure t.Timeout(willwait:LongWord);
+procedure t.Timeout;
  begin
- if willwait>=16000 then begin
-  writeln('TestChat: timeout, give up');
-  ch.Close;
- end else
- writeln('TestChat: resend willwait='+IntToStr(willwait));
+ writeln('TestChat: timeout, give up');
+ ch.Close;
 end;
 
 procedure t.HardTimeout;
@@ -79,10 +76,11 @@ procedure init;
   new(o); with o^ do begin
    ch.Init(paramstr(oi+1));
    ch.Callback:=@Reply;
-   ch.DisposeHook:=@Rekt;
-   ch.TMHook:=@Timeout;
-   Shedule(7000,@HardTimeout);
+   ch.OnDispose:=@Rekt;
+   ch.OnTimeout:=@Timeout;
+   //Shedule(7000,@HardTimeout);
    s.init(GetMem(56),0,56);
+   ch.SetTimeout(6000,8000);
    ch.AddHeaders(s);
    msg:='Test Chat Message!';
    s.WriteByte(32);
