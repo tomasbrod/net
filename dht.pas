@@ -174,8 +174,8 @@ function CheckNode(const id: tPID; const addr: tNetAddr): boolean;
  for i:=1 to high(b^.peer) do begin {check for ban and dup}
    if (b^.peer[i].Ban) and (b^.peer[i].Addr=addr) then exit;
    if (fr=0)and(b^.peer[i].Addr.isNil) then fr:=i;
-   if (b^.peer[i].ReqDelta<2)and(b^.peer[i].ID=id) then begin
-     fr:=i;dup:=true;break
+   if (b^.peer[i].ID=id)or(b^.peer[i].Addr=Addr) then begin
+     fr:=i;dup:=(b^.peer[i].ReqDelta<2);break
    end;
  end;
  if fr=0 then for i:=1 to high(b^.peer) do begin {check for old/banned}
