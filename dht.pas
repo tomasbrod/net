@@ -235,7 +235,7 @@ procedure GetNextNode(var ibkt:tBucket_ptr; var ix:byte; const id:tPID; maxrd:wo
   end;
  until (not bkt^.peer[ix].Addr.isNil)
        and(bkt^.peer[ix].ReqDelta<maxrd)
-       and(bans and(bkt^.peer[ix].ban=false));
+       and(bans or(bkt^.peer[ix].ban=false));
  ibkt:=bkt;
 end;
 
@@ -439,13 +439,21 @@ procedure VerifyInit(b:tBucket_ptr; i:byte);
   new(Verify);
   Verify^.Callback:=@VerifyCallback;
   Verify^.Init(Addr);
+  //writeln('DHT: Starting Verificator for ',string(Addr));
  end
 end;
 procedure tPeer.VerifyCallback;
  begin
- if not( Verify^.Valid and Verify^.PowValid ) then begin
+ if Verify^.error>0 then begin
+  writeln('DHT: Verificator error ',string(Addr),Verify^.error);
+  ReqDelta:=3;
+ end else
+ if Verify^.Valid and Verify^.PowValid and (CompareWord(ID,Verify^.RemotePub,10)=0) then
+  Ban:=false
+ else begin
   Ban:=true;
- end else Ban:=false; {just in case}
+  writeln('DHT: Verificator failed for ',string(Addr),Verify^.Valid,Verify^.PoWValid,Verify^.error);
+ end;
  Verify:=nil; {it will free itelf}
 end;
 

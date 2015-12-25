@@ -135,6 +135,7 @@ procedure tChat.Ack;
   ServerLoop.SendMessage(s.base^,s.length,remote);
   FreeMem(s.base,s.length);
   rxAcked:=true;
+  if assigned(OnTimeout) and (tmReply>0) then Shedule(tmReply,@ReplyTimeout);
  end;
 end;
 
@@ -145,6 +146,7 @@ procedure tChat.Close;
  closed:=true;
  callback:=nil; {avoid calling}
  ontimeout:=nil;
+ UnShedule(@ReplyTimeout); {fuck it}
  //writeln('Chat: closing');
  if txLen=0 {no packets in flight} then begin
   Shedule(5000{todo},@Done); {wait for something lost}
