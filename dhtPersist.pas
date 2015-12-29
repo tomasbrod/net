@@ -77,7 +77,7 @@ procedure LoadIDFromECC;
  var id:dht.tPID;
  begin
  Move(ECC.PublicKey,id,20);
- writeln('dhtPersist: set ID to ',string(id),' from ECC');
+ //writeln('dhtPersist: set ID to ',string(id),' from ECC');
  dht.MyID:=id;
 end;
 

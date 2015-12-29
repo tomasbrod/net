@@ -1,13 +1,13 @@
 unit ECC;
 
 INTERFACE
-uses Curve25519,Sha1;
-type tEccKey=t256BitKey;
+uses ed25519,Sha1;
+type tEccKey=ed25519.tKey32;
 type tPoWTimeStamp=Word;
 
-var SecretKey:tEccKey;
+var SecretKey:ed25519.tKey64;
 var PublicKey:tEccKey;
-var PublicPoW:t256BitKey;
+var PublicPoW:tEccKey;
 var PublicPoWTS:Word;
 var ZeroDigest:tSha1Digest;
 const cDig3PowMask=%0010;
@@ -16,7 +16,7 @@ const cWeekDays=5;
 const cWeekEpoch=40179;
 procedure CreateChallenge(out Challenge: tEccKey);
 procedure CreateResponse(const Challenge: tEccKey; out Response: tSha1Digest; const srce:tEccKey);
-function VerifyPoW(const proof:t256BitKey; const RemotePub:tEccKey; const stamp:Word):boolean;
+function VerifyPoW(const proof:tEccKey; const RemotePub:tEccKey; const stamp:Word):boolean;
 
 operator :=(k:tEccKey) s:string;
 
@@ -33,7 +33,7 @@ procedure CreateResponse(const Challenge: tEccKey; out Response: tSha1Digest; co
  var Shared:tEccKey;
  var shactx:tSha1Context;
  begin
- curve25519.curve25519(shared,secretkey,srce);
+ ed25519.SharedSecret(shared,srce,secretkey);
  Sha1Init(shactx);
  Sha1Update(shactx,challenge,sizeof(challenge));
  Sha1Update(shactx,shared,sizeof(shared));
@@ -42,7 +42,7 @@ end;
 
 var week:Word;
 
-function VerifyPoW(const proof:t256BitKey; const RemotePub:tEccKey; const stamp:Word):boolean;
+function VerifyPoW(const proof:tEccKey; const RemotePub:tEccKey; const stamp:Word):boolean;
  var shactx:tSha1Context;
  var digest:tSha1Digest;
  begin
@@ -89,7 +89,7 @@ end;
 
 const cSeckeyFN='secret.dat';
 procedure LoadFromFile;
- var f:file of tEccKey;
+ var f:file of ed25519.tPrivKey;
  begin
  assign(f,cSecKeyFN);
  reset(f);
@@ -98,7 +98,7 @@ procedure LoadFromFile;
 end;
 
 procedure SaveGenerated;
- var f:file of tEccKey;
+ var f:file of ed25519.tPrivKey;
  begin
  assign(f,cSecKeyFN);
  rewrite(f);
@@ -109,7 +109,7 @@ end;
 
 procedure Generate;
  {$IFDEF UNIX}
- var f:file of tEccKey;
+ var f:file of ed25519.tPrivKey;
  begin
  assign(f,'/dev/urandom');
  reset(f);
@@ -124,7 +124,7 @@ end;
 
 procedure DerivePublic;
  begin
- Curve25519.Curve25519(PublicKey,SecretKey,Curve25519.BasePoint);
+ CreatekeyPair(PublicKey,SecretKey);
 end;
 
 operator :=(k:tEccKey) s:string;
