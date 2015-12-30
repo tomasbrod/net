@@ -1,1 +1,22 @@
+depend:
+dht: messaes, fileshare
+
+directory:
+- group files of common category
+- allow nodes select what they host
+- tag files in dir, allow easy filter
+? key for dir
+  - hash of name: popular dirs will overload nodes
+  ? flood routing
+    - outdated listing
+? moderation
+? voting
+
 To-Do list
+- Upload: use chat's reply-timeout feature
+- Replce Sha1 with truncated sha512
+- Chat: OnTimeout, ExceptReply
+- handle timeouts in Download
+- correct rate skew due to request lag in download
+- skip unavailable segments
+  - handle in download

@@ -13,10 +13,11 @@ type tChat=object
  rxAcked:boolean;
  closed:boolean;
  RTT:LongWord;{in ms}
- callback: procedure(msg:tSMsg; data:boolean) of object; {client must maintain active chats}
- TMhook  : procedure(willwait:LongWord      ) of object;
- DisposeHook: procedure of object; {called instead of freeing self}
+ Callback: procedure(msg:tSMsg; data:boolean) of object; {client must maintain active chats}
+ OnTimeout: procedure of object;
+ OnDispose: procedure of object;
  procedure Init(const iremote:tNetAddr);
+ procedure SetTimeout(acktm,repltm:LongInt);
  procedure AddHeaders(var s:tMemoryStream);
  procedure StreamInit(var s:tMemoryStream; l:word);
  procedure Send(s:tMemoryStream);
@@ -26,10 +27,12 @@ type tChat=object
  private
  txPk:pointer; txLen:word; {last sent, not acked msg}
  txTime:tDateTime;
+ tmAck,tmReply:LongWord;{ms}
  procedure InitFrom(const iremote:tNetAddr; iopcode:byte);
  procedure Done;
  procedure Resend;
  procedure OnReply(msg:tSMsg);
+ procedure ReplyTimeout;
 end;
 
 type tChatHandler=procedure(var nchat:tChat; msg:tSMsg);
@@ -70,11 +73,13 @@ procedure tChat.InitFrom(const iremote:tNetAddr; iopcode:byte);
  closed:=false;
  txPk:=nil;
  txLen:=0;
- callback:=nil;
- TMhook:=nil;
- DisposeHook:=nil;
+ Callback:=nil;
+ OnTimeout:=nil;
+ OnDispose:=nil;
  RTT:=200; {a default for timeouts}
  txTime:=0;
+ tmAck:=0;
+ tmReply:=0;
 end;
 {struct
  opcode:byte
@@ -90,10 +95,19 @@ procedure tChat.StreamInit(var s:tMemoryStream; l:word);
  s.Init(GetMem(l+5),0,l+5);
  AddHeaders(s);
 end;
+procedure tChat.SetTimeout(acktm,repltm:LongInt);
+ begin
+ assert(assigned(OnTimeout));
+ tmAck:=acktm;
+ tmReply:=repltm;
+end;
 
 procedure tChat.Send(s:tMemoryStream);
  begin
- assert(txLen=0);
+ if txLen>0 then begin
+  FreeMem(txPk,txLen);
+  UnShedule(@Resend);
+ end;
  //assert(assigned(callback));
  Inc(txSeq);
  s.Seek(0);
@@ -121,6 +135,7 @@ procedure tChat.Ack;
   ServerLoop.SendMessage(s.base^,s.length,remote);
   FreeMem(s.base,s.length);
   rxAcked:=true;
+  if assigned(OnTimeout) and (tmReply>0) then Shedule(tmReply,@ReplyTimeout);
  end;
 end;
 
@@ -129,11 +144,12 @@ procedure tChat.Close;
  assert(not closed);
  Ack;
  closed:=true;
+ callback:=nil; {avoid calling}
+ ontimeout:=nil;
+ UnShedule(@ReplyTimeout); {fuck it}
  //writeln('Chat: closing');
  if txLen=0 {no packets in flight} then begin
-  Shedule(15000{todo},@Done); {wait for something lost}
-  callback:=nil; {avoid calling}
-  tmhook:=nil;
+  Shedule(5000{todo},@Done); {wait for something lost}
  end;
 end;
 
@@ -141,7 +157,9 @@ procedure tChat.Done;
  begin
  if txLen>0 then FreeMem(txPk,txLen);
  SetMsgHandler(opcode,remote,nil);
- if assigned(DisposeHook) then DisposeHook
+ UnShedule(@Resend);
+ UnShedule(@ReplyTimeout);
+ if assigned(OnDispose) then OnDispose
  else FreeMem(@self,sizeof(self));
  //writeln('Chat: closed');
 end;
@@ -149,27 +167,23 @@ end;
 procedure tChat.Resend;
  {timeout waiting for ack}
  begin
- {resend and reshedule}
- if txLen=0 then exit;
- txTime:=0;
- if RTT<1 then RTT:=2;
- RTT:=RTT*2;
- if assigned(TMhook) and (not closed) then begin
-  TMhook(RTT);
-  if closed then begin
-   Done; {if hook decided to close then abort}
-   exit;
-  end;
+ {check for timeout and closed}
+ if RTT<1 then RTT:=2; RTT:=RTT*2;
+ if closed and (RTT>5000) then begin
+  Done;
+  exit
  end;
- if closed and (RTT<400) then RTT:=400;
- if (RTT>=5000) and closed then begin
-  Done {give up}
- end else begin
-  {finally resend the msg}
-  //writeln('Chat: retry');
-  ServerLoop.SendMessage(txPk^,txLen,remote);
-  ServerLoop.Shedule(RTT,@Resend);
+ if (not closed) and (tmAck>0) and (RTT>tmAck) then begin
+  if assigned(ontimeout) then OnTimeout;
+  Done;
+  exit
  end;
+ {resend}
+ //writeln('Chat: retry');
+ ServerLoop.SendMessage(txPk^,txLen,remote);
+ txTime:=Now;
+ {reshedule}
+ ServerLoop.Shedule(RTT,@Resend);
 end;
 
 procedure tChat.OnReply(msg:tSMsg);
@@ -184,10 +198,11 @@ procedure tChat.OnReply(msg:tSMsg);
    if txTime>0 then RTT:=Round((Now-txTime)*MsecsPerDay);
    FreeMem(txPk,txLen);
    UnShedule(@Resend);
-   if Closed then Shedule(5,@Done);
+   if Closed then Shedule(5,@Done);{wtf?}
    TxLen:=0;
    txPk:=nil;
    if assigned(callback) then callback(msg,false);
+   if assigned(OnTimeout) and (tmReply>0) then Shedule(tmReply,@ReplyTimeout);
   end else {write(' old-ack')it is ack of old data, do nothing};
  end;
  if seq>0 then {some data} begin
@@ -203,9 +218,17 @@ procedure tChat.OnReply(msg:tSMsg);
    {some useful data!}
    rxSeq:=seq;
    rxAcked:=false;
+   UnShedule(@ReplyTimeout);
    if assigned(callback) then callback(msg,true);
   end;
  end;
+end;
+
+procedure tChat.ReplyTimeout;
+ begin
+ assert(assigned(OnTimeout));
+ OnTimeout;
+ {...}
 end;
 
 var ChatHandlers: array [1..32] of tChatHandler;

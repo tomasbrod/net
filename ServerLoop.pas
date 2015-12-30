@@ -1,7 +1,7 @@
 UNIT ServerLoop;
 
 INTERFACE
-uses MemStream,NetAddr,UnixType;
+uses MemStream,NetAddr,UnixType,Sockets;
 
 procedure Main;
 
@@ -17,6 +17,7 @@ type tMessageHandler=procedure(msg:tSMsg);
 procedure SetMsgHandler(OpCode:byte; handler:tMessageHandler);
 procedure SetHiMsgHandler(handler:tMessageHandler);
 
+function GetSocket(const rcpt:tNetAddr):tSocket;
 procedure SendMessage(const data; len:word; const rcpt:tNetAddr );
 {procedure SendReply(const data; len:word; const rcpt:tSMsg );}
 procedure SendMessage(const data; len:word; const rcpt:tNetAddr; channel:word );
@@ -37,12 +38,17 @@ function IsMsgHandled(OpCode:byte; from:tNetAddr):boolean;
 function OptIndex(o:string):word;
 function OptParamCount(o:word):word;
 
+var OnTerminate:procedure;
+
 type tTimeVal=UnixType.timeval;
+type tMTime=DWORD;
 var iNow:tTimeVal;
+var mNow:tMTime; { miliseconds since start }
+                  {overflows in hunderd hours }
 
 IMPLEMENTATION
 
-USES SysUtils,Sockets,BaseUnix
+USES SysUtils,BaseUnix
      ,Unix
      ;
 
@@ -70,6 +76,7 @@ var ShedTop: ^tSheduled;
 var ShedUU: ^tSheduled;
 var LastShed: UnixType.timeval;
 var PollTimeout:LongInt;
+var umNow:integer;
 
 procedure SC(fn:pointer; retval:cint);
  begin
@@ -107,6 +114,10 @@ procedure s_SetupInet;
 
 var Terminated:boolean=false;
 
+function GetSocket(const rcpt:tNetAddr):tSocket;
+ begin
+ result:=s_inet;
+end;
 procedure SendMessage(const data; len:word; const rcpt:tSockAddrL );
  begin
  {SC(@fpsendto,}fpsendto(s_inet,@data,len,0,@rcpt,sizeof(sockaddr_in)){)};
@@ -128,7 +139,6 @@ procedure SignalHandler(sig:cint);CDecl;
   writeln;
   if terminated then raise eControlC.Create('CtrlC DoubleTap') ;
   Terminated:=true;
-  writeln('Shutdown requested');
  end;
 
 {index=iphash+opcode}
@@ -193,7 +203,7 @@ end;
 
 {do not waste stack on statics}
  var EventsCount:integer;
- var Buffer:array [1..1024] of byte;
+ var Buffer:array [1..4096] of byte;
  var pkLen:LongWord;
  var From:tSockAddrL; {use larger struct so everything fits}
  var FromLen:LongWord;
@@ -231,24 +241,44 @@ end;
 procedure ShedRun;
  var cur:^tSheduled;
  var pcur:^pointer;
- var now:UnixType.timeval absolute iNow;
+ var now:UnixType.timeval{ absolute iNow};
  var delta:LongWord;
+ var delta_us:LongInt;
  var tasks:word;
  begin
  {Sheduling}
- {fixme: proste niak aby to šlo vymazať z callbacku}
- {prejdi ich od zaciatku,
-  po spusteni jednej, chod zas na zaciatok
- }
- pcur:=@ShedTop;
- cur:=pcur^;
+ {gmagic with delta-time, increment mNow, ...}
  fpgettimeofday(@Now,nil);
  delta:=(Now.tv_sec-LastShed.tv_sec);
- if delta>6 then delta:=5000 else delta:=(delta*1000)+((Now.tv_usec-LastShed.tv_usec) div 1000);
+ delta_us:=Now.tv_usec-LastShed.tv_usec;
+ delta:=(delta*1000)+(delta_us div 1000);
+ umNow:=umNow+(delta_us mod 1000);
+ if delta>6000 then delta:=5000;
  LastShed:=Now;
+ mNow:=mNow+Delta;
+ if umNow>1000 then begin inc(mNow); dec(umNow,1000) end;
+ if umNow<-1000 then begin dec(mNow); inc(umNow,1000) end;
  //writeln('DeltaTime: ',delta);
+ {first tick all tasks}
+ tasks:=0;
+ cur:=ShedTop;
  while assigned(cur) do begin
-  if (cur^.left<=delta)or(cur^.left=0) then begin
+  if cur^.left<=delta then cur^.left:=0 else begin
+   dec(cur^.left,delta);
+   {also set next wake time}
+   if cur^.left<PollTimeout then PollTimeout:=cur^.left;
+  end;
+  {count tasks here}
+  inc(tasks);
+  cur:=cur^.next;
+ end;
+ {correct floating-point glitch}
+ if pollTimeout=0 then pollTimeOut:=1;
+ {run first runnable task}
+ pcur:=@ShedTop;
+ cur:=pcur^;
+ while assigned(cur) do begin
+  if cur^.left=0 then begin
    {unlink}
    pcur^:=cur^.next;
    {link to unused}
@@ -256,27 +286,13 @@ procedure ShedRun;
    ShedUU:=cur;
    {call}
    cur^.cb;
-   {go to beginning}
+   {do rest later}
+   pollTimeout:=0;
    break;
-   pcur:=@ShedTop;
-   cur:=pcur^;
-  end else begin
-   DEC(cur^.left,delta);
-   //writeln('Left: ',cur^.left);
-   if pollTimeOut>cur^.left then PollTimeOut:=cur^.left;
-   pcur:=@cur^.next;
-   cur:=cur^.next;
   end;
- end;
- cur:=ShedTop;
- tasks:=0;
- while assigned(cur) do begin
-  if cur^.left<PollTimeout then PollTimeout:=cur^.left;
+  pcur:=@cur^.next;
   cur:=cur^.next;
-  inc(tasks);
  end;
- if pollTimeout=0 then pollTimeOut:=1;
- //if delta >4990 then writeln('ServerLoop: tasks=',tasks);
 end;
 
 procedure Main;
@@ -294,7 +310,7 @@ procedure Main;
    if DoSock(PollArr[0]) then
    if assigned(curhndo) then curhndo(msg)
    else if assigned(curhnd) then curhnd(msg)
-   else raise eXception.Create('No handler for opcode '+IntToStr(Buffer[1]));
+   else {raise eXception.Create('}writeln('ServerLoop: No handler for opcode '+IntToStr(Buffer[1]));
    {INET6...}
    {Generic}
    for tp:=1 to pollTop do if PollArr[tp].revents>0 then begin
@@ -303,9 +319,8 @@ procedure Main;
    end;
   end;
  end;
- write('Loop broken [');
+ if assigned(onTerminate) then onTerminate;
  CloseSocket(s_inet);
- writeln(']');
 end;
 
 procedure SetMsgHandler(OpCode:byte; handler:tMessageHandler);
@@ -369,8 +384,10 @@ procedure UnShedule(h:tOnTimer);
  end;
 end;
 
+var DoShowOpts:boolean=false;
 function OptIndex(o:string):word;
  begin
+ if DoShowOpts then writeln('Option: ',o);
  result:=paramcount;
  while result>0 do begin
   if o=system.paramstr(result) then break;
@@ -389,7 +406,11 @@ function OptParamCount(o:word):word;
 end;
 
 var i:byte;
+var nb:array [0..0] of byte;
 BEGIN
+ writeln('ServerLoop: BrodNetD');
+ mNow:=0;
+ umNow:=0;
  Randomize;
  fpSignal(SigInt,@SignalHandler);
  fpSignal(SigTerm,@SignalHandler);
@@ -400,4 +421,8 @@ BEGIN
  ShedTop:=nil;
  ShedUU:=nil; {todo: allocate a few to improve paging}
  fpgettimeofday(@LastShed,nil);
+ if OptIndex('-h')>0 then DoShowOpts:=true;
+ OnTerminate:=nil;
+ Flush(OUTPUT);
+ SetTextBuf(OUTPUT,nb);
 END.

@@ -1,14 +1,17 @@
 PROGRAM brodnetd;
 
 { Poll loop. Read message, get handler, exec handler. }
-uses ServerLoop
+uses cthreads,ServerLoop
 	,TestWatch
-	//,TestTC
-	//,TestChat
+	,TestChat
 	,AsyncProcess
-	,upmgr
-	,TestFS
+	,Upload
 	,Download
+	,TestFS
+	,dht
+	,dhtBootStatic
+	,dhtPersist
+	,ECC
 	;
 
 BEGIN
