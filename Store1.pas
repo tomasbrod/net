@@ -432,5 +432,6 @@ operator :=(a:tFID) r:string;
  r:=sha1print(a);
 end;
 BEGIN
+ CreateDir('obj');
  SegInfoChain:=nil;
 END.

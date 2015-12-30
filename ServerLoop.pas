@@ -406,7 +406,9 @@ function OptParamCount(o:word):word;
 end;
 
 var i:byte;
+var nb:array [0..0] of byte;
 BEGIN
+ writeln('ServerLoop: BrodNetD');
  mNow:=0;
  umNow:=0;
  Randomize;
@@ -421,4 +423,6 @@ BEGIN
  fpgettimeofday(@LastShed,nil);
  if OptIndex('-h')>0 then DoShowOpts:=true;
  OnTerminate:=nil;
+ Flush(OUTPUT);
+ SetTextBuf(OUTPUT,nb);
 END.

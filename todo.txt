@@ -13,6 +13,8 @@ directory:
 ? voting
 
 To-Do list
+- Upload: use chat's reply-timeout feature
+- Replce Sha1 with truncated sha512
 - Chat: OnTimeout, ExceptReply
 - handle timeouts in Download
 - correct rate skew due to request lag in download

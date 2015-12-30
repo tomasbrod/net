@@ -8,7 +8,7 @@ unit dhtPersist;
 INTERFACE
 
 IMPLEMENTATION
-uses NetAddr,ServerLoop,DHT,SysUtils,Store1;
+uses NetAddr,ServerLoop,DHT,SysUtils,Store1,ECC;
 
 const ndfn='nodes.dat';
 const idfn='idhash.txt';
@@ -68,9 +68,17 @@ procedure LoadID;
   writeln('dhtPersist: can not open id file ',idfn);
  exit end;
  readln(nd,line);
- writeln('dhtPersist: set ID to ',line);
+ writeln('dhtPersist: set ID to ',line,' from '+idfn);
  dht.MyID:=line;
  close(nd);
+end;
+
+procedure LoadIDFromECC;
+ var id:dht.tPID;
+ begin
+ Move(ECC.PublicKey,id,20);
+ //writeln('dhtPersist: set ID to ',string(id),' from ECC');
+ dht.MyID:=id;
 end;
 
 procedure LoadIDFromArgs;
@@ -80,7 +88,7 @@ procedure LoadIDFromArgs;
  oi:=OptIndex(opt);
  if oi>0 then begin
   assert(OptParamCount(oi)=1,opt+'(pid:sha1)');
-  writeln('dhtPersist: set ID to '+paramstr(oi+1));
+  writeln('dhtPersist: set ID to '+paramstr(oi+1),' from '+opt);
   MyID:=tPID(paramstr(oi+1));
  end;
 end;
@@ -93,7 +101,7 @@ procedure LoadIDRandom;
  if oi>0 then begin
   assert(OptParamCount(oi)=0,opt+'()');
   for b:=0 to 19 do MyID[b]:=Random(256);
-  writeln('dhtPersist: set ID to ',string(MyID));
+  writeln('dhtPersist: set ID to ',string(MyID),' random');
  end;
 end;
 
@@ -122,7 +130,8 @@ end;
 
 procedure t.Init;
  begin
- LoadID;
+ (*LoadID*);
+ LoadIDFromECC;
  LoadIDFromArgs;
  LoadIDRandom;
  Shedule(2000,@doSoon);

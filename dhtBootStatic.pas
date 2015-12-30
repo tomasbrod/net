@@ -11,6 +11,24 @@ uses NetAddr,ServerLoop,DHT,SysUtils;
 
 type t=object
  procedure Boot;
+ procedure BootCmdline;
+end;
+
+procedure t.BootCmdline;
+ var addr:tNetAddr;
+ var oi:word;
+ var cnt:word;
+ const opt='-boot';
+ begin
+ oi:=OptIndex(opt);
+ if oi>0 then begin
+  cnt:=OptParamCount(oi);
+  assert(cnt>=1,opt+'(addr+)');
+  for oi:=oi+1 to cnt do begin
+   addr.FromString(paramstr(oi+1));
+   DHT.NodeBootstrap(addr);
+  end;
+ end;
 end;
 
 procedure t.Boot;
@@ -19,6 +37,7 @@ procedure t.Boot;
  var line:string;
  var addr:tNetAddr;
  begin
+ BootCmdLine;
  assign(bs,bsfn);
  try
   reset(bs);

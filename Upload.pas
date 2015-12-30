@@ -26,7 +26,7 @@ tPrv=object
  procedure Start;
  procedure Close;
  procedure Close(tell:boolean); overload; inline;
- procedure ChatTimeout(willwait:LongWord);
+ procedure ChatTimeout;
 end;
 tAggr=object
  thr:tUploadThr;
@@ -252,7 +252,8 @@ procedure tPrv.Init(var nchat:tChat);
  begin
  ch:=@nchat;
  ch^.Callback:=@OnMsg;
- ch^.TMHook:=@ChatTimeout;
+ ch^.OnTimeout:=@ChatTimeout;
+ ch^.SetTimeout(8000,0);
  uc.weight:=100;
  isOpen:=false; Active:=false;
  Shedule(5000,@Close);
@@ -306,9 +307,8 @@ procedure tPrv.Close;
  Close(true);
 end;
 
-procedure tPrv.ChatTimeout(willwait:LongWord);
+procedure tPrv.ChatTimeout;
  begin
- if WillWait<8000 then exit;
  writeln('Upload: prv for ',string(ch^.remote),'/',chan,' ChatTimeout');
  Close(false);
 end;
