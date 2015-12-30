@@ -3,20 +3,21 @@ unit ECC;
 INTERFACE
 uses ed25519,Sha1;
 type tEccKey=ed25519.tKey32;
-type tPoWTimeStamp=Word;
+type tPoWRec=packed record
+ data:ed25519.tKey32;
+ stamp:LongWord; {NetOrder}
+ end;
 
 var SecretKey:ed25519.tKey64;
 var PublicKey:tEccKey;
-var PublicPoW:tEccKey;
-var PublicPoWTS:Word;
+var PublicPoW:tPoWRec;
 var ZeroDigest:tSha1Digest;
 const cDig3PowMask=%0010;
-const cPoWValidWeeks=1;
-const cWeekDays=5;
-const cWeekEpoch=40179;
+const cPoWValidDays=5;
+const cTSEpoch=40179;
 procedure CreateChallenge(out Challenge: tEccKey);
 procedure CreateResponse(const Challenge: tEccKey; out Response: tSha1Digest; const srce:tEccKey);
-function VerifyPoW(const proof:tEccKey; const RemotePub:tEccKey; const stamp:Word):boolean;
+function VerifyPoW(const proof:tPoWRec; const RemotePub:tEccKey):boolean;
 
 operator :=(k:tEccKey) s:string;
 
@@ -40,17 +41,18 @@ procedure CreateResponse(const Challenge: tEccKey; out Response: tSha1Digest; co
  Sha1Final(shactx,Response);
 end;
 
-var week:Word;
+var TSNow:LongWord;
 
-function VerifyPoW(const proof:tEccKey; const RemotePub:tEccKey; const stamp:Word):boolean;
+function VerifyPoW(const proof:tPoWRec; const RemotePub:tEccKey):boolean;
  var shactx:tSha1Context;
  var digest:tSha1Digest;
+ var delta:Integer;
  begin
- if abs(Week-BEtoN(stamp))<=cPoWValidWeeks then begin
+ delta:=TSNow-BEtoN(proof.stamp);
+ if (delta<=cPoWValidDays) and (delta>=-1) then begin
  Sha1Init(shactx);
  Sha1Update(shactx,proof,sizeof(proof));
  Sha1Update(shactx,RemotePub,sizeof(RemotePub));
- Sha1Update(shactx,stamp,sizeof(stamp));
  Sha1Final(shactx,digest);
  result:=(CompareByte(digest,ZeroDigest,3)=0)and((digest[3]and cDig3PoWMask)=0);
  end else result:=false;
@@ -58,32 +60,30 @@ end;
 
 const cPoWFN='proof.dat';
 procedure PoWLoadFromFile;
- var f:file of byte;
+ var f:file of tPoWRec;
  begin
  assign(f,cPoWFN);
- reset(f,1);
- blockread(f,PublicPoW,sizeof(PublicPoW));
- blockread(f,PublicPoWTS,2);
+ reset(f);
+ read(f,PublicPoW);
  close(f);
 end;
 procedure PoWGenerate;
- var f:file of byte;
+ var f:file of tPoWRec;
  var i:byte;
  var counter:LongWord;
  var start:tDateTime;
  begin
  assign(f,cPoWFN);
- rewrite(f,1);
+ rewrite(f);
  write('ECC: Generating PoW, this may take a while...');
- PublicPowTS:=NtoBE(Week);
+ PublicPow.stamp:=NtoBE(TSNow);
  Start:=Now; counter:=0;
  repeat
-  for i:=0 to 31 do PublicPoW[i]:=Random(256);
+  for i:=0 to 31 do PublicPoW.data[i]:=Random(256);
   inc(counter);
- until VerifyPoW(PublicPoW,PublicKey,PublicPoWTS);
+ until VerifyPoW(PublicPoW,PublicKey);
  writeln(' PoW found in ',(Now-start)*SecsPerDay:1:0,'s speed=',counter/((Now-start)*SecsPerDay):1:0,'h/s');
- blockwrite(f,PublicPoW,sizeof(PublicPoW));
- blockwrite(f,PublicPoWTS,sizeof(PublicPoWTS));
+ write(f,PublicPoW);
  close(f);
 end;
 
@@ -135,27 +135,26 @@ end;
 
 BEGIN
  FillChar(ZeroDigest,sizeof(ZeroDigest),0);
- week:=trunc((Now-cWeekEpoch)/cWeekDays);
- //writeln('ECC: Today is W',Week);
+ TSNow:=trunc(Now-cTSEpoch);
+ //writeln('ECC: Today is W',TSNow);
  try LoadFromFile;
  except on e:Exception do begin
-  writeln('ECC: '+e.message+' while loading secret key');
+  writeln('ECC: '+cSecKeyFN+' '+e.message+' while loading secret key, generating new keypair');
   Generate;
   (*until (PublicKey[31]=0)and(PublicKey[30]=0);*)
   SaveGenerated;
-  writeln('ECC: random secret key saved to '+cSecKeyFN);
  end end;
  DerivePublic;
  writeln('ECC: pubkey is ',string(PublicKey));
  try
   PoWLoadFromFile;
-  if not VerifyPoW(PublicPoW,PublicKey,PublicPoWTS)
+  if not VerifyPoW(PublicPoW,PublicKey)
    then raise eXception.Create('invalid or expired proof');
-  if (week-BEtoN(PublicPowTS))>=cPoWValidWeeks
+  if (TSNow-BEtoN(PublicPow.Stamp))>=cPoWValidDays
    then raise eXception.Create('proof about to expire');
  except on e:Exception do begin
-  writeln('ECC: '+e.message+' while loading proof');
+  writeln('ECC: '+cPOWFN+' '+e.message+' while loading proof');
   PoWGenerate;
  end end;
- writeln('ECC: ProofOfWork valid for W',BEtoN(PublicPowTS));
+ //writeln('ECC: ProofOfWork valid for W',BEtoN(PublicPow.Stamp));
 END.

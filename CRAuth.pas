@@ -66,14 +66,12 @@ end;
 procedure tAuth.ReplyPow(msg:tSMsg; data:boolean);
  var r:tMemoryStream absolute msg.Stream;
  var ptp:byte;{Proof TyPe}
- var nonce:^tEccKey;
- var pts: ^tPoWTimeStamp;
+ var nonce:^tPoWRec;
  begin
  if not data then exit;
  ptp:=r.readbyte; {todo}
- nonce:=r.ReadPtr(sizeof(tEccKey));
- pts:=r.ReadPtr(2);
- PoWValid:=VerifyPoW(nonce^,RemotePub,pts^);
+ nonce:=r.ReadPtr(sizeof(tPoWRec));
+ PoWValid:=VerifyPoW(nonce^,RemotePub);
  Conclusion;
 end;
 procedure tAuth.Timeout;
@@ -147,9 +145,8 @@ procedure tServer.SendPow(msg:tSMsg; data:boolean);
  begin
  if data then exit;
  ch^.StreamInit(ms,66); {todo}
- ms.WriteByte(1);
+ ms.WriteByte(2);
  ms.Write(PublicPoW,sizeof(PublicPoW));
- ms.Write(PublicPoWTS,2);
  ch^.Callback:=@Last;
  ch^.SetTimeout(8000,2000);
  ch^.send(ms);
