@@ -303,7 +303,7 @@ procedure RecvRequest(msg:tSMsg);
  SendCnt:=0;
  //writeln('DHT: ',string(msg.source^),' Request for ',string(rID^));
  if not CheckNode(sID^,msg.source^) then exit;
- list.Init(rID^);list.Next;
+ list.Init(rID^);
  {TODO: sometimes it is better to send answer directly}
  {if assigned(list.bkt) then begin}
   r.Init(128);
@@ -317,10 +317,12 @@ procedure RecvRequest(msg:tSMsg);
   else writeln('-> empty bucket')
  ;}
  while SendCnt<4 do begin
+  list.Next;
   if not assigned(list.bkt) then break; {simply no more peers}
   //writeln('-> Select to ',string(list.p^.addr));
+  if list.p^.addr=msg.source^ then continue;
   SendMessage(r.base^,r.length,list.p^.addr);
-  Inc(SendCnt); list.Next;
+  Inc(SendCnt);
  end;
  r.Seek(0);
  r.Trunc;
