@@ -8,7 +8,7 @@ unit dhtPersist;
 INTERFACE
 
 IMPLEMENTATION
-uses NetAddr,ServerLoop,DHT,SysUtils,Store1,ECC;
+uses NetAddr,ServerLoop,DHT,SysUtils,Store1,ECC,SHA1;
 
 const ndfn='nodes.dat';
 const idfn='idhash.txt';
@@ -17,18 +17,18 @@ procedure Save;
  var nd: FILE of tPeerPub;
  var node:tPeerPub;
  var nnp:pointer=nil;
- var nni:byte=0;
  begin
  assign(nd,'_'+ndfn);
  ReWrite(nd);
  try
  repeat
-  dht.GetNextNode(nnp,nni,node);
+  dht.GetNextNode(nnp,node);
   if node.addr.isNil then break;
   //writeln('dhtPersist: save ',string(node.addr));
   write(nd,node);
  until false;
  finally
+  dht.DoneGetNextNode(nnp);
   close(nd);
  end;
  rename(nd,ndfn);
@@ -77,7 +77,7 @@ procedure LoadIDFromECC;
  var id:dht.tPID;
  begin
  Move(ECC.PublicKey,id,20);
- //writeln('dhtPersist: set ID to ',string(id),' from ECC');
+ writeln('dhtPersist: set ID to ',string(id),' from ECC');
  dht.MyID:=id;
 end;
 

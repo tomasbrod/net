@@ -8,14 +8,17 @@ const {dgram opcode}
  tceack=7;
  tcdata_no_report=8 unimplemented;
  {10-16 reserved for dht}
- dht=10;
+ dht=10 deprecated;
  dhtRequest=10;
  dhtSelect=11;
  dhtReqAck=12;
  dhtWazzup=13;
+ dhtResponse=14;
+ dhtIndirect=15;
 const {chat init}
  upFileServer=2;
  crAuthReq=3;
+ testChat=32; 
 const {FS opcodes}
  {c}upOPEN=7;
  {s}upINFO=8;

@@ -6,6 +6,7 @@ unit DHT;
  old>new,
  new>dead
  TODO: weight nodes by IP-Address common prefix length.
+ TODO: improve node selection
 }
 
 {used by: messages, fileshare}
@@ -21,7 +22,8 @@ type tPeerPub=object
  end;
 var MyID:tPID;
 procedure NodeBootstrap(const contact:tNetAddr);
-procedure GetNextNode(var ibkt:pointer; var ix:byte; out peer:tPeerPub);
+procedure GetNextNode(var ptr:pointer; out peer:tPeerPub);
+procedure DoneGetNextNode(var ptr:pointer);
 procedure InsertNode(const peer:tPeerPub);
 
 IMPLEMENTATION
@@ -79,7 +81,7 @@ function tBucket.MatchPrefix(const tp:tFID):boolean;
  result:=(depth=0)or(PrefixLength(prefix,tp)>=depth);
 end;
 
-function FindBucket(const prefix:tFID):tBucket_ptr;
+function FindBucket(const prefix:tFID):tBucket_ptr; overload;
  var cur:^tBucket;
  begin
  cur:=Table;
@@ -221,32 +223,61 @@ procedure InsertNode(const peer:tPeerPub);
  CheckNode(peer.id,peer.addr);
 end;
 
-procedure GetNextNode(var ibkt:tBucket_ptr; var ix:byte; const id:tPID; maxrd:word; bans:boolean);
- var bkt:^tBucket;
- begin
- if not assigned(ibkt) then exit;
- bkt:=ibkt;
- repeat
-  inc(ix);
-  if ix>high(tBucket.peer) then begin
-   ix:=1;
-   bkt:=bkt^.next;
-   if not assigned(bkt) then break;
-  end;
- until (not bkt^.peer[ix].Addr.isNil)
-       and(bkt^.peer[ix].ReqDelta<maxrd)
-       and(bans or(bkt^.peer[ix].ban=false));
- ibkt:=bkt;
+type tPeerList=object
+ bkt:^tBucket;
+ ix:byte;
+ p:^tPeer;
+ bans:boolean;
+ maxRD:word;
+ procedure Init(const id:tPID);
+ procedure Init; overload;
+ procedure Next;
+ private theb:boolean; {fuck identifier}
 end;
 
-procedure GetNextNode(var ibkt:pointer; var ix:byte; out peer:tPeerPub);
+procedure tPeerList.Init(const id:tPID);
  begin
- if ibkt=nil then ibkt:=Table;
- GetNextNode(ibkt,ix,MyID,3,false);
- if assigned(ibkt)
- then peer:=tBucket(ibkt^).peer[ix]
- else peer.addr.clear;
+ bans:=false; maxRD:=2;
+ bkt:=FindBucket(id); ix:=0; theb:=true;
+ p:=nil;
 end;
+
+procedure tPeerList.Init;
+ begin
+ bans:=false; maxRD:=2;
+ bkt:=Table; ix:=0; theb:=false;
+ p:=nil;
+end;
+
+procedure tPeerList.Next;
+ begin
+ repeat
+  if not assigned(bkt) then break;
+  inc(ix); {next peer}
+  if ix>high(tBucket.peer) then {bucket exhausted} begin
+   if theb then begin
+    theb:=false;
+    bkt:=Table;
+   end
+   else bkt:=bkt^.next;
+   ix:=1;
+   if not assigned(bkt) then break;
+  end;
+  {FIXME: list returns nodes from The bucket second time}
+ until (not bkt^.peer[ix].Addr.isNil)
+       and(bkt^.peer[ix].ReqDelta<=maxrd)
+       and(bans or(bkt^.peer[ix].ban=false));
+ if assigned(bkt) then p:=@bkt^.peer[ix] else p:=nil;
+end;
+
+procedure GetNextNode(var ptr:pointer; out peer:tPeerPub);
+ begin
+ if ptr=nil then begin ptr:=GetMem(sizeof(tPeerList)); tPeerList(ptr^).Init end;
+ with tPeerList(ptr^) do begin
+  Next; if assigned(bkt)  then peer:=bkt^.peer[ix]
+  else peer.addr.clear end end;
+procedure DoneGetNextNode(var ptr:pointer);
+begin FreeMem(ptr,sizeof(tPeerList)); ptr:=nil; end;
 
 {Messages:
  a)Request: op, SendID, TargetID, caps, adt
@@ -262,8 +293,7 @@ procedure RecvRequest(msg:tSMsg);
  var rID:^tPID;
  var caps:byte;
  var r:tMemoryStream;
- var bkt:^tBucket;
- var i,li:byte;
+ var list:tPeerList;
  var SendCnt:byte;
  begin
  s.skip(1);
@@ -273,40 +303,29 @@ procedure RecvRequest(msg:tSMsg);
  SendCnt:=0;
  //writeln('DHT: ',string(msg.source^),' Request for ',string(rID^));
  if not CheckNode(sID^,msg.source^) then exit;
- {Select peers only from The bucket,
-  if it is broken, send none, but still Ack}
- bkt:=FindBucket(rID^);
- r.Init(128);
- if assigned(bkt) then begin
+ list.Init(rID^);list.Next;
+ {TODO: sometimes it is better to send answer directly}
+ {if assigned(list.bkt) then begin}
+  r.Init(128);
   r.WriteByte(opcode.dhtSelect);
   r.WriteByte(caps);
   r.Write(msg.Source^,sizeof(tNetAddr));
   r.Write(rID^,20);
   r.Write(MyID,20);
   if (s.RdBufLen>0)and(s.RdBufLen<=8) then r.Write(s.RdBuf^,s.RdBufLen);
-  for i:=1 to high(tBucket.peer) do begin
-   if bkt^.peer[i].addr.isNil then continue;
-   if bkt^.peer[i].addr=msg.source^ then continue;
-   if bkt^.peer[i].ReqDelta>1 then continue;
-   //writeln('-> Select to ',string(bkt^.peer[i].addr));
-   SendMessage(r.base^,r.length,bkt^.peer[i].addr);
-   li:=i;
-   Inc(SendCnt);
-  end;
-  while SendCnt<4 do begin
-   GetNextNode(bkt,li,rID^,3,false);
-   if not assigned(bkt) then break;
-   SendMessage(r.base^,r.length,bkt^.peer[li].addr);
-   Inc(SendCnt);
-  end;
-  r.Seek(0);
-  r.Trunc;
- end
-  //else writeln('-> empty bucket')
-  ;
- r.WriteByte(opcode.dhtReqAck);
+ {end
+  else writeln('-> empty bucket')
+ ;}
+ while SendCnt<4 do begin
+  if not assigned(list.bkt) then break; {simply no more peers}
+  //writeln('-> Select to ',string(list.p^.addr));
+  SendMessage(r.base^,r.length,list.p^.addr);
+  Inc(SendCnt); list.Next;
+ end;
+ r.Seek(0);
+ r.Trunc;
+ r.WriteByte(opcode.dhtWazzup);
  r.Write(MyID,20);
- //writeln('-> ReqAck to ',string(msg.Source^));
  SendMessage(r.base^,r.length,msg.source^);
  FreeMem(r.base,r.size);
 end;
@@ -323,16 +342,6 @@ procedure SendRequest(const contact:tNetAddr; const forid: tPID; caps:byte);
  FreeMem(r.base,r.size);
 end;
 
-procedure RecvReqAck(msg:tSMsg);
- var s:tMemoryStream absolute msg.stream;
- var hID:^tPID;
- begin
- s.skip(1);
- hID:=s.ReadPtr(20);
- //writeln('DHT: ',string(msg.source^),' is ',string(hID^),' (ReqAck)');
- CheckNode(hID^,msg.source^);
-end;
-
 procedure RecvWazzup(msg:tSMsg);
  var s:tMemoryStream absolute msg.stream;
  var hID:^tPID;
@@ -347,6 +356,7 @@ end;
 procedure NodeBootstrap(const contact:tNetAddr);
  begin
  SendRequest(contact,MyID,0);
+ SendRequest(contact,MyID,0); {xD}
 end;
 
 procedure RecvSelect(msg:tSMsg);
@@ -362,6 +372,7 @@ procedure RecvSelect(msg:tSMsg);
  rID:=s.ReadPtr(20);
  sID:=s.ReadPtr(20);
  if CheckNode(sID^,msg.source^) then exit;
+ {TODO: if we can answer the request, JUST DO IT}
  //writeln('DHT: ',string(msg.source^),' Select for ',string(addr^));
  if rID^=MyID then begin
   //writeln('-> self');
@@ -379,7 +390,7 @@ procedure tBucket.Refresh;
  var my,rtr,stich:boolean;
  var i,ol,rv:byte;
  var wait:LongWord;
- var rvb:^tBucket;
+ var list:tPeerList;
  procedure lSend(var peer:tPeer; const trg:tPID);
   begin
   SendRequest(peer.Addr,trg,0);
@@ -410,15 +421,12 @@ procedure tBucket.Refresh;
  end;
  {try to recover bucket full of bad nodes}
  if (ol=0){and(not rtr)} then begin
-  rv:=0; rvb:=@self;
-  GetNextNode(rvb,rv,prefix,desperate,false);
-  if not assigned(rvb) then begin
-   rv:=0; rvb:=Table; {in extreme cases, try the whole table}
-   GetNextNode(rvb,rv,prefix,desperate,true);
-  end;
-  if assigned(rvb) then begin
-   writeln('DHT: Recover ',string(prefix),'/',depth,' try ',copy(string(rvb^.peer[rv].id),1,6),string(rvb^.peer[rv].addr));
-   lSend(rvb^.peer[rv],prefix);
+  list.Init(Prefix);
+  list.bans:=true;
+  list.maxRD:=desperate; list.Next;
+  if assigned(list.bkt) then begin
+   writeln('DHT: Recover ',string(prefix),'/',depth,' try ',copy(string(list.p^.id),1,6),string(list.p^.addr));
+   lSend(list.p^,prefix);
   end else inc(desperate);
  end else desperate:=3;
  if my
@@ -460,6 +468,6 @@ end;
 BEGIN
  SetMsgHandler(opcode.dhtRequest,@recvRequest);
  SetMsgHandler(opcode.dhtSelect,@recvSelect);
- SetMsgHandler(opcode.dhtReqAck,@recvReqAck);
+ SetMsgHandler(opcode.dhtReqAck,@recvWazzup);{deprecated}
  SetMsgHandler(opcode.dhtWazzup,@recvWazzup);
 END.
