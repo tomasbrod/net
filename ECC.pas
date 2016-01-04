@@ -10,6 +10,7 @@ type tPoWRec=packed record
 
 var SecretKey:ed25519.tKey64;
 var PublicKey:tEccKey;
+var PublicKeyHash:tSHA1Digest;
 var PublicPoW:tPoWRec;
 var ZeroDigest:tSha1Digest;
 const cDig3PowMask=%0010;
@@ -125,6 +126,7 @@ end;
 procedure DerivePublic;
  begin
  CreatekeyPair(PublicKey,SecretKey);
+ PublicKeyHash:=SHA1Buffer(PublicKey,sizeof(PublicKey));
 end;
 
 operator :=(k:tEccKey) s:string;
