@@ -25,9 +25,20 @@ procedure NodeBootstrap(const contact:tNetAddr);
 procedure GetNextNode(var ptr:pointer; out peer:tPeerPub);
 procedure DoneGetNextNode(var ptr:pointer);
 procedure InsertNode(const peer:tPeerPub);
+type tSearch=object
+  callback:procedure of object;
+  caps:byte;
+  extra:pointer; extralen:word;
+  target:tPID;
+  procedure Start;
+  procedure Cancel;
+ end; tSearch_ptr=^tSearch;
+function NewSearch:tSearch_ptr;
 
 IMPLEMENTATION
 uses ServerLoop,Chat,MemStream,opcode,sha1,ecc,CRAuth;
+
+{## LOW LEVEL ROUTINES AND DATA STORAGE ##}
 
 type
  tPeer=object(tPeerPub)
@@ -45,7 +56,6 @@ type
    Depth:  byte;
    peer:   array [1..4] of tPeer;
    ModifyTime: tMTime;
-   //ll: ^tll;
    desperate:word;
    next: ^tBucket;
    function MatchPrefix(const tp:tFID):boolean;
@@ -279,6 +289,8 @@ procedure GetNextNode(var ptr:pointer; out peer:tPeerPub);
 procedure DoneGetNextNode(var ptr:pointer);
 begin FreeMem(ptr,sizeof(tPeerList)); ptr:=nil; end;
 
+{## NETWORK MESSAGES ##}
+
 {Messages:
  a)Request: op, SendID, TargetID, caps, adt
  b)Select : op, caps, addr, TargetID, OrigID, adt (66) [ ]
@@ -305,7 +317,7 @@ procedure RecvRequest(msg:tSMsg);
  if not CheckNode(sID^,msg.source^) then exit;
  list.Init(rID^);
  {TODO: sometimes it is better to send answer directly}
- {if assigned(list.bkt) then begin}
+ (*if assigned(list.bkt) then begin*)
   r.Init(128);
   r.WriteByte(opcode.dhtSelect);
   r.WriteByte(caps);
@@ -313,9 +325,9 @@ procedure RecvRequest(msg:tSMsg);
   r.Write(rID^,20);
   r.Write(MyID,20);
   if (s.RdBufLen>0)and(s.RdBufLen<=8) then r.Write(s.RdBuf^,s.RdBufLen);
- {end
+ (*end
   else writeln('-> empty bucket')
- ;}
+ ;*)
  while SendCnt<4 do begin
   list.Next;
   if not assigned(list.bkt) then break; {simply no more peers}
@@ -352,7 +364,7 @@ procedure RecvWazzup(msg:tSMsg);
  hID:=s.ReadPtr(20);
  //writeln('DHT: ',string(msg.source^),' is ',string(hID^),' (Wazzup)');
  if CheckNode(hID^,msg.source^) then
- {UpdateSearch(hID^,msg.source^)};
+ (*UpdateSearch(hID^,msg.source^)*);
 end;
 
 procedure NodeBootstrap(const contact:tNetAddr);
@@ -422,7 +434,7 @@ procedure tBucket.Refresh;
   lSend(peer[ol],MyID);
  end;
  {try to recover bucket full of bad nodes}
- if (ol=0){and(not rtr)} then begin
+ if (ol=0)(*and(not rtr)*) then begin
   list.Init(Prefix);
   list.bans:=true;
   list.maxRD:=desperate; list.Next;
@@ -441,6 +453,8 @@ end;
 {to bootstrap: ping address to get ID and insert to bucket/il
 ping may get lost: separate bootstrap unit :)
 now jut Ass-U-Me wont get lost}
+
+{## ECC AUTHENTICATION AND PROOF OF WORK VALIDATION ##}
 
 procedure VerifyInit(b:tBucket_ptr; i:byte);
  begin
@@ -466,6 +480,87 @@ procedure tPeer.VerifyCallback;
  end;
  Verify:=nil; {it will free itelf}
 end;
+
+{## LOW LEVEL SEARCH ROUTINES AND DATA STRUCTURES ##}
+
+type
+ tSearch2_ptr=^tSearch2;
+ tSearchNode_ptr=^tSearchNode;
+ tSearchNode=object(tPeerPub)
+   next:tSearchNode_ptr;
+   Tx:byte;
+   Rx:byte;
+   TxTime:tMTime;
+   score:byte;{cached}
+ end;
+ tSearch2=object(tSearch)
+   next,prev:tSearch2_ptr;
+   nodes:^tSearchNode; {sorted: high score first}
+   procedure Start;
+   procedure Step;
+   function Insert(const ID:tPID; const Addr:tNetAddr){inserted}:boolean;
+ end;
+
+var SearchList:^tSearch2;
+
+procedure tSearch2.Start;
+ var list:tPeerList;
+ begin
+ list.Init(Self.target);
+ list.MaxRD:=4;
+ list.Next;
+ nodes:=nil;
+ while assigned(list.p) do begin
+  Self.Insert(list.p^.ID,list.p^.Addr);
+  list.Next;
+ end;
+ ServerLoop.Shedule(1,@Step);
+end;
+
+function tSearch2.Insert(const ID:tPID; const Addr:tNetAddr) :boolean;
+ var cur:^tSearchNode;
+ var insat:^pointer;
+ var nscore:byte;
+ begin
+ result:=false;
+ insat:=@nodes;
+ cur:=nodes;
+ nscore:=PrefixLength(ID,Self.Target);
+ while assigned(cur) do begin
+  if (cur^.score=nscore)and(cur^.ID=ID) then begin
+   inc(cur^.Rx);
+   exit; {already}end;
+  if (cur^.score>nscore) then insat:=@cur^.next;
+  cur:=cur^.next;
+ end;
+ new(cur);
+ cur^.ID   :=    ID;
+ cur^.Addr :=  Addr;
+ cur^.Score:=nScore;
+ cur^.next:=insat^;
+ cur^.Tx:=0;
+ cur^.Rx:=1;
+ cur^.TxTime:=0;
+ insat^:=cur;
+end;
+
+procedure tSearch2.Step;
+ begin
+ {check full ID match (caps=0)}
+ if (Self.caps=0)and assigned(nodes) and (nodes^.score=160) then begin
+  {found}
+  Callback; exit
+ end;
+ {find next node to request}
+ {opts: not contacted recently, highscored, }
+ {TODO:}
+end;
+
+ {Start: Load from bucket Shedule(1,Step)
+  Step: check target and Callback,  SendRequest to someone in searchlist
+  OnReply: Add to SearchList and Step
+ }
+
 
 BEGIN
  SetMsgHandler(opcode.dhtRequest,@recvRequest);
