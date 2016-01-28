@@ -13,10 +13,11 @@ type t=object
  procedure Boot;
  procedure BootCmdline;
 end;
+{$note Add delay between boots}
 
 procedure t.BootCmdline;
  var addr:tNetAddr;
- var oi:word;
+ var oi,pdi:word;
  var cnt:word;
  const opt='-boot';
  begin
@@ -24,8 +25,8 @@ procedure t.BootCmdline;
  if oi>0 then begin
   cnt:=OptParamCount(oi);
   assert(cnt>=1,opt+'(addr+)');
-  for oi:=oi+1 to cnt do begin
-   addr.FromString(paramstr(oi+1));
+  for pdi:=1 to cnt do begin
+   addr.FromString(paramstr(oi+pdi));   
    DHT.NodeBootstrap(addr);
   end;
  end;
@@ -50,7 +51,7 @@ procedure t.Boot;
    readln(bs,line);
    try addr.FromString(line);
    except on eConvertError do begin
-    writeln('BootStatic: ConvertError ',line,' to tNetAddr');
+    writeln('BootStatic('+bsfn+'): ConvertError ',line,' to tNetAddr');
     continue;
    end end;
    DHT.NodeBootstrap(addr);

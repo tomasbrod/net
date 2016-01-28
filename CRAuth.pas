@@ -1,7 +1,7 @@
 unit CRAuth;
 {Challenge-Response Authenticator}
 INTERFACE
-USES NetAddr,ECC,SHA1,Chat,ServerLoop,MemStream,opcode;
+USES NetAddr,ECC,SHA512,Chat,ServerLoop,MemStream,opcode;
 type
  tAuth=object
   ch:tChat;
@@ -48,13 +48,13 @@ end;
 procedure tAuth.ReplyRes(msg:tSMsg; data:boolean);
  var r:tMemoryStream absolute msg.Stream;
  var status:byte;
- var resp:^tEccKey;
- var vresp:tSha1Digest;
+ var resp:^tSha512Digest;
+ var vresp:tSha512Digest;
  begin
  if not data then exit;
  status:=r.readbyte; {todo, set error (eg: unsuported meth)}
  r.Read(RemotePub,sizeof(tEccKey));
- resp:=r.readptr(sizeof(tEccKey));
+ resp:=r.readptr(sizeof(tSha512Digest));
  ECC.CreateResponse(Challenge,vresp,RemotePub);
  Valid:=CompareByte(resp^,vresp,sizeof(vresp))=0;
  if (status and 128)>0 then begin
@@ -125,13 +125,13 @@ procedure tServer.SendRep(msg:tSMsg; data:boolean);
  var ms:tMemoryStream;
  var ver:byte;
  var chal:^tEccKey;
- var resp:tSha1Digest;
+ var resp:tSha512Digest;
  begin
  ver:=r.ReadByte; {todo}
  r.Read(pub,sizeof(pub));
  chal:=r.readptr(sizeof(tEccKey));
  CreateResponse(chal^,resp,pub);
- ch^.StreamInit(ms,66); {todo}
+ ch^.StreamInit(ms,97); {todo}
  ms.WriteByte(128);
  ms.Write(PublicKey,sizeof(PublicKey));
  ms.Write(resp,sizeof(resp));

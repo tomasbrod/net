@@ -1,7 +1,7 @@
 unit ECC;
 
 INTERFACE
-uses ed25519,Sha1;
+uses ed25519,Sha512;
 type tEccKey=ed25519.tKey32;
 type tPoWRec=packed record
  data:ed25519.tKey32;
@@ -10,20 +10,19 @@ type tPoWRec=packed record
 
 var SecretKey:ed25519.tKey64;
 var PublicKey:tEccKey;
-var PublicKeyHash:tSHA1Digest;
 var PublicPoW:tPoWRec;
-var ZeroDigest:tSha1Digest;
+var ZeroDigest:tSha512Digest;
 const cDig3PowMask=%0010;
 const cPoWValidDays=5;
 const cTSEpoch=40179;
 procedure CreateChallenge(out Challenge: tEccKey);
-procedure CreateResponse(const Challenge: tEccKey; out Response: tSha1Digest; const srce:tEccKey);
+procedure CreateResponse(const Challenge: tEccKey; out Response: tSha512Digest; const srce:tEccKey);
 function VerifyPoW(const proof:tPoWRec; const RemotePub:tEccKey):boolean;
 
 operator :=(k:tEccKey) s:string;
 
 IMPLEMENTATION
-uses SysUtils,StrUtils,DateUtils;
+uses SysUtils,MemStream,DateUtils;
 
 procedure CreateChallenge(out Challenge: tEccKey);
  var i:byte;
@@ -31,30 +30,30 @@ procedure CreateChallenge(out Challenge: tEccKey);
  for i:=0 to 31 do challenge[i]:=Random(256);
 end;
 
-procedure CreateResponse(const Challenge: tEccKey; out Response: tSha1Digest; const srce:tEccKey);
+procedure CreateResponse(const Challenge: tEccKey; out Response: tSha512Digest; const srce:tEccKey);
  var Shared:tEccKey;
- var shactx:tSha1Context;
+ var shactx:tSha512Context;
  begin
  ed25519.SharedSecret(shared,srce,secretkey);
- Sha1Init(shactx);
- Sha1Update(shactx,challenge,sizeof(challenge));
- Sha1Update(shactx,shared,sizeof(shared));
- Sha1Final(shactx,Response);
+ Sha512Init(shactx);
+ Sha512Update(shactx,challenge,sizeof(challenge));
+ Sha512Update(shactx,shared,sizeof(shared));
+ Sha512Final(shactx,Response);
 end;
 
 var TSNow:LongWord;
 
 function VerifyPoW(const proof:tPoWRec; const RemotePub:tEccKey):boolean;
- var shactx:tSha1Context;
- var digest:tSha1Digest;
+ var shactx:tSha512Context;
+ var digest:tSha512Digest;
  var delta:Integer;
  begin
  delta:=TSNow-BEtoN(proof.stamp);
  if (delta<=cPoWValidDays) and (delta>=-1) then begin
- Sha1Init(shactx);
- Sha1Update(shactx,proof,sizeof(proof));
- Sha1Update(shactx,RemotePub,sizeof(RemotePub));
- Sha1Final(shactx,digest);
+ Sha512Init(shactx);
+ Sha512Update(shactx,proof,sizeof(proof));
+ Sha512Update(shactx,RemotePub,sizeof(RemotePub));
+ Sha512Final(shactx,digest);
  result:=(CompareByte(digest,ZeroDigest,3)=0)and((digest[3]and cDig3PoWMask)=0);
  end else result:=false;
 end;
@@ -68,6 +67,7 @@ procedure PoWLoadFromFile;
  read(f,PublicPoW);
  close(f);
 end;
+
 procedure PoWGenerate;
  var f:file of tPoWRec;
  var i:byte;
@@ -126,13 +126,12 @@ end;
 procedure DerivePublic;
  begin
  CreatekeyPair(PublicKey,SecretKey);
- PublicKeyHash:=SHA1Buffer(PublicKey,sizeof(PublicKey));
 end;
 
 operator :=(k:tEccKey) s:string;
  begin
  Setlength(s,64);
- BinToHex(@k,@s[1],32);
+ BinToHex(@s[1],k,32);
 end;
 
 BEGIN

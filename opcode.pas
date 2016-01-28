@@ -7,13 +7,9 @@ const {dgram opcode}
  otCtrl=9; {server->client}
  otData=8; {client->server}
  {10-16 reserved for dht}
- dht=10 deprecated;
  dhtRequest=10;
- dhtSelect=11;
- dhtReqAck=12;
- dhtWazzup=13;
- dhtResponse=14;
- dhtIndirect=15;
+ dhtPeers=11;
+ dhtCapable=16;
 const {chat init}
  upFileServer=2 deprecated;
  crAuthReq=3;

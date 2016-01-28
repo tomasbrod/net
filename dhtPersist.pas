@@ -1,6 +1,5 @@
 unit dhtPersist;
 {
-  Initialize DHT local node ID from file.
   Restore DHT routing table from file.
   Save DHT routing table on exit and periodically.
 }
@@ -8,7 +7,7 @@ unit dhtPersist;
 INTERFACE
 
 IMPLEMENTATION
-uses NetAddr,ServerLoop,DHT,SysUtils,Store1,ECC,SHA1;
+uses NetAddr,ServerLoop,DHT,SysUtils,ECC,SHA512;
 
 const ndfn='nodes.dat';
 const idfn='idhash.txt';
@@ -47,7 +46,7 @@ procedure Load;
  exit end;
  {need to read the file backwards}
  pos:=FileSize(nd);
- if pos=0 then exit;
+ if pos>0 then
  for pos:=pos-1 downto 0 do begin
   Seek(nd,pos);
   Read(nd,node);
@@ -55,54 +54,6 @@ procedure Load;
   dht.InsertNode(node);
  end;
  close(nd);
-end;
-
-procedure LoadID;
- var nd: TextFile;
- var line:string;
- begin
- assign(nd,idfn);
- try
-  ReSet(nd);
- except
-  writeln('dhtPersist: can not open id file ',idfn);
- exit end;
- readln(nd,line);
- writeln('dhtPersist: set ID to ',line,' from '+idfn);
- dht.MyID:=line;
- close(nd);
-end;
-
-procedure LoadIDFromECC;
- var id:dht.tPID;
- begin
- Move(ECC.PublicKey,id,20);
- writeln('dhtPersist: set ID to ',string(id),' from ECC');
- dht.MyID:=id;
-end;
-
-procedure LoadIDFromArgs;
- var oi:word;
- const opt='-id';
- begin
- oi:=OptIndex(opt);
- if oi>0 then begin
-  assert(OptParamCount(oi)=1,opt+'(pid:sha1)');
-  writeln('dhtPersist: set ID to '+paramstr(oi+1),' from '+opt);
-  MyID:=tPID(paramstr(oi+1));
- end;
-end;
-procedure LoadIDRandom;
- var oi:word;
- const opt='-id-rnd';
- var b:byte;
- begin
- oi:=OptIndex(opt);
- if oi>0 then begin
-  assert(OptParamCount(oi)=0,opt+'()');
-  for b:=0 to 19 do MyID[b]:=Random(256);
-  writeln('dhtPersist: set ID to ',string(MyID),' random');
- end;
 end;
 
 type t=object
@@ -130,10 +81,6 @@ end;
 
 procedure t.Init;
  begin
- (*LoadID*);
- LoadIDFromECC;
- LoadIDFromArgs;
- LoadIDRandom;
  Shedule(2000,@doSoon);
  Shedule(25000,@doPeriodic);
  {

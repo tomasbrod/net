@@ -6,14 +6,14 @@ unit DHT;
  old>new,
  new>dead
  TODO: weight nodes by IP-Address common prefix length.
- TODO: improve node selection
+ IMPR: REQ send 3 IDs close to trg, rcpt has>0 respond else select
 }
 
 {used by: messages, fileshare}
 
 INTERFACE
-uses NetAddr,Store1;
-type tPID=Store1.tFID; {reQ: ids can be shorter}
+uses NetAddr,Store2;
+type tPID=Store2.tFID; {reQ: ids can be shorter}
 type tPeerPub=object
    ID   :tPID;
    Addr :tNetAddr;
@@ -25,20 +25,9 @@ procedure NodeBootstrap(const contact:tNetAddr);
 procedure GetNextNode(var ptr:pointer; out peer:tPeerPub);
 procedure DoneGetNextNode(var ptr:pointer);
 procedure InsertNode(const peer:tPeerPub);
-type tSearch=object
-  callback:procedure of object;
-  caps:byte;
-  extra:pointer; extralen:word;
-  target:tPID;
-  procedure Start;
-  procedure Cancel;
- end; tSearch_ptr=^tSearch;
-function NewSearch:tSearch_ptr;
 
 IMPLEMENTATION
-uses ServerLoop,Chat,MemStream,opcode,sha1,ecc,CRAuth;
-
-{## LOW LEVEL ROUTINES AND DATA STORAGE ##}
+uses ServerLoop,Chat,MemStream,opcode,ECC,sha512,CRAuth;
 
 type
  tPeer=object(tPeerPub)
@@ -56,6 +45,7 @@ type
    Depth:  byte;
    peer:   array [1..4] of tPeer;
    ModifyTime: tMTime;
+   //ll: ^tll;
    desperate:word;
    next: ^tBucket;
    function MatchPrefix(const tp:tFID):boolean;
@@ -289,64 +279,47 @@ procedure GetNextNode(var ptr:pointer; out peer:tPeerPub);
 procedure DoneGetNextNode(var ptr:pointer);
 begin FreeMem(ptr,sizeof(tPeerList)); ptr:=nil; end;
 
-{## NETWORK MESSAGES ##}
-
 {Messages:
  a)Request: op, SendID, TargetID, caps, adt
- b)Select : op, caps, addr, TargetID, OrigID, adt (66) [ ]
-          : op, caps, addr, TatgetID, SendID, adt (66) [*]
- c)Ack    : op, SenderID
- d)Wazzup : op, SenderID
+ b)Peers  : op, SendID, [addr, ID]
+ c)Capable: ?
 }
 
 procedure RecvRequest(msg:tSMsg);
- var s:tMemoryStream absolute msg.stream;
- var sID:^tPID;
- var rID:^tPID;
- var caps:byte;
- var r:tMemoryStream;
- var list:tPeerList;
- var SendCnt:byte;
- begin
- s.skip(1);
- sID:=s.ReadPtr(20);
- rID:=s.ReadPtr(20);
- caps:=s.ReadByte;
- SendCnt:=0;
- //writeln('DHT: ',string(msg.source^),' Request for ',string(rID^));
- if not CheckNode(sID^,msg.source^) then exit;
- list.Init(rID^);
- {TODO: sometimes it is better to send answer directly}
- (*if assigned(list.bkt) then begin*)
-  r.Init(128);
-  r.WriteByte(opcode.dhtSelect);
-  r.WriteByte(caps);
-  r.Write(msg.Source^,sizeof(tNetAddr));
-  r.Write(rID^,20);
+  var s:tMemoryStream absolute msg.stream;
+  var sID:^tPID;
+  var Target:^tPID;
+  var caps:byte;
+  var r:tMemoryStream;
+  var list:tPeerList;
+  begin
+  s.skip(1);
+  sID:=s.ReadPtr(20);
+  Target:=s.ReadPtr(20);
+  caps:=s.ReadByte;
+  //writeln('DHT: ',string(msg.source^),' Request for ',string(Target^));
+  if not CheckNode(sID^,msg.source^) then exit;
+  list.Init(Target^);
+  {TODO: sometimes it is better to send answer directly}
+  r.Init(197);
+  r.WriteByte(opcode.dhtPeers);
   r.Write(MyID,20);
-  if (s.RdBufLen>0)and(s.RdBufLen<=8) then r.Write(s.RdBuf^,s.RdBufLen);
- (*end
-  else writeln('-> empty bucket')
- ;*)
- while SendCnt<4 do begin
-  list.Next;
-  if not assigned(list.bkt) then break; {simply no more peers}
-  //writeln('-> Select to ',string(list.p^.addr));
-  if list.p^.addr=msg.source^ then continue;
-  SendMessage(r.base^,r.length,list.p^.addr);
-  Inc(SendCnt);
- end;
- r.Seek(0);
- r.Trunc;
- r.WriteByte(opcode.dhtWazzup);
- r.Write(MyID,20);
- SendMessage(r.base^,r.length,msg.source^);
- FreeMem(r.base,r.size);
+  while r.WrBufLen>=44 do begin
+    list.Next;
+    if not assigned(list.bkt) then break; {simply no more peers}
+    //writeln('-> Select to ',string(list.p^.addr));
+    if list.p^.addr=msg.source^ then continue;
+    r.Write(list.p^.Addr,24);
+    r.Write(list.p^.ID,20);
+  end;
+  SendMessage(r.base^,r.length,msg.source^);
+  FreeMem(r.base,r.size);
 end;
 
 procedure SendRequest(const contact:tNetAddr; const forid: tPID; caps:byte);
  var r:tMemoryStream;
  begin
+ //writeln('DHT: Request to ',string(contact),' for ',string(forid),' caps=',caps);
  r.Init(42);
  r.WriteByte(opcode.dhtRequest);
  r.Write(MyID,sizeof(tFID));
@@ -356,47 +329,27 @@ procedure SendRequest(const contact:tNetAddr; const forid: tPID; caps:byte);
  FreeMem(r.base,r.size);
 end;
 
-procedure RecvWazzup(msg:tSMsg);
- var s:tMemoryStream absolute msg.stream;
- var hID:^tPID;
- begin
- s.skip(1);
- hID:=s.ReadPtr(20);
- //writeln('DHT: ',string(msg.source^),' is ',string(hID^),' (Wazzup)');
- if CheckNode(hID^,msg.source^) then
- (*UpdateSearch(hID^,msg.source^)*);
+procedure RecvPeers(msg:tSMsg);
+  var s:tMemoryStream absolute msg.stream;
+  var ID:^tPID;
+  var Addr:^tNetAddr;
+  begin
+  s.skip(1);
+  ID:=s.ReadPtr(20);
+  //writeln('DHT: ',string(msg.source^),' is ',string(ID^),' Peers');
+  if not CheckNode(ID^,msg.source^) then exit;
+  while s.RdBufLen>44 do begin
+    Addr:=s.ReadPtr(24);
+    ID:=s.ReadPtr(20);
+    CheckNode(ID^,Addr^);
+  end;
+ {UpdateSearch(hID^,msg.source^)};
 end;
 
 procedure NodeBootstrap(const contact:tNetAddr);
  begin
  SendRequest(contact,MyID,0);
  SendRequest(contact,MyID,0); {xD}
-end;
-
-procedure RecvSelect(msg:tSMsg);
- var s:tMemoryStream absolute msg.stream;
- var caps:byte;
- var addr:^tNetAddr;
- var rID,sID:^tPID;
- var r:tMemoryStream;
- begin
- s.skip(1);
- caps:=s.ReadByte;
- addr:=s.ReadPtr(sizeof(tNetAddr));
- rID:=s.ReadPtr(20);
- sID:=s.ReadPtr(20);
- if CheckNode(sID^,msg.source^) then exit;
- {TODO: if we can answer the request, JUST DO IT}
- //writeln('DHT: ',string(msg.source^),' Select for ',string(addr^));
- if rID^=MyID then begin
-  //writeln('-> self');
- exit end;
- r.Init(21);
- r.WriteByte(opcode.dhtWazzup);
- r.Write(MyID,20);
- //writeln('-> Wazzup to ',string(addr^));
- SendMessage(r.base^,r.length,addr^);
- FreeMem(r.base,r.size);
 end;
 
 const cStichRar=10;
@@ -418,7 +371,7 @@ procedure tBucket.Refresh;
  for i:=1 to high(tBucket.peer)
   do if (not peer[i].Addr.isNil) and (not peer[i].Ban) then begin
    if peer[i].ReqDelta>0 then begin
-    if (peer[i].ReqDelta<=3)xor stich then begin
+    if (peer[i].ReqDelta<=3)xor stich then begin {$warning magic constants}
      {this will get rid of half-dead nodes}
      writeln('DHT: Refresh (R',peer[i].ReqDelta,') ',copy(string(peer[i].id),1,6),string(peer[i].addr));
      lSend(peer[i],prefix);
@@ -434,7 +387,7 @@ procedure tBucket.Refresh;
   lSend(peer[ol],MyID);
  end;
  {try to recover bucket full of bad nodes}
- if (ol=0)(*and(not rtr)*) then begin
+ if (ol=0){and(not rtr)} then begin
   list.Init(Prefix);
   list.bans:=true;
   list.maxRD:=desperate; list.Next;
@@ -454,8 +407,6 @@ end;
 ping may get lost: separate bootstrap unit :)
 now jut Ass-U-Me wont get lost}
 
-{## ECC AUTHENTICATION AND PROOF OF WORK VALIDATION ##}
-
 procedure VerifyInit(b:tBucket_ptr; i:byte);
  begin
  with b^.peer[i] do begin
@@ -467,104 +418,26 @@ procedure VerifyInit(b:tBucket_ptr; i:byte);
  end
 end;
 procedure tPeer.VerifyCallback;
+ var PubHash:tPID;
  begin
  if Verify^.error>0 then begin
   writeln('DHT: Verificator error ',string(Addr),Verify^.error);
   ReqDelta:=3;
- end else
- if Verify^.Valid and Verify^.PowValid and (CompareWord(ID,Verify^.RemotePub,10)=0) then
+ end else begin
+ Sha512Buffer(Verify^.RemotePub,sizeof(tEccKey),PubHash,sizeof(PubHash));
+ if Verify^.Valid and Verify^.PowValid and (CompareWord(ID,PubHash,10)=0) then
   Ban:=false
  else begin
   Ban:=true;
   writeln('DHT: Verificator failed for ',string(Addr),Verify^.Valid,Verify^.PoWValid,Verify^.error);
- end;
+ end; end;
  Verify:=nil; {it will free itelf}
 end;
 
-{## LOW LEVEL SEARCH ROUTINES AND DATA STRUCTURES ##}
-
-type
- tSearch2_ptr=^tSearch2;
- tSearchNode_ptr=^tSearchNode;
- tSearchNode=object(tPeerPub)
-   next:tSearchNode_ptr;
-   Tx:byte;
-   Rx:byte;
-   TxTime:tMTime;
-   score:byte;{cached}
- end;
- tSearch2=object(tSearch)
-   next,prev:tSearch2_ptr;
-   nodes:^tSearchNode; {sorted: high score first}
-   procedure Start;
-   procedure Step;
-   function Insert(const ID:tPID; const Addr:tNetAddr){inserted}:boolean;
- end;
-
-var SearchList:^tSearch2;
-
-procedure tSearch2.Start;
- var list:tPeerList;
- begin
- list.Init(Self.target);
- list.MaxRD:=4;
- list.Next;
- nodes:=nil;
- while assigned(list.p) do begin
-  Self.Insert(list.p^.ID,list.p^.Addr);
-  list.Next;
- end;
- ServerLoop.Shedule(1,@Step);
-end;
-
-function tSearch2.Insert(const ID:tPID; const Addr:tNetAddr) :boolean;
- var cur:^tSearchNode;
- var insat:^pointer;
- var nscore:byte;
- begin
- result:=false;
- insat:=@nodes;
- cur:=nodes;
- nscore:=PrefixLength(ID,Self.Target);
- while assigned(cur) do begin
-  if (cur^.score=nscore)and(cur^.ID=ID) then begin
-   inc(cur^.Rx);
-   exit; {already}end;
-  if (cur^.score>nscore) then insat:=@cur^.next;
-  cur:=cur^.next;
- end;
- new(cur);
- cur^.ID   :=    ID;
- cur^.Addr :=  Addr;
- cur^.Score:=nScore;
- cur^.next:=insat^;
- cur^.Tx:=0;
- cur^.Rx:=1;
- cur^.TxTime:=0;
- insat^:=cur;
-end;
-
-procedure tSearch2.Step;
- begin
- {check full ID match (caps=0)}
- if (Self.caps=0)and assigned(nodes) and (nodes^.score=160) then begin
-  {found}
-  Callback; exit
- end;
- {find next node to request}
- {opts: not contacted recently, highscored, }
- {TODO:}
-end;
-
- {Start: Load from bucket Shedule(1,Step)
-  Step: check target and Callback,  SendRequest to someone in searchlist
-  OnReply: Add to SearchList and Step
- }
-
-
 BEGIN
- SetMsgHandler(opcode.dhtRequest,@recvRequest);
- SetMsgHandler(opcode.dhtSelect,@recvSelect);
- SetMsgHandler(opcode.dhtReqAck,@recvWazzup);{deprecated}
- SetMsgHandler(opcode.dhtWazzup,@recvWazzup);
+  assert((sizeof(tNetAddr)+sizeof(tPID))=44);
+  SetMsgHandler(opcode.dhtRequest,@recvRequest);
+  SetMsgHandler(opcode.dhtPeers,@recvPeers);
+  Sha512Buffer(PublicKey,sizeof(PublicKey),MyID,sizeof(MyID));
+  writeln('DHT: set ID to ',string(MyID),' from ECC');
 END.
