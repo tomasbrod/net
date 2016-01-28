@@ -58,7 +58,7 @@ uses SysUtils;
 procedure tChat.Init(const iremote:tNetAddr);
  begin
  remote:=iremote;
- opcode:=128+Random(128);
+ opcode:=128+Random(128); {$warning possible overflow}
  while ServerLoop.IsMsgHandled(opcode,remote) do inc(opcode);
  InitFrom(remote,opcode);
 end;
