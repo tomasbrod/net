@@ -2,6 +2,9 @@ unit MemStream;
 
 INTERFACE
 uses SysUtils;
+
+procedure BinToHex(hexValue:pChar; const orig; len:word);
+
 type tMemoryStream=object
  length: LongWord;
  size: LongWord;
@@ -32,6 +35,10 @@ type tMemoryStream=object
 type eInvalidMemStreamAccess=class(Exception)
  {no details jet}
 end;
+type eReadPastEoF=class(Exception)
+ {no details jet}
+end;
+
 
 IMPLEMENTATION
 
@@ -48,7 +55,7 @@ end;
 
 procedure tMemoryStream.Read(var buf; cnt:Word);
  begin
- if (position+cnt)>length then raise eInvalidMemStreamAccess.Create('Read out of bounds');
+ if (position+cnt)>length then raise eReadPastEoF.Create('Read out of bounds');
  Move((base+position)^,buf,cnt);
  position:=position+cnt;
 end;
@@ -68,7 +75,7 @@ function  tMemoryStream.ReadWord(cnt:byte): LongWord;
  var i:byte;
  begin
  FillChar(tm,4,0);
- if (position+cnt)>length then raise eInvalidMemStreamAccess.Create('Read out of bounds');
+ if (position+cnt)>length then raise eReadPastEoF.Create('Read out of bounds');
  for i:=cnt-1 downto 0 do begin
   tm[i]:=byte((base+position)^);
   inc(position);
@@ -137,6 +144,19 @@ function tMemoryStream.RDBufLen:LongWord;
  begin result:=length-position end;
 procedure tMemoryStream.RDEnd(used:LongWord);
  begin skip(used) end;
+
+const
+  HexTbl: array[0..15] of char='0123456789ABCDEF';
+procedure BinToHex(hexValue:pChar; const orig; len:word);
+ var i:word;
+ var b:array [byte] of byte absolute orig;
+ begin
+ dec(len);
+ for i:=0 to len do begin
+  hexValue[i*2+0]:=HexTbl[b[i] shr 4];
+  hexValue[i*2+1]:=HexTbl[b[i] and 15];
+ end;
+end;
 
 END.
 
