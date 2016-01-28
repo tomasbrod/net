@@ -46,6 +46,7 @@ var iNow:tTimeVal;
 var mNow:tMTime; { miliseconds since start }
                   {overflows in hunderd hours }
 function GetMTime:tMTime;
+procedure SetThreadName(name:pchar);
 
 IMPLEMENTATION
 
@@ -252,6 +253,15 @@ function GetMTime:tMTime;
  {$ELSE}{$ERROR Not Implemented on non unix}
  begin GetMTime:=0;
 {$ENDIF}end;
+
+{$IFDEF Linux}
+function prctl( option:cint; arg2,arg3,arg4,arg5:culong):cint; cdecl; external;
+const PR_SET_NAME=15;
+{$ENDIF}
+procedure SetThreadName(name:pchar);
+{$IFDEF Linux} begin prctl(PR_SET_NAME,culong(pchar(name)),0,0,0)
+{$ELSE}begin{$NOTE Custom thread mames not supported}
+{$ENDIF} end;
 
 procedure ShedRun;
  var cur:^tSheduled;
