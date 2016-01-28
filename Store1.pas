@@ -1,4 +1,4 @@
-UNIT Store1;
+UNIT Store1 deprecated;
 {Take tracks of files in store}
 {just simple, no cleaning, etc}
 INTERFACE
