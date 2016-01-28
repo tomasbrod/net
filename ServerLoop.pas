@@ -45,11 +45,13 @@ type tMTime=DWORD;
 var iNow:tTimeVal;
 var mNow:tMTime; { miliseconds since start }
                   {overflows in hunderd hours }
+function GetMTime:tMTime;
 
 IMPLEMENTATION
 
 USES SysUtils,BaseUnix
      ,Unix
+     ,Linux
      ;
 
 {aim for most simple implementation, since could be extended anytime}
@@ -74,9 +76,8 @@ type tSheduled_ptr=^tSheduled; tSheduled=record
  end;
 var ShedTop: ^tSheduled;
 var ShedUU: ^tSheduled;
-var LastShed: UnixType.timeval;
+var LastShed: tMTime;
 var PollTimeout:LongInt;
-var umNow:integer;
 
 procedure SC(fn:pointer; retval:cint);
  begin
@@ -238,26 +239,31 @@ function DoSock(var p:tPollFD):boolean;
  end;
 end;
 
+var GetMTimeOffset:QWORD=0;
+function GetMTime:tMTime;
+ {$IFDEF UNIX}
+ var time:UnixType.timespec;
+ var trans:QWORD;
+ begin
+ assert(clock_gettime(CLOCK_MONOTONIC,@time)=0);
+ trans:=(time.tv_sec*1000)+(time.tv_nsec div 1000000);
+ trans:=(trans-GetMTimeOffset);
+ GetMTime:=trans and $FFFFFFFF;
+ {$ELSE}{$ERROR Not Implemented on non unix}
+ begin GetMTime:=0;
+{$ENDIF}end;
+
 procedure ShedRun;
  var cur:^tSheduled;
  var pcur:^pointer;
- var now:UnixType.timeval{ absolute iNow};
  var delta:LongWord;
- var delta_us:LongInt;
  var tasks:word;
  begin
  {Sheduling}
  {gmagic with delta-time, increment mNow, ...}
- fpgettimeofday(@Now,nil);
- delta:=(Now.tv_sec-LastShed.tv_sec);
- delta_us:=Now.tv_usec-LastShed.tv_usec;
- delta:=(delta*1000)+(delta_us div 1000);
- umNow:=umNow+(delta_us mod 1000);
- if delta>6000 then delta:=5000;
- LastShed:=Now;
- mNow:=mNow+Delta;
- if umNow>1000 then begin inc(mNow); dec(umNow,1000) end;
- if umNow<-1000 then begin dec(mNow); inc(umNow,1000) end;
+ mNow:=GetMTime;
+ delta:=mNow-LastShed;
+ LastShed:=mNow;
  //writeln('DeltaTime: ',delta);
  {first tick all tasks}
  tasks:=0;
@@ -410,7 +416,6 @@ var nb:array [0..0] of byte;
 BEGIN
  writeln('ServerLoop: BrodNetD');
  mNow:=0;
- umNow:=0;
  Randomize;
  fpSignal(SigInt,@SignalHandler);
  fpSignal(SigTerm,@SignalHandler);
@@ -420,7 +425,8 @@ BEGIN
  pollTop:=1; {1 for basic listen}
  ShedTop:=nil;
  ShedUU:=nil; {todo: allocate a few to improve paging}
- fpgettimeofday(@LastShed,nil);
+ GetMTimeOffset:=GetMTime;
+ LastShed:=GetMTime;
  if OptIndex('-h')>0 then DoShowOpts:=true;
  OnTerminate:=nil;
  Flush(OUTPUT);
