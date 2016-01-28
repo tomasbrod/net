@@ -3,7 +3,6 @@ unit sha512;
 interface
 
 {$PACKRECORDS C}
-{$L ed25519/sha512.o}
 
 type
  tsha512context = record
@@ -20,7 +19,27 @@ function sha512update(var md:tsha512context; const buf; buflen:LongWord):longint
  cdecl; external name 'sha512_update';
 function sha512final(var md:tsha512context; out digest:tsha512digest):longint;
  cdecl; external name 'sha512_final';
+function sha512final(var md:tsha512context; out digest; len:word):longint;
+ overload; {truncated to len bytes}
+procedure SHA512Buffer(const Buf; BufLen: LongWord; out digest; digestlen:word );
 
 implementation
+
+{$L ed25519/sha512.o}
+
+function sha512final(var md:tsha512context; out digest; len:word):longint;
+  var full:tSha512Digest;
+  begin
+  result:=sha512final(md, full);
+  if result=0 then Move({source}full,{dest}digest,len);
+end;
+
+procedure SHA512Buffer(const Buf; BufLen: LongWord; out digest; digestlen:word );
+  var ctx:tSha512context;
+  begin
+  sha512init(ctx);
+  sha512update(ctx, buf, buflen);
+  sha512final(ctx,digest,digestlen);
+end;
 
 end.

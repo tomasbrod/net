@@ -5,9 +5,8 @@ uses cthreads,ServerLoop
 	,TestWatch
 	,TestChat
 	,AsyncProcess
-	,Upload
-	,Download
-	,TestFS
+	,OTServer
+ 	,ObjTrans
 	,dht
 	,dhtBootStatic
 	,dhtPersist

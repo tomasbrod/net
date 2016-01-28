@@ -2,43 +2,29 @@ UNIT opcode;
 INTERFACE
 
 const {dgram opcode}
- tcdata=4;
- tcdataimm=6;
- tccont=5;
- tceack=7;
- tcdata_no_report=8 unimplemented;
+ {4-8 for TC deprecated}
+ {8-9 for ObjectTransfer}
+ otCtrl=9; {server->client}
+ otData=8; {client->server}
  {10-16 reserved for dht}
- dht=10 deprecated;
  dhtRequest=10;
- dhtSelect=11;
- dhtReqAck=12;
- dhtWazzup=13;
- dhtResponse=14;
- dhtIndirect=15;
+ dhtPeers=11;
+ dhtCapable=16;
 const {chat init}
- upFileServer=2;
+ upFileServer=2 deprecated;
  crAuthReq=3;
- testChat=32; 
-const {FS opcodes}
- {c}upOPEN=7;
- {s}upINFO=8;
- {s}upFAIL=9;
- {c}upLSEG=10;
- {s}upUNAVL=11;
- {c}upSTOP=13;
- {c}upCLOSE=14;
- {c}upWEIGHT=15;
- {s}upEPROTO=16;
- {s}upDONE=17;
- {s}upSEGOK=18;
- upErrMalformed=1;
- upErrHiChan=2;
- upErrChanInUse=3;
- upErrNotFound=4;
- upErrIO=5;
- upErrSegNoGet=6;
- upErrNotOpen=7;
- upErrTroll=99;
+ testChat=32;
+const {ObjectTransfer magic numbers}
+ otSPEED=1; {control type speed report}
+ otSIACK=2; {control type size increase ack}
+ otFin=3;   {control type finish}
+ otReq=$80; {control type request}
+ otInfo=$80;      {DataLineEscape type Info}
+ otFail=otInfo+1; {DLE type ServerFail}
+ otNotFound=otInfo+2; {DLE type ObjectNotFound}
+ otEoT=otInfo+3;  {DLE type End Off Transmission}
+ otSINC=otInfo+4; {DLE Explicit Ack Request}
+ otRateInfo=otInfo+5; {DLE Rate Adjust Debug info}
 
 IMPLEMENTATION
 END.

@@ -13,7 +13,7 @@
 
  **********************************************************************}
 
-unit sha1;
+unit sha1 deprecated 'use truncated sha512';
 {$mode objfpc}{$h+}
 
 interface
