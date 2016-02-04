@@ -12,22 +12,25 @@ unit DHT;
 {used by: messages, fileshare}
 
 INTERFACE
-uses NetAddr,Store2;
-type tPID=Store2.tFID; {reQ: ids can be shorter}
-type tPeerPub=object
-   ID   :tPID;
-   Addr :tNetAddr;
-   //function IsGood
-   //function GetAge
- end;
-var MyID:tPID;
+uses ServerLoop,NetAddr,Store2;
+type
+  tPID=Store2.tFID; {reQ: ids can be shorter}
+  tPeerPub=object
+    ID   :tPID;
+    Addr :tNetAddr;
+    end;
+
+var MyID: tPID;
+var OnNewPeer: procedure(const ID: tPID; const Addr:tNetAddr; rpc:boolean)=nil;
 procedure NodeBootstrap(const contact:tNetAddr);
+procedure GetFirstNode(var ptr:pointer; const Target:tPID);
 procedure GetNextNode(var ptr:pointer; out peer:tPeerPub);
 procedure DoneGetNextNode(var ptr:pointer);
 procedure InsertNode(const peer:tPeerPub);
+function PrefixLength(const a,b:tFID):byte;
 
 IMPLEMENTATION
-uses ServerLoop,Chat,MemStream,opcode,ECC,sha512,CRAuth;
+uses Chat,MemStream,opcode,ECC,sha512,CRAuth;
 
 type
  tPeer=object(tPeerPub)
@@ -276,13 +279,14 @@ procedure GetNextNode(var ptr:pointer; out peer:tPeerPub);
  with tPeerList(ptr^) do begin
   Next; if assigned(bkt)  then peer:=bkt^.peer[ix]
   else peer.addr.clear end end;
+procedure GetFirstNode(var ptr:pointer; const Target:tPID);
+begin ptr:=GetMem(sizeof(tPeerList)); tPeerList(ptr^).Init(target); end;
 procedure DoneGetNextNode(var ptr:pointer);
 begin FreeMem(ptr,sizeof(tPeerList)); ptr:=nil; end;
 
 {Messages:
  a)Request: op, SendID, TargetID, caps, adt
  b)Peers  : op, SendID, [addr, ID]
- c)Capable: ?
 }
 
 procedure RecvRequest(msg:tSMsg);
@@ -320,7 +324,7 @@ procedure SendRequest(const contact:tNetAddr; const forid: tPID; caps:byte);
  var r:tMemoryStream;
  begin
  //writeln('DHT: Request to ',string(contact),' for ',string(forid),' caps=',caps);
- r.Init(42);
+ r.Init(42);{$note todo}
  r.WriteByte(opcode.dhtRequest);
  r.Write(MyID,sizeof(tFID));
  r.Write(ForID,sizeof(tFID));
@@ -338,12 +342,13 @@ procedure RecvPeers(msg:tSMsg);
   ID:=s.ReadPtr(20);
   //writeln('DHT: ',string(msg.source^),' is ',string(ID^),' Peers');
   if not CheckNode(ID^,msg.source^) then exit;
+  if assigned(OnNewPeer) then OnNewPeer(ID^,msg.source^,true);
   while s.RdBufLen>44 do begin
     Addr:=s.ReadPtr(24);
     ID:=s.ReadPtr(20);
     CheckNode(ID^,Addr^);
+    if assigned(OnNewPeer) then OnNewPeer(ID^,Addr^,false);
   end;
- {UpdateSearch(hID^,msg.source^)};
 end;
 
 procedure NodeBootstrap(const contact:tNetAddr);
