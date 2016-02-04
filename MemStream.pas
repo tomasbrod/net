@@ -4,6 +4,7 @@ INTERFACE
 uses SysUtils;
 
 procedure BinToHex(hexValue:pChar; const orig; len:word);
+operator :=(a:pointer) r:shortstring;
 
 type tMemoryStream=object
  length: LongWord;
@@ -156,6 +157,11 @@ procedure BinToHex(hexValue:pChar; const orig; len:word);
   hexValue[i*2+0]:=HexTbl[b[i] shr 4];
   hexValue[i*2+1]:=HexTbl[b[i] and 15];
  end;
+end;
+
+operator :=(a:pointer) r:shortstring;
+  begin
+  r:=IntToHex(LongInt(a),8);
 end;
 
 END.
