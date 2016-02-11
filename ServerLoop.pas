@@ -423,8 +423,9 @@ end;
 
 var i:byte;
 var nb:array [0..0] of byte;
+{$I gitver.inc}
 BEGIN
- writeln('ServerLoop: BrodNetD');
+ writeln('ServerLoop: BrodNetD ',GIT_VERSION);
  mNow:=0;
  Randomize;
  fpSignal(SigInt,@SignalHandler);
