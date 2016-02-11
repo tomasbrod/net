@@ -6,6 +6,15 @@ uses SysUtils;
 procedure BinToHex(hexValue:pChar; const orig; len:word);
 operator :=(a:pointer) r:shortstring;
 
+type tKey20=packed array [0..19] of byte;
+type tKey32=packed array [0..31] of byte;
+type tKey64=packed array [0..63] of byte;
+operator :=(a:tKey20) r:string;
+operator :=(a:string) r:tKey20;
+operator  =(a,b:tKey20) r:boolean;
+operator :=(k:tKey32) s:string;
+operator :=(a:string) r:tKey32;
+
 type tMemoryStream=object
  length: LongWord;
  size: LongWord;
@@ -42,6 +51,34 @@ end;
 
 
 IMPLEMENTATION
+uses StrUtils;
+
+operator :=(a:tKey20) r:string;
+  begin
+  SetLength(r,40);
+  BinToHex(@r[1], a, 20);
+end;
+operator :=(a:string) r:tKey20;
+  begin
+  if HexToBin(@a[1],pchar(@r),20)<20 then raise
+  eConvertError.Create('Invalid Hex String');
+end;
+
+operator  =(a,b:tKey20) r:boolean;
+  begin
+  r:=CompareDWord(a,b,5)=0;
+end;
+
+operator :=(k:tKey32) s:string;
+ begin
+ Setlength(s,64);
+ BinToHex(@s[1],k,32);
+end;
+operator :=(a:string) r:tKey32;
+  begin
+  if HexToBin(@a[1],pchar(@r),32)<32 then raise
+  eConvertError.Create('Invalid Hex String');
+end;
 
 procedure tMemoryStream.Seek(absolute:LongWord);
  begin
