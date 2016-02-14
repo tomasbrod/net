@@ -30,6 +30,7 @@ end;
 
 var o:t;
 BEGIN
-shedule(1,@o.DOIT);
+writeln('dhlt: giving dht time to initialize: 3s');
+shedule(3000,@o.DOIT);
 end.
 
