@@ -11,6 +11,7 @@ type tKey32=packed array [0..31] of byte;
 type tKey64=packed array [0..63] of byte;
 operator :=(a:tKey20) r:string;
 operator :=(a:string) r:tKey20;
+function PrefixLength(const a,b:tKey20):byte;
 operator  =(a,b:tKey20) r:boolean;
 operator :=(k:tKey32) s:string;
 operator :=(a:string) r:tKey32;
@@ -67,6 +68,26 @@ end;
 operator  =(a,b:tKey20) r:boolean;
   begin
   r:=CompareDWord(a,b,5)=0;
+end;
+
+function PrefixLength(const a,b:tKey20):byte;
+ var i:byte;
+ var by:byte;
+ var m:byte;
+ begin
+ by:=0;
+ i:=0; while(i<=19) do begin
+  if a[i]<>b[i] then break;
+  inc(i);
+ end;
+ result:=i*8;
+ if i=20 then exit;
+ m:=$80;
+ while(m>0) do begin
+  if (a[i] and m)<>(b[i] and m) then break;
+  m:=m shr 1;
+  inc(result);
+ end;
 end;
 
 operator :=(k:tKey32) s:string;
