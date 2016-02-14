@@ -113,7 +113,7 @@ procedure tSearch.Step;
     if peers[ix].addr.isNil then break;
     if (rqc>=3)or(rpc>=6) then break;
     if peers[ix].rplc>=2 then inc(rpc)
-    else if (peers[ix].reqc<4)
+    else if (peers[ix].reqc<7)
          and(rqc<3)
     then begin
         inc(rqc);
@@ -188,7 +188,6 @@ procedure RecvCapable(msg:tSMsg);
     sr:=sr^.next;
   end;
 end;
-
 
 BEGIN
   dht.OnNewPeer:=@UpdateSearch;
