@@ -12,7 +12,7 @@ var SecretKey:tKey64;
 var PublicKey:tEccKey;
 var PublicPoW:tPoWRec;
 var ZeroDigest:tSha512Digest;
-const cDig3PowMask=%0010;
+const cDig3PowMask=%0000;
 const cPoWValidDays=5;
 const cTSEpoch=40179;
 procedure CreateChallenge(out Challenge: tEccKey);
@@ -41,9 +41,8 @@ end;
 
 var TSNow:LongWord;
 
-function VerifyPoW(const proof:tPoWRec; const RemotePub:tEccKey):boolean;
+function VerifyPoW(const proof:tPoWRec; const RemotePub:tEccKey; out digest:tSha512Digest ):boolean;
  var shactx:tSha512Context;
- var digest:tSha512Digest;
  var delta:Integer;
  begin
  delta:=TSNow-BEtoN(proof.stamp);
@@ -54,6 +53,12 @@ function VerifyPoW(const proof:tPoWRec; const RemotePub:tEccKey):boolean;
  Sha512Final(shactx,digest);
  result:=(CompareByte(digest,ZeroDigest,3)=0)and((digest[3]and cDig3PoWMask)=0);
  end else result:=false;
+end;
+
+function VerifyPoW(const proof:tPoWRec; const RemotePub:tEccKey):boolean;
+ var digest:tSha512Digest;
+ begin
+ result:=VerifyPoW(proof,RemotePub,digest);
 end;
 
 const cPoWFN='proof.dat';
@@ -71,16 +76,18 @@ procedure PoWGenerate;
  var i:byte;
  var counter:LongWord;
  var start:tDateTime;
+ var digest:tSha512Digest;
  begin
  assign(f,cPoWFN);
  rewrite(f);
  write('ECC: Generating PoW, this may take a while...');
  PublicPow.stamp:=NtoBE(TSNow);
  Start:=Now; counter:=0;
+ for i:=0 to 31 do digest[i]:=Random(256);
  repeat
-  for i:=0 to 31 do PublicPoW.data[i]:=Random(256);
+  Move(digest,PublicPoW.data,32);
   inc(counter);
- until VerifyPoW(PublicPoW,PublicKey);
+ until VerifyPoW(PublicPoW,PublicKey,digest);
  writeln(' PoW found in ',(Now-start)*SecsPerDay:1:0,'s speed=',counter/((Now-start)*SecsPerDay):1:0,'h/s');
  write(f,PublicPoW);
  close(f);
