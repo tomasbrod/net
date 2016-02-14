@@ -9,6 +9,7 @@ type
   RemotePub:tEccKey;
   Valid:Boolean;
   PoWValid:Boolean;
+  Version:string[63];
   error:byte;
   Callback:procedure of object;
   procedure Init(const iRemote:tNetAddr);
@@ -30,6 +31,7 @@ procedure tAuth.Init(const iRemote:tNetAddr);
  Valid:=FALSE;
  PoWValid:=FALSE;
  Error:=255;
+ Version:='';
  Ch.Init(iRemote);
  Ch.OnDispose:=@Done;
  Ch.OnTimeout:=@Timeout;
@@ -71,6 +73,8 @@ procedure tAuth.ReplyPow(msg:tSMsg; data:boolean);
  if not data then exit;
  ptp:=r.readbyte; {todo}
  nonce:=r.ReadPtr(sizeof(tPoWRec));
+ SetLength(Version,r.RdBufLen);
+ r.Read(Version[1],r.RdBufLen);
  PoWValid:=VerifyPoW(nonce^,RemotePub);
  Conclusion;
 end;
@@ -144,9 +148,10 @@ procedure tServer.SendPow(msg:tSMsg; data:boolean);
  var ms:tMemoryStream;
  begin
  if data then exit;
- ch^.StreamInit(ms,66); {todo}
+ ch^.StreamInit(ms,135); {todo}
  ms.WriteByte(2);
  ms.Write(PublicPoW,sizeof(PublicPoW));
+ ms.Write(ServerLoop.VersionString[1],Length(ServerLoop.VersionString));
  ch^.Callback:=@Last;
  ch^.SetTimeout(8000,2000);
  ch^.send(ms);

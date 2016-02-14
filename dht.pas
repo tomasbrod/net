@@ -412,6 +412,7 @@ procedure tPeer.VerifyCallback;
   writeln('DHT: Verificator error ',string(Addr),Verify^.error);
   ReqDelta:=3;
  end else begin
+ writeln('DHT: ',copy(string(id),1,6),' version ',Verify^.Version);
  Sha512Buffer(Verify^.RemotePub,sizeof(tEccKey),PubHash,sizeof(PubHash));
  if Verify^.Valid and Verify^.PowValid and (CompareWord(ID,PubHash,10)=0) then
   Ban:=false

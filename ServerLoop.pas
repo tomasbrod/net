@@ -39,6 +39,7 @@ function OptIndex(o:string):word;
 function OptParamCount(o:word):word;
 
 var OnTerminate:procedure;
+var VersionString:string[63];
 
 type tTimeVal=UnixType.timeval;
 type tMTime=DWORD;
@@ -426,6 +427,7 @@ var nb:array [0..0] of byte;
 {$I gitver.inc}
 BEGIN
  writeln('ServerLoop: BrodNetD ',GIT_VERSION);
+ VersionString:=GIT_VERSION;
  mNow:=0;
  Randomize;
  fpSignal(SigInt,@SignalHandler);
