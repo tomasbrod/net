@@ -12,13 +12,14 @@ unit DHT;
 {used by: messages, fileshare}
 
 INTERFACE
-uses ServerLoop,NetAddr,Store2;
+uses ServerLoop,NetAddr,Store2,MemStream;
 type
   tPID=Store2.tFID; {reQ: ids can be shorter}
   tPeerPub=object
     ID   :tPID;
     Addr :tNetAddr;
     end;
+  tCapHandler=function(caps:byte; const Target:tPID; var extra:tMemoryStream):boolean;
 
 var MyID: tPID;
 var OnNewPeer: procedure(const ID: tPID; const Addr:tNetAddr; rpc:boolean)=nil;
@@ -27,10 +28,11 @@ procedure GetFirstNode(var ptr:pointer; const Target:tPID);
 procedure GetNextNode(var ptr:pointer; out peer:tPeerPub);
 procedure DoneGetNextNode(var ptr:pointer);
 procedure InsertNode(const peer:tPeerPub);
+procedure RegisterCapability(cap:byte; handler:tCapHandler);
 function PrefixLength(const a,b:tFID):byte;
 
 IMPLEMENTATION
-uses Chat,MemStream,opcode,ECC,sha512,CRAuth;
+uses Chat,opcode,ECC,sha512,CRAuth;
 
 type
  tPeer=object(tPeerPub)
@@ -56,6 +58,7 @@ type
  end;
 
 var Table:^tBucket;
+var CapHandler: array [1..32] of tCapHandler;
 {deepest first}
 
 function PrefixLength(const a,b:tFID):byte;
@@ -303,6 +306,8 @@ procedure RecvRequest(msg:tSMsg);
   caps:=s.ReadByte;
   //writeln('DHT: ',string(msg.source^),' Request for ',string(Target^));
   if not CheckNode(sID^,msg.source^) then exit;
+  if (caps>0)and(caps<=high(CapHandler))and assigned(CapHandler[caps])
+  then if CapHandler[caps](caps,Target^,s) then exit;
   list.Init(Target^);
   {TODO: sometimes it is better to send answer directly}
   r.Init(197);
@@ -439,7 +444,15 @@ procedure tPeer.VerifyCallback;
  Verify:=nil; {it will free itelf}
 end;
 
+
+procedure RegisterCapability(cap:byte; handler:tCapHandler);
+  begin
+  Assert(CapHandler[cap]=nil);
+  CapHandler[cap]:=handler;
+end;
+
 BEGIN
+  FillChar(CapHandler,sizeof(CapHandler),0);
   assert((sizeof(tNetAddr)+sizeof(tPID))=44);
   SetMsgHandler(opcode.dhtRequest,@recvRequest);
   SetMsgHandler(opcode.dhtPeers,@recvPeers);

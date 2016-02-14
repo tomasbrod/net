@@ -5,26 +5,24 @@ uses ServerLoop,dht,NetAddr;
 type
   tPID=dht.tPID;
   tSearchPeer=object(dht.tPeerPub)
-    Next:^tSearchPeer;
     LastReq:tMTime;
-    caps:byte;
-    reqc,rplc:byte;
-    Extra:string[24];
+    reqc,
+    rplc:byte;{1=replied with cap, 2=replied with peers}
     end;
   tSearch=object
     Target:tPID;
     Caps:byte;
-    Extra:string[24];
-    First:^tSearchPeer;
-    Passive:boolean;
-    Callback:procedure(const peer:tSearchPeer) of object;
+    Extra:string[48];
+    Peers:array [0..10] of tSearchPeer;
+    Passive,Closed:boolean;
+    Callback:procedure(const Source:tNetAddr; scaps:byte; exl:word; exp:pointer) of object;
+    ObjectPointer:pointer;
     procedure Init;
     procedure Start;
-    procedure Done;
+    procedure Close;
     private
     next,prev:^tSearch;
     function AddPeer(const iID:tPID; const iAddr:tNetAddr; setrepl:boolean): pointer;
-    procedure AddCapable(const sID:tPID; const Source:tNetAddr; scaps:byte; exl:byte; exp:pointer);
     procedure Step;
     procedure Periodic;
     end;
@@ -33,12 +31,14 @@ uses MemStream,opcode,Store2;
 var Searches:^tSearch;
 
 procedure tSearch.Init;
+  var i:integer;
   begin
   Caps:=0;
   Extra:='';
-  First:=nil;
   Passive:=false;
+  Closed:=false;
   Callback:=nil;
+  for i:=high(peers) to 0 do Peers[i].Addr.Clear;
 end;
 
 procedure tSearch.Start;
@@ -54,7 +54,7 @@ procedure tSearch.Start;
   GetFirstNode(list,target);
   adc:=0;
   writeln('dhtLookup.Start@',string(@self),' target=',string(target),' caps=',caps,' exl=',length(extra));
-  while adc<10 do begin
+  while adc<6 do begin
     GetNextNode(list,ipeer);
     if ipeer.addr.isnil then break;
     inc(adc);
@@ -65,87 +65,76 @@ procedure tSearch.Start;
 end;
 
 function tSearch.AddPeer(const iID:tPID; const iAddr:tNetAddr; setrepl:boolean): pointer;
-  var cur,this:^tSearchPeer;
-  var pcur:^pointer;
-  var tpfl,idx:byte;
-  label discard;
+  var tpfl,idx,j:byte;
   begin
-  pcur:=@first; cur:=First;
   idx:=0; result:=nil;
   tpfl:=PrefixLength(iid,Target);
   write('dhtLookup.AddPeer@',string(@self),' tpfl=',tpfl,' addr=',string(iaddr));
-  while assigned(cur) and (PrefixLength(cur^.id,Target)>=tpfl)
-  do begin
-    if cur^.addr=iaddr then begin
-      if setrepl then Inc(cur^.rplc);
-      result:=cur;
+  for idx:=0 to high(peers) do begin
+    if peers[idx].addr=iaddr then begin
+      if setrepl then Inc(peers[idx].rplc);
+      result:=@peers[idx];
       writeln(' update ',idx);
     exit end;
-    if idx>10 then goto discard; {$hint magic constant}
-    pcur:=@cur^.next; cur:=cur^.next;
-    inc(idx);
+    if PrefixLength(peers[idx].id,Target)<tpfl then break;
   end;
-  if setrepl then goto discard;
-  new(this); this^.next:=cur; pcur^:=this;
-  writeln(' insert ',idx);
-  with this^ do begin
-    id:=iid; addr:=iaddr;
-    caps:=0;
-    reqc:=0; rplc:=0;
-    Extra:='';
-  end;
-  result:=this;
-  exit; discard:
-  writeln(' discard');
+  if not setrepl then begin
+    writeln(' insert ',idx);
+    for j:=idx to high(peers)-1 do peers[j+1]:=peers[j];
+    peers[idx].id:=iid; peers[idx].addr:=iaddr;
+    peers[idx].reqc:=0; peers[idx].rplc:=0;
+    result:=@peers[idx];
+    Shedule(1,@Step);
+  end else writeln(' discard');
 end;
 
 procedure tSearch.Step;
-  var p:^tSearchPeer;
-  var pc,nc,again:byte;
+  var ix:byte;
+  var rqc,rpc,again:byte;
   var r:tMemoryStream;
   var buf:array [1..66] of byte;
   begin
+  if closed then begin
+    if assigned(prev) then prev^.next:=next
+    else Searches:=next;
+    if assigned(next) then next^.prev:=prev;
+    FreeMem(@self,sizeof(self));
+  exit end;
   r.Init(@buf,0,sizeof(buf));
   write('dhtLookup.Step@',string(@self),': ');
-  p:=First; pc:=0;nc:=0; again:=0;
-  while assigned(p) and (pc<4) do begin
-    if (p^.reqc=0)
-    or( (p^.rplc<=again)
-    and (p^.reqc<4) )then begin
-      if (mNow-p^.LastReq)>800 then begin
-        inc(pc);
+  {send request to at most 3 peers,
+   count nodes that replied
+  }
+  rqc:=0;rpc:=0; again:=0;
+  repeat
+  for ix:=0 to high(peers) do begin
+    if peers[ix].addr.isNil then break;
+    if (rqc>=3)or(rpc>=6) then break;
+    if peers[ix].rplc>=2 then inc(rpc)
+    else if (peers[ix].reqc<4)
+         and((mNow-peers[ix].LastReq)>800)
+         and(rqc<3)
+    then begin
+        inc(rqc);
         r.WriteByte(opcode.dhtRequest);
         r.Write(dht.MyID,sizeof(tPID));
         r.Write(self.Target,sizeof(tPID));
-        r.WriteByte(self.caps);
+        if peers[ix].rplc=0
+        then  r.WriteByte(self.caps)
+        else  r.WriteByte(0);
         r.Write(extra[1],length(extra));
-        write('[',pc,':',string(p^.addr),' ',p^.rplc,'/',p^.reqc);
-        inc(p^.reqc);
-        p^.LastReq:=MNow;
-        ServerLoop.SendMessage(r.base^,r.length,p^.Addr);
-      end else inc(nc);
+        write('[',rqc,':',string(peers[ix].addr),' ',peers[ix].rplc,'/',peers[ix].reqc,']');
+        inc(peers[ix].reqc);
+        peers[ix].LastReq:=MNow;
+        ServerLoop.SendMessage(r.base^,r.length,peers[ix].Addr);
     end;
-    p:=p^.next;
-    if (p=nil) and (again<3) and (nc<=3) then begin p:=First; inc(again); end;
-  end;
-  if (pc+nc)=0 then begin
+  end; inc(again);
+  until (again>1)or(rqc>=3)or(rpc>=6);
+  if (rqc+rpc)=0 then begin
     writeln('search failed');
-    //search failed
+    //search failed or exhausted
     {$warning notify of search failure}
   end else writeln;
-end;
-
-procedure tSearch.AddCapable(const sID:tPID; const Source:tNetAddr; scaps:byte; exl:byte; exp:pointer);
-  var p:^tSearchPeer;
-  begin
-  p:=self.AddPeer(sID,source,true);
-  if assigned(p) then begin
-    writeln('dhtLookup.AddCapable@',string(@self),' ',string(Source),' scaps=',caps,' exl=',exl);
-    p^.caps:=scaps;
-    SetLength(p^.Extra,exl);
-    if exl>0 then Move(exp^,p^.Extra[1],exl);
-    if (Callback<>nil) then Callback(p^);
-  end else  writeln('dhtLookup.AddCapable@',string(@self),' discard ',string(Source));
 end;
 
 procedure tSearch.Periodic;
@@ -154,44 +143,45 @@ procedure tSearch.Periodic;
   Step;
 end;
 
-procedure tSearch.Done;
-  var rs,rsn:^tSearchPeer;
+procedure tSearch.Close;
   begin
   {$hint todo check for identical search and mark as active if active}
-  rs:=First; while assigned(rs) do begin
-    rsn:=rs^.next; Dispose(rs); rs:=rsn;
-  end;
+  Closed:=true;
   UnShedule(@Periodic);
 end;
 
 procedure UpdateSearch(const ID: tPID; const Addr:tNetAddr; rpc:boolean);
   var sr:^tSearch;
+  var p:^tSearchPeer;
   //called by dhr.RecvPers with sender info
   begin
   sr:=Searches; while assigned(sr) do begin
-    sr^.AddPeer(ID,Addr,rpc);
+    p:=sr^.AddPeer(ID,Addr,rpc);
+    if assigned(p)and rpc then inc(p^.rplc); {mark it as exhausted}
     sr:=sr^.next;
   end;
 end;
 
-{c) op, SenderID, caps, extra}
+{c) op, SenderID, Target, caps, extra}
 procedure RecvCapable(msg:tSMsg);
   unimplemented;
   var sr:^tSearch;
-  var sID:^tPID;
+  var sID,sTarget:^tPID;
   var caps:byte;
   var exl:word;
   var exp:pointer;
   begin
   msg.stream.skip(1);
   sID:=msg.stream.readptr(sizeof(tPID));
+  sTarget:=msg.stream.readptr(sizeof(tPID));
   caps:=msg.stream.readByte;
   exl:=msg.stream.RdBufLen;
-  if exl>24 then exl:=24;
   exp:=msg.stream.readptr(exl);
   sr:=Searches; while assigned(sr) do begin
-    if sr^.caps=caps then begin
-      sr^.AddCapable(sID^,msg.Source^,caps,exl,exp);
+    if (sr^.caps=caps)and(sr^.Target=sTarget^) then begin
+      sr^.AddPeer(sID^,msg.Source^,true);
+      writeln('dhtLookup.AddCapable@',string(sr),' ',string(msg.Source^),' caps=',caps,' exl=',exl);
+      if assigned(sr^.callback) then sr^.Callback(msg.Source^,caps,exl,exp);
     end;
     sr:=sr^.next;
   end;
