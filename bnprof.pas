@@ -154,7 +154,7 @@ BEGIN
     hdr.Nick:='undefined'
   end else begin
     BlockRead(pf,hdr,sizeof(hdr));
-    if LongWord(hdr.Magic)<>pfHeader then raise eXception.Create('Wrong magic number in profile header');
+    if CompareByte(hdr.Magic,pfHeader,4)<>0 then raise eXception.Create('Wrong magic number in profile header');
   end;
   if paramstr(2)<>'' then begin
     assign(lsf,paramstr(2));
@@ -200,12 +200,14 @@ BEGIN
       end;
     until EOF(input);
     Seek(pf,0);
-    hdr.updated:=LongWord(hdr.updated)+1;
+    tmpp:=trunc(Now-40179);
+    if tmpp=LongWord(hdr.updateDay) then Inc(hdr.UpdateCnt) else hdr.UpdateCnt:=0;
+    hdr.updateday:=LongWord(tmpp);
     BlockWrite(pf,hdr,sizeof(hdr));
     SignProfile(pf);
   end else begin
     Writeln('PubKey: ',string(hdr.LoginPub));
-    Writeln('Updated: ',LongWord(hdr.Updated));
+    Writeln('Updated: D',LongWord(hdr.UpdateDay),'+',hdr.UpdateCnt);
     writeln('Nick: ',hdr.nick);
     DumpProfile(pf,hdr);
     writeln('Verify: ',VerifyProfile(pf));
