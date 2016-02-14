@@ -6,7 +6,7 @@ INTERFACE
 USES NetAddr,MemStream;
 
 const
-  pfHeader:LongWord=$EB4A8A65;
+  pfHeader:packed array [1..4] of byte=($42,$4E,$50,$1A);
   pfName=2;
   pfHost=4;
   pfLink=5;
@@ -14,10 +14,10 @@ const
   pfSig=127;
 
 type tProfileHeader=record
-  Magic:Word4;
+  Magic:packed array [1..4] of byte;
   LoginPub:tKey32;
-  Updated:Word4;
-  UpdatedBy:byte;
+  UpdateDay:Word4;
+  UpdateCnt:byte;
   Nick:string[11];
   end;
 type tProfileSig=packed record
