@@ -1,6 +1,7 @@
 #!/bin/bash
 set -e
 #if [ ! -d bin ]; then mkdir bin; fi
+git pull origin ||:
 mkdir -p bin
 make -C ed25519
 gitver=$(git describe --always --dirty --abbrev=16 --tags || true)
