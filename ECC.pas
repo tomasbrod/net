@@ -1,14 +1,14 @@
 unit ECC;
 
 INTERFACE
-uses ed25519,Sha512;
-type tEccKey=ed25519.tKey32;
+uses ed25519,Sha512,MemStream;
+type tEccKey=tKey32;
 type tPoWRec=packed record
- data:ed25519.tKey32;
+ data:tKey32;
  stamp:LongWord; {NetOrder}
  end;
 
-var SecretKey:ed25519.tKey64;
+var SecretKey:tKey64;
 var PublicKey:tEccKey;
 var PublicPoW:tPoWRec;
 var ZeroDigest:tSha512Digest;
@@ -19,10 +19,8 @@ procedure CreateChallenge(out Challenge: tEccKey);
 procedure CreateResponse(const Challenge: tEccKey; out Response: tSha512Digest; const srce:tEccKey);
 function VerifyPoW(const proof:tPoWRec; const RemotePub:tEccKey):boolean;
 
-operator :=(k:tEccKey) s:string;
-
 IMPLEMENTATION
-uses SysUtils,MemStream,DateUtils;
+uses SysUtils,DateUtils;
 
 procedure CreateChallenge(out Challenge: tEccKey);
  var i:byte;
@@ -128,16 +126,10 @@ procedure DerivePublic;
  CreatekeyPair(PublicKey,SecretKey);
 end;
 
-operator :=(k:tEccKey) s:string;
- begin
- Setlength(s,64);
- BinToHex(@s[1],k,32);
-end;
-
 BEGIN
  FillChar(ZeroDigest,sizeof(ZeroDigest),0);
  TSNow:=trunc(Now-cTSEpoch);
- //writeln('ECC: Today is W',TSNow);
+ writeln('ECC: Today is D',TSNow);
  try LoadFromFile;
  except on e:Exception do begin
   writeln('ECC: '+cSecKeyFN+' '+e.message+' while loading secret key, generating new keypair');

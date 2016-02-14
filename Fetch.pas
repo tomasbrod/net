@@ -37,7 +37,7 @@ function FetchObject(fid:tFID; srce:tNetAddr; prio:Byte; callback:tCb1): pFetch;
 {returns nil if file is present}
 
 IMPLEMENTATION
-uses SysUtils,opcode;
+uses SysUtils,opcode,MemStream;
 
 var Running:^tFetch;
 

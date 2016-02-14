@@ -4,9 +4,9 @@ UNIT Store2;
  Objects need a header?
 }
 INTERFACE
-USES Sha512;
+USES Sha512,MemStream;
 
-type tFID=array [0..19] of byte;
+type tFID=MemStream.tKey20;
 const cObjHeaderSize=64;
 const cObjDir='obj/';
 
@@ -19,10 +19,8 @@ function  HashObjectCheckID(var f:file; const id:tFID):boolean;
 
 procedure HashObjectCopy(const fn:string; out id:tFID);
 
-operator :=(a:tFID) r:string;
-operator  =(a,b:tFID) r:boolean;
 IMPLEMENTATION
-USES NetAddr,MemStream;
+USES NetAddr;
 type tHeader=record
   case byte of
   1:(
@@ -124,17 +122,6 @@ procedure HashObjectCopy(const fn:string; out id:tFID);
   rewrite(dst);
   HashObject(dst,id,src,true);
   Close(src);
-end;
-
-operator :=(a:tFID) r:string;
-  begin
-  SetLength(r,40);
-  BinToHex(@r[1], a, 20);
-end;
-
-operator  =(a,b:tFID) r:boolean;
-  begin
-  r:=CompareDWord(a,b,5)=0;
 end;
 
 END.

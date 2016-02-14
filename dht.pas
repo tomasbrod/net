@@ -29,7 +29,6 @@ procedure GetNextNode(var ptr:pointer; out peer:tPeerPub);
 procedure DoneGetNextNode(var ptr:pointer);
 procedure InsertNode(const peer:tPeerPub);
 procedure RegisterCapability(cap:byte; handler:tCapHandler);
-function PrefixLength(const a,b:tFID):byte;
 
 IMPLEMENTATION
 uses Chat,opcode,ECC,sha512,CRAuth;
@@ -60,27 +59,6 @@ type
 var Table:^tBucket;
 var CapHandler: array [1..32] of tCapHandler;
 {deepest first}
-
-function PrefixLength(const a,b:tFID):byte;
- var i:byte;
- var by:byte;
- var m:byte;
- begin
- by:=0;
- i:=0; while(i<=19) do begin
-  if a[i]<>b[i] then break;
-  inc(i);
- end;
- result:=i*8;
- if i=20 then exit;
- m:=$80;
- while(m>0) do begin
-  if (a[i] and m)<>(b[i] and m) then break;
-  m:=m shr 1;
-  inc(result);
- end;
-end;
-
 
 function tBucket.MatchPrefix(const tp:tFID):boolean;
  begin

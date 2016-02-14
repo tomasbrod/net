@@ -21,9 +21,9 @@ void ed25519_sign(unsigned char *signature, const unsigned char *message, size_t
     ge_p3_tobytes(signature, &R);
 
     sha512_init(&hash);
+    sha512_update(&hash, message, message_len);
     sha512_update(&hash, signature, 32);
     sha512_update(&hash, public_key, 32);
-    sha512_update(&hash, message, message_len);
     sha512_final(&hash, hram);
 
     sc_reduce(hram);

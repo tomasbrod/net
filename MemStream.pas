@@ -6,6 +6,16 @@ uses SysUtils;
 procedure BinToHex(hexValue:pChar; const orig; len:word);
 operator :=(a:pointer) r:shortstring;
 
+type tKey20=packed array [0..19] of byte;
+type tKey32=packed array [0..31] of byte;
+type tKey64=packed array [0..63] of byte;
+operator :=(a:tKey20) r:string;
+operator :=(a:string) r:tKey20;
+function PrefixLength(const a,b:tKey20):byte;
+operator  =(a,b:tKey20) r:boolean;
+operator :=(k:tKey32) s:string;
+operator :=(a:string) r:tKey32;
+
 type tMemoryStream=object
  length: LongWord;
  size: LongWord;
@@ -42,6 +52,54 @@ end;
 
 
 IMPLEMENTATION
+uses StrUtils;
+
+operator :=(a:tKey20) r:string;
+  begin
+  SetLength(r,40);
+  BinToHex(@r[1], a, 20);
+end;
+operator :=(a:string) r:tKey20;
+  begin
+  if HexToBin(@a[1],pchar(@r),20)<20 then raise
+  eConvertError.Create('Invalid Hex String');
+end;
+
+operator  =(a,b:tKey20) r:boolean;
+  begin
+  r:=CompareDWord(a,b,5)=0;
+end;
+
+function PrefixLength(const a,b:tKey20):byte;
+ var i:byte;
+ var by:byte;
+ var m:byte;
+ begin
+ by:=0;
+ i:=0; while(i<=19) do begin
+  if a[i]<>b[i] then break;
+  inc(i);
+ end;
+ result:=i*8;
+ if i=20 then exit;
+ m:=$80;
+ while(m>0) do begin
+  if (a[i] and m)<>(b[i] and m) then break;
+  m:=m shr 1;
+  inc(result);
+ end;
+end;
+
+operator :=(k:tKey32) s:string;
+ begin
+ Setlength(s,64);
+ BinToHex(@s[1],k,32);
+end;
+operator :=(a:string) r:tKey32;
+  begin
+  if HexToBin(@a[1],pchar(@r),32)<32 then raise
+  eConvertError.Create('Invalid Hex String');
+end;
 
 procedure tMemoryStream.Seek(absolute:LongWord);
  begin

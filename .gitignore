@@ -1,3 +1,12 @@
 *.o
 *.ppu
 lib*.a
+/gitver.inc
+/bin/
+brodnetd
+fpc.cfg
+proof.dat
+secret.dat
+nodes.dat
+obj/
+srv/
