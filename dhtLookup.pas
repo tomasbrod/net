@@ -61,7 +61,7 @@ procedure tSearch.Start;
     self.AddPeer(ipeer.id,ipeer.addr,false);
   end;
   DoneGetNextNode(list);
-  Shedule(1,@Periodic);
+  Shedule(800,@Periodic);
 end;
 
 function tSearch.AddPeer(const iID:tPID; const iAddr:tNetAddr; setrepl:boolean): pointer;
@@ -71,6 +71,7 @@ function tSearch.AddPeer(const iID:tPID; const iAddr:tNetAddr; setrepl:boolean):
   tpfl:=PrefixLength(iid,Target);
   write('dhtLookup.AddPeer@',string(@self),' tpfl=',tpfl,' addr=',string(iaddr));
   for idx:=0 to high(peers) do begin
+    if peers[idx].addr.isNil then break;
     if peers[idx].addr=iaddr then begin
       if setrepl then Inc(peers[idx].rplc);
       result:=@peers[idx];
@@ -84,6 +85,7 @@ function tSearch.AddPeer(const iID:tPID; const iAddr:tNetAddr; setrepl:boolean):
     peers[idx].id:=iid; peers[idx].addr:=iaddr;
     peers[idx].reqc:=0; peers[idx].rplc:=0;
     result:=@peers[idx];
+    UnShedule(@Step);
     Shedule(1,@Step);
   end else writeln(' discard');
 end;
@@ -98,9 +100,9 @@ procedure tSearch.Step;
     if assigned(prev) then prev^.next:=next
     else Searches:=next;
     if assigned(next) then next^.prev:=prev;
+    UnShedule(@Periodic);
     FreeMem(@self,sizeof(self));
   exit end;
-  r.Init(@buf,0,sizeof(buf));
   write('dhtLookup.Step@',string(@self),': ');
   {send request to at most 3 peers,
    count nodes that replied
@@ -112,10 +114,11 @@ procedure tSearch.Step;
     if (rqc>=3)or(rpc>=6) then break;
     if peers[ix].rplc>=2 then inc(rpc)
     else if (peers[ix].reqc<4)
-         and((mNow-peers[ix].LastReq)>800)
          and(rqc<3)
     then begin
         inc(rqc);
+        if (mNow-peers[ix].LastReq)<800 then continue;
+        r.Init(@buf,0,sizeof(buf));
         r.WriteByte(opcode.dhtRequest);
         r.Write(dht.MyID,sizeof(tPID));
         r.Write(self.Target,sizeof(tPID));
@@ -130,8 +133,8 @@ procedure tSearch.Step;
     end;
   end; inc(again);
   until (again>1)or(rqc>=3)or(rpc>=6);
-  if (rqc+rpc)=0 then begin
-    writeln('search failed');
+  if (rqc)=0 then begin
+    writeln('search failed'); Close;
     //search failed or exhausted
     {$warning notify of search failure}
   end else writeln;
@@ -147,7 +150,6 @@ procedure tSearch.Close;
   begin
   {$hint todo check for identical search and mark as active if active}
   Closed:=true;
-  UnShedule(@Periodic);
 end;
 
 procedure UpdateSearch(const ID: tPID; const Addr:tNetAddr; rpc:boolean);

@@ -19,7 +19,7 @@ type
     ID   :tPID;
     Addr :tNetAddr;
     end;
-  tCapHandler=function(caps:byte; const Target:tPID; var extra:tMemoryStream):boolean;
+  tCapHandler=function(const source:tNetAddr; caps:byte; const Target:tPID; var extra:tMemoryStream):boolean;
 
 var MyID: tPID;
 var OnNewPeer: procedure(const ID: tPID; const Addr:tNetAddr; rpc:boolean)=nil;
@@ -285,7 +285,7 @@ procedure RecvRequest(msg:tSMsg);
   //writeln('DHT: ',string(msg.source^),' Request for ',string(Target^));
   if not CheckNode(sID^,msg.source^) then exit;
   if (caps>0)and(caps<=high(CapHandler))and assigned(CapHandler[caps])
-  then if CapHandler[caps](caps,Target^,s) then exit;
+  then if CapHandler[caps](msg.source^,caps,Target^,s) then exit;
   list.Init(Target^);
   {TODO: sometimes it is better to send answer directly}
   r.Init(197);
