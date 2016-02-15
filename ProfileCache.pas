@@ -20,33 +20,27 @@ function CacheProfile( fid: tFID ): boolean;
   var hash:tSha512Context;
   var buf:packed array [0..1023] of byte;
   var sig:tProfileSig absolute buf;
-  var fleft,hbs:LongWord;
+  var fleft,hbs:LongInt;
   begin
-  AssignObject(f,fid);
-  Reset(f,1);Seek(f,cObjHeaderSize);
-  fleft:=FileSize(f)-cObjHeaderSize;
-  result:=fleft>=(Sizeof(ph)+Sizeof(sig));
-  if not result then exit;
-  writeln('fsok');
-  BlockRead(f,ph,sizeof(ph));
-  result:=(CompareByte(ph.Magic,pfHeader,4)=0);
-  if not result then exit;
-  writeln('hdrok');
-  fleft:=fleft-Sizeof(ph);
+  result:=false;
   Sha512Init(hash);
+  AssignObject(f,fid);
+  Reset(f,1);
+  fleft:=FileSize(f)-(Sizeof(ph)+cObjHeaderSize+sizeof(sig));
+  if fleft<0 then exit;
+  Seek(f,cObjHeaderSize);
+  BlockRead(f,ph,sizeof(ph));
+  if CompareByte(ph.Magic,pfHeader,4)<>0 then exit;
   Sha512Update(hash,ph,sizeof(ph));
-  while true do begin
-    hbs:=fleft-sizeof(tProfileSig);
-    if fleft<=sizeof(tProfileSig) then break;
+  while fleft>0 do begin
+    hbs:=fleft;
     if hbs>sizeof(buf) then hbs:=sizeof(buf);
     BlockRead(f,buf,hbs);
     Sha512Update(hash,buf,hbs);
     fleft:=fleft-hbs;
   end;
   BlockRead(f,sig,sizeof(sig));
-  result:=(sig.Len1=0)and(sig.Len2=65)and(sig.tag=pfSig);
-  if not result then exit;
-  writeln('sighok');
+  if (sig.Len1<>0)or(sig.Len2<>65)or(sig.tag<>pfSig) then exit;
   result:=ed25519.Verify2(hash, sig.sig, ph.LoginPub);
 end;
 
