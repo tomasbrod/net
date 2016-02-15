@@ -61,7 +61,7 @@ function Verify(const signature:tSig; const message; len:LongWord; const pub:tPu
  begin
  Sha512Init(hash);
  Sha512Update(hash,message,len);
- result:=ed25519_verify_p2(@hash,@signature,@pub)=1;
+ result:=Verify2(hash,signature,pub);
  //assert(result=(ed25519_verify(@signature,@message,len,@pub)=1));
 end;
 
@@ -72,7 +72,7 @@ function Verify1(var ctx:tSha512Context):boolean;
 end;
 function Verify2(var ctx:tSha512Context; const signature:tSig; const pub:tPubKey):boolean;
   begin
-  result:=ed25519_verify_p2(@hash,@signature,@pub)=1;
+  result:=ed25519_verify_p2(@ctx,@signature,@pub)=1;
 end;
 
 procedure SharedSecret(out shared:tKey32; const pub:tPubKey; const priv:tPrivKey);
