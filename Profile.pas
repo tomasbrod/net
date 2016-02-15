@@ -20,6 +20,10 @@ type tProfileHeader=record
   UpdateCnt:byte;
   Nick:string[11];
   end;
+type tProfileField=packed record
+  len:Word2;
+  tag:byte;
+  end;
 type tProfileSig=packed record
   Len1:byte; {0}
   Len2:byte; {65}
