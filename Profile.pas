@@ -16,8 +16,8 @@ const
 type tProfileHeader=record
   Magic:packed array [1..4] of byte;
   LoginPub:tKey32;
-  UpdateDay:Word4;
-  UpdateCnt:byte;
+  Update:Word4;
+  pad:byte;
   Nick:string[11];
   end;
 type tProfileField=packed record

@@ -71,6 +71,7 @@ function tSearch.AddPeer(const iID:tPID; const iAddr:tNetAddr; setrepl:boolean):
   tpfl:=PrefixLength(iid,Target);
   write('dhtLookup.AddPeer@',string(@self),' tpfl=',tpfl,' addr=',string(iaddr));
   for idx:=0 to high(peers) do begin
+    write('[',string(peers[idx].addr),']');
     if peers[idx].addr.isNil then break;
     if peers[idx].addr=iaddr then begin
       if setrepl then Inc(peers[idx].rplc);
@@ -81,7 +82,7 @@ function tSearch.AddPeer(const iID:tPID; const iAddr:tNetAddr; setrepl:boolean):
   end;
   if not setrepl then begin
     writeln(' insert ',idx);
-    for j:=idx to high(peers)-1 do peers[j+1]:=peers[j];
+    for j:=high(peers)-1 downto idx do peers[j+1]:=peers[j];
     peers[idx].id:=iid; peers[idx].addr:=iaddr;
     peers[idx].reqc:=0; peers[idx].rplc:=0;
     result:=@peers[idx];
@@ -126,7 +127,7 @@ procedure tSearch.Step;
         then  r.WriteByte(self.caps)
         else  r.WriteByte(0);
         r.Write(extra[1],length(extra));
-        write('[',rqc,':',string(peers[ix].addr),' ',peers[ix].rplc,'/',peers[ix].reqc,']');
+        write('[',rqc,':',ix,':',string(peers[ix].addr),' ',peers[ix].rplc,'/',peers[ix].reqc,']');
         inc(peers[ix].reqc);
         peers[ix].LastReq:=MNow;
         ServerLoop.SendMessage(r.base^,r.length,peers[ix].Addr);

@@ -279,10 +279,8 @@ operator := (net : Word2) host:word;
  host:=ShortNetToHost( pnet^ );
 end;
 operator := (net : Word4) host:Dword;
- var pnet:^DWord;
  begin
- pnet:=@net;
- host:=LEtoN( pnet^ );
+ host:=BEtoN( DWORD(pointer(@net)^) );
 end;
 
 operator := (host : word) net:Word2;
@@ -295,7 +293,7 @@ operator := (host : Dword) net:Word4;
  var pnet:^DWord;
  begin
  pnet:=@net;
- pnet^:=NtoLE( host );
+ DWORD(pointer(@net)^):=NtoBE( host );
 end;
 
 END.
