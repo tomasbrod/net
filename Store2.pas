@@ -24,11 +24,12 @@ USES NetAddr;
 type tHeader=record
   case byte of
   1:(
-    mark:packed array [1..2] of byte;
+    mark:packed array [1..4] of byte;
     RefCount:Word2;
   );
   0:(pad:packed array [1..cObjHeaderSize] of byte);
 end;
+const cMark:packed array [1..4] of byte=($42,$4E,$4F,$1A);
 
 procedure mkfn(const id: tFID; fn:pchar);
   begin
@@ -68,7 +69,7 @@ procedure Reference(const id: tFID; adj: integer);
   adj:=adj+word(h.RefCount);
   if adj<0 then adj:=0;
   h.RefCount:=adj;
-  h.mark[1]:=$42; h.mark[2]:=$4E;
+  h.mark:=cMark;
   Seek(f,0);  BlockWrite(f,h,sizeof(h));
   close(f);
   if (adj=0) and (not CacheKeep(id,f)) then Erase(f);
@@ -93,7 +94,7 @@ procedure HashObject(var f:file; out id:tFID; var f2:file; icopy:boolean);
   Sha512Final(ctx,id,length(id));
   FillWord(h.pad,sizeof(h.pad),$428E);
   h.RefCount:=1;
-  h.mark[1]:=$42; h.mark[2]:=$4E;
+  h.mark:=cMark;
   Seek(f,0);
   BlockWrite(f,h,sizeof(h));
   Close(f);

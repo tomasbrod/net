@@ -12,6 +12,7 @@ uses cthreads,ServerLoop
 	,dhtPersist
 	,ECC
   ,dhlt
+  ,TestPRC
 	;
 
 BEGIN
