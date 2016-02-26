@@ -1,16 +1,26 @@
 unit TestPRC;
 interface
-uses MemStream,ProfileCache;
+uses ServerLoop,MemStream,ProfileCache;
 
 implementation
 uses Store2;
-var fid:tFID;
+var prid:tFID;
+var pro:tSObj;
 var ocr:boolean;
+var oi:byte;
+var sfn:string;
 
 BEGIN
-  writeln('TestPRC: going to insert profile.dat');
-  HashObjectCopy('profile.dat', fid);
-  writeln('TestPRC: FileID: ',string(fid));
-  ocr:=CacheProfile(fid);
-  writeln('TestPRC: verify result: ',ocr);
+  oi:=OptIndex('-test-prc');
+  if (oi>0) then begin
+    assert(OptParamCount(oi)=1);
+    sfn:=paramstr(oi+1);
+    writeln('TestPRC: going to insert ',sfn);
+    HashObjectCopy(sfn, pro.fid);
+    pro.Init(pro.fid);
+    writeln('TestPRC: FileID: ',string(pro.fid),' small=',pro.small,' base=',pro.base);
+    ocr:=CacheProfile(pro,prid);
+    if ocr then writeln('TestPRC: success, loginpubhash=',string(prid))
+    else writeln('TestPRC: invalid or corrupt profile file');
+  end;
 END.
