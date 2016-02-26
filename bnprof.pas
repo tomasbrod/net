@@ -5,6 +5,7 @@ var pf:file of byte;
 var lsf:file of tKey64;
 var LoginSec:tKey64;
 var LoginPub:tKey32;
+var LoginPubHash{,FileHash}:tKey20;
 var pubkey:tKey32;
 var hdr:tProfileHeader;
 var cmd,param:string;
@@ -73,6 +74,13 @@ function GetPubFromSecFile(const fn:string):tKey32;
   end;
   CreateKeyPair(result, sec);
 end;
+function GetPubHash(const pub:tKey32):tKey20;
+  var hash:tSha512Context;
+  begin
+  Sha512Init(hash);
+  Sha512Update(hash,pub,sizeof(pub));
+  Sha512Final(hash,result,sizeof(result));
+end;
 
 procedure DumpProfile(var pf:file; const hdr:tProfileHeader);
   var tmp:packed record len:Word2; tag:byte; end;
@@ -101,8 +109,8 @@ procedure DumpProfile(var pf:file; const hdr:tProfileHeader);
       pfHost:writeln('Login: ',vals);
       pfLink:writeln('Link: ');
       pfMotd:writeln('MOTD: ',vals);
-      127,0:;
-      //0:writeln('Unused ',es,' bytes');
+      0:writeln('Unused ',es,' bytes');
+      127:;
       else writeln('Unknown (tag=',tmp.tag,') ',es,' bytes');
     end;
     pos:=pos+3+es; Seek(pf,pos);
@@ -162,7 +170,7 @@ BEGIN
     Read(lsf,LoginSec);
     Close(lsf);
     CreateKeyPair(LoginPub, LoginSec);
-    Move(LoginPub,hdr.LoginPub,32);
+    hdr.LoginPub:=LoginPub;
     if FileSize(pf)>=(sizeof(tProfileSig)+sizeof(tProfileHeader)) then begin
       Seek(pf,FileSize(pf)-sizeof(tProfileSig));
       Truncate(pf); {remove file signature}
@@ -182,6 +190,7 @@ BEGIN
       end else if cmd='NICK' then begin
         hdr.nick:=param;
       end else if cmd='MOTD' then begin
+        //if param=''
         SetProp(pf,spRewrite,pfMotd,param[1],length(param));
       end else if cmd='LOGIN' then begin
         pubkey:=param;
@@ -197,17 +206,22 @@ BEGIN
       end else if cmd='LOGOUT' then begin
         pubkey:=param;
         SetProp(pf,spDel,pfHost,pubkey[0],sizeof(pubkey));
+      end else if cmd='UPDATED' then begin
+        val(param,tmpp);
+        if tmpp>=DWORD(hdr.Update) then hdr.Update:=tmpp
+        else writeln('Error: Can not decrease UPDATED field');
       end;
     until EOF(input);
     Seek(pf,0);
     tmpp:=trunc(Now-40179);
-    if tmpp=LongWord(hdr.updateDay) then Inc(hdr.UpdateCnt) else hdr.UpdateCnt:=0;
-    hdr.updateday:=LongWord(tmpp);
+    hdr.Update:=DWORD(hdr.Update)+1;
     BlockWrite(pf,hdr,sizeof(hdr));
     SignProfile(pf);
   end else begin
-    Writeln('PubKey: ',string(hdr.LoginPub));
-    Writeln('Updated: D',LongWord(hdr.UpdateDay),'+',hdr.UpdateCnt);
+    LoginPubHash:=GetPubHash(hdr.LoginPub);
+    Writeln('ID: ',string(LoginPubHash));
+    //Writeln('PubKey: ',string(hdr.LoginPub));
+    Writeln('Updated: ',DWord(hdr.Update));
     writeln('Nick: ',hdr.nick);
     DumpProfile(pf,hdr);
     writeln('Verify: ',VerifyProfile(pf));

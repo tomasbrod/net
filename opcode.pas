@@ -25,6 +25,9 @@ const {ObjectTransfer magic numbers}
  otEoT=otInfo+3;  {DLE type End Off Transmission}
  otSINC=otInfo+4; {DLE Explicit Ack Request}
  otRateInfo=otInfo+5; {DLE Rate Adjust Debug info}
+const {dht node Capabilities}
+ capProfile=1;
+ capTest=32;
 
 IMPLEMENTATION
 END.

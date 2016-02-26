@@ -2,9 +2,6 @@ PROGRAM brodnetd;
 
 { Poll loop. Read message, get handler, exec handler. }
 uses cthreads,ServerLoop
-	,TestWatch
-	,TestChat
-	,AsyncProcess
 	,OTServer
  	,ObjTrans
 	,dht
@@ -13,6 +10,7 @@ uses cthreads,ServerLoop
 	,ECC
   ,dhlt
   ,TestPRC
+  ,TestPRL
 	;
 
 BEGIN

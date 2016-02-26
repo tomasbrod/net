@@ -16,7 +16,7 @@ type tHKVS=object
   procedure SetVal( key: tkey20; var value );
   procedure Init( filename: string; ivalsz: word; ibktsz:word );
   //procedure Done;
-  private
+  private{$warning Use some sort of locking}
   function mkrix(key:tKey20):word;
   function mkfofs(bko:LongWord; ri:word):LongWord;
   end;
