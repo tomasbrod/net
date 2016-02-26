@@ -40,7 +40,8 @@ tChannel=object
  cli: tClient_ptr;
  chn: byte;
  weight,eotrtr:byte;
- fd:tHandle; {$note Use System file handle}
+ opened:boolean;
+ fo:tSObj;
  segofs:LongWord;{cache}
  seglen:LongWord;{no seglist in sync yet}
  procedure Reset(prio:byte; const cmd:tMemoryStream);
@@ -170,27 +171,26 @@ end;
 
 procedure tChannel.Reset(prio:byte; const cmd:tMemoryStream);
  var id:^tFID;
- var filelen:LongWord;
  var fn:array [0..44] of char;
  var info:tMemoryStream;
  begin
  id:=cmd.ReadPtr(20);
  fn:='obj/';
  BinToHex(@fn[4],id^,20); fn[44]:=#0;
- if fd<>-1 then FileClose(fd);
- fd:=FileOpen(fn,fmOpenRead);
+ if opened then fo.Close;
  info.Init(@fn,0,sizeof(fn));
  info.WriteByte(otData);
  info.WriteByte(chn);
- if fd>=0 then filelen:=FileSeek(fd,0,fsFromEnd);
- if (fd<0) or (filelen<cObjHeaderSize) then begin
-  info.WriteByte(otFail);
+ try
+  fo.Init(id^);
+  opened:=true;
+ except on eObjectNF do begin
+  info.WriteByte(otNotFound);
   cli^.Send(info.base^,info.length);
-  Finish;  exit; end;
- filelen:=filelen-cObjHeaderSize;
+  Finish;  exit end end;
  info.WriteByte(otInfo);
  info.WriteByte(0);
- info.WriteWord(filelen,4);
+ info.WriteWord(fo.length,4);
  info.WriteByte(1);
  seglen:=0;
  segofs:=0;
@@ -198,13 +198,13 @@ procedure tChannel.Reset(prio:byte; const cmd:tMemoryStream);
   cmd.Skip(1);
   segofs:=cmd.ReadWord(4);
   seglen:=cmd.ReadWord(4);
-  seglen:=Clamp(seglen,segofs,filelen);
+  seglen:=Clamp(seglen,segofs,fo.length);
   break{singleseg};
  end;
  info.WriteWord(seglen,4);
  cli^.Send(info.base^,info.length);
  if seglen=0 then Finish else begin
-  Assert(FileSeek(fd,segofs+cObjHeaderSize,fsFromBeginning)>=0);
+  fo.Seek(segofs);
   cli^.IdleTicks:=0;
   weight:=prio+1;//*6
   cli^.SwitchChannel(chn); //activate this channel
@@ -213,27 +213,27 @@ end;
 procedure tChannel.Finish;
  begin
  cli^.SendDebug(chn,'Finish channel');
- if fd<>-1 then FileClose(fd);
+ if opened then fo.Close;
+ opened:=false;
  cli^.channel[chn]:=nil;
  dec(cli^.ccnt);
  FreeMem(@self,sizeof(self));
 end;
 procedure tChannel.FillBuff(var s:tMemoryStream; sz:LongWord);
- var red:LongWord;
  var msgeot:string[3];
  begin
  s.WriteByte(0);{high part of offset, must be <128}
  s.WriteWord(segofs,4);
  sz:=sz-5;
  if sz>seglen then sz:=seglen;
- red:=FileRead(fd,s.WrBuf^,sz);
- if red>0 then begin
-   segofs:=segofs+red;
-   seglen:=seglen-red;
-   s.WrEnd(red);
+ fo.Read(s.WrBuf^,sz); {todo errorcheck}
+ if true then begin
+   segofs:=segofs+sz;
+   seglen:=seglen-sz;
+   s.WrEnd(sz);
    cli^.Send(s.base^,s.length);
  end;
- if (seglen=0)or(red<sz) then begin
+ if (seglen=0){or(red<sz)} then begin
   weight:=0; eotrtr:=1;
   msgeot:=char(otData)+char(chn)+char(otEoT);
   cli^.Send(msgeot[1],3);
@@ -284,7 +284,7 @@ procedure tClient.Recv(op:byte; cmd:tMemoryStream);
  try
  if op>=3 then ch:=cmd.ReadByte else ch:=0;
  if (op>otReq)and(ch>0)and(cmd.RdBufLen>=29) then begin
-  if ch>high(channel) then exit; {$NOTE grace}
+  if ch>high(channel) then exit; {$NOTE grace on channel overflow}
   if channel[ch]=nil then NewChannel(ch);
   channel[ch]^.Reset(op-otReq,cmd);
  end else if (op=otFin)and assigned(channel[ch]) then begin
@@ -364,7 +364,7 @@ function SFSThread(param:pointer):PtrInt;
    cmd.Init(@sharedbuf,0,sizeof(sharedbuf));
    rc:=fpRecv(sock[1],cmd.base,cmd.size,0);
    assert(rc>=0); if rc=0 then break;
-   cmd.length:=rc;
+   cmd.vlength:=rc;
    source:=cmd.ReadPtr(sizeof(tNetAddr));
    if cmd.rdbuflen>=2 then begin
     op:=cmd.ReadByte;
@@ -451,7 +451,7 @@ procedure tClient.NewChannel(ch:byte);
  with channel[ch]^ do begin
   chn:=ch;
   cli:=@self;
-  fd:=-1;
+  opened:=false;
 end end;
 
 function FindClient(const addr:tNetAddr; creat:boolean):tClient_ptr;
