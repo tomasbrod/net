@@ -8,7 +8,7 @@ type t=object
   oi:byte;
   job:^tSearch;
   procedure init;
-  procedure SearchResult(const Source:tNetAddr; scaps:byte; exl:word; exp:pointer);
+  procedure SearchResult(const Source:tNetAddr; var ex:tMemoryStream);
   end;
 var O:t;
 
@@ -25,9 +25,9 @@ procedure t.Init;
   Shedule(3000,@job^.Start);
 end;
 
-procedure t.SearchResult(const Source:tNetAddr; scaps:byte; exl:word; exp:pointer);
+procedure t.SearchResult(const Source:tNetAddr; var ex:tMemoryStream);
   begin
-  writeln('TestRPL.SearchResult: ',string(source),' caps=',scaps,' extra[',exl,']');
+  writeln('TestRPL.SearchResult: ',string(source),' extra[',ex.left,']');
 end;
 
 BEGIN

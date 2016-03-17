@@ -38,7 +38,7 @@ procedure Reference(const id: tFID; adj: integer);
 //procedure HashObject2(var f:file; out id:tFID);
 //function  HashObject2CheckID(var f:file; const id:tFID):boolean;
 
-procedure HashObjectCopy(const fn:string; out id:tFID);
+procedure HashObjectCopy(const fn:ansistring; out id:tFID);
 
 IMPLEMENTATION
 USES NetAddr,HKVS;
@@ -188,7 +188,7 @@ procedure HashAndCopy(var inf,outf:file; out id:tFID; icopy:boolean);
   Sha512Final(ctx,id,length(id));
 end;
 
-procedure HashObjectCopy(const fn:string; out id:tFID);
+procedure HashObjectCopy(const fn:ansistring; out id:tFID);
   var inf,outf:file of byte;
   var dlen,dofs:LongWord;
   var hdr:tHeader;

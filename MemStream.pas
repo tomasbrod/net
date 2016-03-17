@@ -49,6 +49,7 @@ type tMemoryStream=object(tCommonStream)
  procedure WriteWord(v:LongWord; cnt:byte);
  constructor Init(ibuf:pointer; ilen,isize:LongWord);
  constructor Init(isize:LongWord);
+ procedure Free;
  function WRBuf:pointer;
  function WRBufLen:LongWord;
  procedure WREnd(used:LongWord);
@@ -193,6 +194,8 @@ constructor tMemoryStream.Init(isize:LongWord);
  begin
  Init(GetMem(isize),0,isize);
 end;
+procedure tMemoryStream.Free;
+  begin FreeMem(base,size) end;
 
 function tMemoryStream.Length:LongWord;
  begin result:=vLength end;

@@ -8,7 +8,7 @@ uses ServerLoop,MemStream,opcode,NetAddr,dhtLookup,dht;
 type t=object
   job:^tSearch;
  procedure DoIt;
- procedure SearchResult(const Source:tNetAddr; scaps:byte; exl:word; exp:pointer);
+ procedure SearchResult(const Source:tNetAddr; var ex:tMemoryStream);
 end;
 
 procedure t.DoIt;
@@ -24,12 +24,12 @@ procedure t.DoIt;
  job^.Start;
 end;
 
-procedure t.SearchResult(const Source:tNetAddr; scaps:byte; exl:word; exp:pointer);
+procedure t.SearchResult(const Source:tNetAddr; var ex:tMemoryStream);
   var rx:string[100];
   begin
-  SetLength(rx,exl);
-  Move(exp^,rx[1],exl);
-  writeln('dhlt: called back ',string(source),' caps=',scaps,' extra[',exl,']=',rx);
+  SetLength(rx,ex.left);
+  ex.Read(rx[1],length(rx));
+  writeln('dhlt: called back ',string(source),' extra[',length(rx),']=',rx);
 end;
 
 function Cap32Handler(const source:tNetAddr; caps:byte; const Target:tPID; var extra:tMemoryStream):boolean;

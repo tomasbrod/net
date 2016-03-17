@@ -25,6 +25,7 @@ tFetch=object
   Done: boolean;
   Error: tErr;
   procedure Abort(callback:tCb1); experimental;
+  procedure AddSource(const srce:tNetAddr); unimplemented;
   {$hint get fraction done, total size, rate, size}
   private
   observers: array of tCb1;
@@ -82,6 +83,10 @@ function FetchObject(fid:tFID; srce:tNetAddr; prio:Byte; callback:tCb1): pFetch;
   result:=p;
 end;
 
+procedure tFetch.AddSource(const srce:tNetAddr);
+  begin
+end;
+
 procedure tFetch.OTJobHandler;
   var i:integer;
   begin
@@ -101,6 +106,7 @@ procedure tFetch.OTJobHandler;
     else AbstractError;
   end;
   writeln('Fetch.OTJobHandler: ',done,error);
+  {$note the fetch should be unlinked now and deleted after callbacks}
   for i:=0 to high(observers) do observers[i];
 end;
 

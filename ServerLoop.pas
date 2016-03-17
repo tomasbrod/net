@@ -4,7 +4,7 @@ INTERFACE
 uses MemStream,NetAddr,UnixType,Sockets;
 
 procedure Main;
-procedure RequestTerminate;
+procedure RequestTerminate(c:byte);
 
 {#Message handling#}
 type tSMsg=object
@@ -27,6 +27,7 @@ procedure SendMessage(const data; len:word; const rcpt:tNetAddr; channel:word );
 type tFDEventHandler=procedure(ev:Word) of object;
 type tOnTimer=procedure of object;
 procedure WatchFD(fd:tHandle; h:tFDEventHandler);
+procedure WatchFDRW(fd:tHandle; h:tFDEventHandler);
 procedure Shedule(timeout{ms}: LongWord; h:tOnTimer);
 procedure UnShedule(h:tOnTimer);
  {note unshed will fail when called from OnTimer proc}
@@ -41,6 +42,7 @@ function OptParamCount(o:word):word;
 
 var OnTerminate:procedure;
 var VersionString:string[63];
+const VersionBrand='BrodNetD';
 
 type tTimeVal=UnixType.timeval;
 type tMTime=DWORD;
@@ -145,6 +147,11 @@ procedure SignalHandler(sig:cint);CDecl;
   if terminated then raise eControlC.Create('CtrlC DoubleTap') ;
   Terminated:=true;
  end;
+procedure FatalSignalHandler(sig:cint);CDecl;
+  begin
+  raise eExternal.Create('Unexpected Signal '+IntToStr(sig)) ;
+  Terminated:=true;
+end;
 
 {index=iphash+opcode}
 type tPeerTableBucket=record
@@ -314,6 +321,7 @@ procedure ShedRun;
  end;
 end;
 
+var ReExec:boolean=false;
 procedure Main;
  begin
  s_setupInet;
@@ -340,6 +348,7 @@ procedure Main;
  end;
  if assigned(onTerminate) then onTerminate;
  CloseSocket(s_inet);
+ if ReExec then fpExecv(paramstr(0),argv);
 end;
 
 procedure SetMsgHandler(OpCode:byte; handler:tMessageHandler);
@@ -347,14 +356,13 @@ begin assert(hnd[OpCode]=nil); hnd[OpCode]:=handler; end;
 procedure SetHiMsgHandler(handler:tMessageHandler);
 begin Hihnd:=handler; end;
 
-procedure WatchFD(fd:tHandle; h:tFDEventHandler);
+procedure WatchFD(fd:tHandle; h:tFDEventHandler; e:LongWord);
  var opt: tPollTop;
 begin
  if assigned(h) then begin
   PollHnd[pollTop].CB:=h;
   PollArr[pollTop].fd:=fd;
-  PollArr[pollTop].events:=POLLERR or POLLHUP or POLLIN or POLLPRI or 
-  POLLRDBAND or POLLRDNORM;
+  PollArr[pollTop].events:=e;
   PollArr[pollTop].revents:=0;
   //writeln('Add watch ',pollTop,' on ',fd,' to ',IntToHex(qword(@h),8));
   Inc(PollTop);
@@ -369,6 +377,16 @@ begin
   PollArr[pollTop].revents:=0;
   break;
  end;
+end;
+procedure WatchFD(fd:tHandle; h:tFDEventHandler);
+  begin
+  WatchFD(fd,h,POLLERR or POLLHUP or POLLIN or POLLPRI or 
+  POLLRDBAND or POLLRDNORM);
+end;
+procedure WatchFDRW(fd:tHandle; h:tFDEventHandler);
+  begin
+  WatchFD(fd,h,POLLERR or POLLHUP or POLLIN or POLLPRI or 
+  POLLRDBAND or POLLRDNORM or POLLOUT);
 end;
 
 procedure Shedule(timeout{ms}: LongWord; h:tOnTimer);
@@ -423,19 +441,22 @@ function OptParamCount(o:word):word;
   else break;
  end;
 end;
-procedure RequestTerminate;
-begin Terminated:=true end;
+procedure RequestTerminate(c:byte);
+begin Terminated:=true;
+  if c=9 then ReExec:=true;
+end;
 
 var i:byte;
 var nb:array [0..0] of byte;
 {$I gitver.inc}
 BEGIN
- writeln('ServerLoop: BrodNetD ',GIT_VERSION);
+ writeln('ServerLoop: ',VersionBrand,' ',GIT_VERSION);
  VersionString:=GIT_VERSION;
  mNow:=0;
  Randomize;
  fpSignal(SigInt,@SignalHandler);
  fpSignal(SigTerm,@SignalHandler);
+ fpSignal(SigPipe,baseunix.signalhandler(SIG_IGN));
  for i:=1 to high(hnd) do hnd[i]:=nil;
  for i:=1 to high(PT) do PT[i]:=nil;
  PT_opcodes:=[];
