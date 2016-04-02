@@ -18,7 +18,7 @@ type tStoreObject=object(MemStream.tCommonStream)
   constructor Init(id: tFID);
   
   destructor  Close;
-  procedure Reference(adj: integer);
+  procedure Reference(const adj: integer);
   procedure Seek(abs:longword); virtual;
   function  Tell:LongWord; virtual;
   procedure Read(out blk; len:word); virtual;
@@ -119,34 +119,37 @@ constructor tStoreObject.Init(id: tFID);
   end;
   Seek(0);
   fid:=id;
+  //writeln('Store2.Open: ',string(fid),' small=',small,' base=',base);
 end;
-procedure tStoreObject.Reference(adj: integer);
+procedure tStoreObject.Reference(const adj: integer);
   var hdr:tHeader;
   var des:tDescr;
+  var nref:integer;
   begin
   {$note refc may get below zero and then some refs may be lost}
   if small then begin
     EnterCriticalSection(lock);
     db.GetVal(fid,des);
-    adj:=adj+Word(des.RefCount);
-    if adj<0 then adj:=0;
-    des.RefCount:=adj;
+    nref:=adj+Word(des.RefCount);
+    if nref<0 then nref:=0;
+    des.RefCount:=nref;
     db.SetVal(fid,des);
     LeaveCriticalSection(lock);
+    if adj<0 then self.Close;
   end else begin
     System.Seek(handle,0);
     System.BlockRead(handle,hdr,sizeof(hdr));
-    adj:=adj+word(hdr.RefCount);
-    if adj<0 then adj:=0;
-    hdr.RefCount:=adj;
+    nref:=adj+word(hdr.RefCount);
+    if nref<0 then nref:=0;
+    hdr.RefCount:=nref;
     hdr.mark:=cMark;
     System.Seek(handle,0);
     System.BlockWrite(handle,hdr,sizeof(hdr));
     Seek(vpos);
-    if adj=0 then begin
-      System.Close(handle);
-      System.Erase(handle);
-    end;
+    if adj<0 then begin
+      self.Close;
+      if nref<=0 then System.Erase(handle);
+    end else assert(nref>0,'Refcount went to 0 by non-negative adjustment');
   end;
 end;
 destructor tStoreObject.Close;
@@ -175,10 +178,11 @@ function CacheKeep(id:tFID; var f:file):boolean;
 procedure Reference(const id: tFID; adj: integer);
   var so:tStoreObject;
   begin
+  //writeln('Store2.DirectReference: ',string(id),' ',adj);
   if adj=0 then exit;
   so.Init(id);
   so.Reference(adj);
-  so.Close;
+  if adj>=0 then so.Close;
 end;
 
 procedure HashAndCopy(var inf,outf:file; out id:tFID; icopy:boolean);

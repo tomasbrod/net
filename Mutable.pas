@@ -102,6 +102,7 @@ function SetMutable( var so:tStoreObject; out meta:tMutableMeta ): boolean;
   if oldis then begin
     oldfid:=meta.fid;
     if DWord(meta.Ver)>=DWord(ph.Ver) then begin
+      meta.fid:=mid;
       result:= true; exit end;
   end;
   {hash for signature check}
@@ -122,6 +123,7 @@ function SetMutable( var so:tStoreObject; out meta:tMutableMeta ): boolean;
   if oldis then Store2.Reference(oldfid,-1);
   {reference the new object and dereference the old one}
   so.Reference(+1);
+  meta.fid:=mid;
   result:=true;
 end;
 
@@ -359,4 +361,5 @@ BEGIN
   db.Init('mutable.dat',sizeof(tMutableMeta), 128);
   writeln('Mutable: Database initialized, valsz=',db.valsz,' bktsz=',db.bucksz);
   //dht.RegisterCapability(capMutable,@CapHMutable);
+  //SetMsgHandler(opcode.mutableUpdate,@recvUpdate);
 END.

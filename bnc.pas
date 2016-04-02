@@ -67,26 +67,24 @@ var op:word;
 var pl:tMemoryStream;
 var rpl:tMemoryStream;
 var path:string;
+type tMutEvt=(
+      meSearchEnd=1, meSearchFound, meSearchInvalid, meFetchStart,
+      meFetchLocal,  meFetchSource, meFetchDone,     meFetchError,
+      meCheckOK,     meCheckOld,    meFetchBad,      meSendOld,
+      meSendNew,     meSendTo,      meSendEnd
+             );
 procedure ShowPUPD;
   var st:byte;
+  var id:tKey20;
+  var ad:tNetAddr;
   begin
   repeat
     CopySP(sck,rpl); rpl.seek(0);
     st:=rpl.ReadByte;
-    if st=1 then writeln('search exhausted')
-    else if (st=2)and(rpl.left>=49)
-    then writeln('found version ',rpl.ReadWord(2),' from ',string(tNetAddr(rpl.ReadPtr(24)^)),' fid ',string(tkey20(rpl.ReadPtr(20)^)))
-    else if (st=3)and(rpl.left>=2)
-    then writeln('fetching version ',rpl.ReadWord(2))
-    else if (st=4)and(rpl.left>=0)
-    then writeln('transfer failed')
-    else if (st=5)and(rpl.left>=0)
-    then writeln('file corrupted or not a profile')
-    else if (st=6)and(rpl.left>=2)
-    then writeln('updated to version ',rpl.ReadWord(2))
-    else if (st=7)and(rpl.left>=0)
-    then writeln('no newer versions found')
-  until st in [6,7];
+    rpl.Read(id,20);
+    rpl.read(ad,24);
+    writeln(tMutEvt(st),' ',string(id),' ',string(ad));
+  until tMutEvt(st)=meSendEnd;
 end;
 BEGIN
   if paramcount=0 then begin writeln('Invalid parameters'); halt(1) end;

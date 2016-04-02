@@ -87,6 +87,7 @@ end;
 
 procedure tClient.Done;
  begin
+ Int;
  ServerLoop.WatchFD(s,nil);
  fpClose(s);
  FreeMem(@self,sizeof(self));
@@ -162,6 +163,7 @@ procedure tClient.Event(ev:word);
   resp_stream.Init(cBuf);
   resp_stream.Write(arg,2);
   //Writeln('CtrlLow.Event: method=',hdr.method,' arglen=',hdr.length);
+  Int;
   methods[hdr.method].ptr(self,msg_stream,resp_stream);
   if not error then begin
     resp_stream.Seek(0);

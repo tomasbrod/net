@@ -6,6 +6,7 @@ USES ServerLoop,opcode
     ,SysUtils
     ,dht,dhtLookup
     ,Store2
+    ,Mutable
     //,Fetch
     ;
 
@@ -14,16 +15,17 @@ type tClient=object
   error:boolean;
   SndObj:^Store2.tStoreObject;
   SndObjLeft:LongWord;
-  search:^dhtLookup.tSearch;
+  mutator:^tMutator;
   //transf:^Fetch.tFetch;
   procedure Init(i_s:tSocket);
   procedure Init2;
   procedure Done;
+  procedure Int;
   procedure Event(ev:word);
   procedure SendTo(msg:tMemoryStream);
   procedure SendObject(var o:tStoreObject; ilen:LongWord);
-  {procedure SP1(const pid:tPID);
-  procedure SP2(const Source:tNetAddr; var extra:tMemoryStream);}
+  procedure MutatorComplete;
+  procedure MutatorEvent( ev:tMutEvt; ver:longword; const fid:tFID; const Src:tNetAddr );
 end;
 {$I CtrlLow.pas}
 
@@ -97,21 +99,22 @@ procedure StoreGet(var client:tClient; var a,r:tMemoryStream);
   o.Close;
 end;
 
-(*procedure ProfileSet(var client:tClient; var a,r:tMemoryStream);
+procedure MutableSet(var client:tClient; var a,r:tMemoryStream);
   var fid:^tFID;
-  var pid:tPID;
+  var meta:tMutableMeta;
   var o:tStoreObject;
   var valid:boolean;
   begin
   fid:=a.ReadPtr(20);
   try
     o.Init(fid^);
-    valid:=CacheProfile(o, pid);
+    valid:=SetMutable(o, meta);
     if valid then begin
       r.WriteByte(0);
-      r.Write(pid,20);
-      r.WriteWord($FFFFFFFF,4);
+      r.Write(meta.fid,20);
+      r.WriteWord(meta.ver,4);
     end else r.WriteByte(1);
+    o.Close;
   except
     on eObjectNF do r.WriteByte(opcode.otNotFound);
     on eInOutError do r.WriteByte(opcode.otFail);
@@ -119,63 +122,58 @@ end;
   end;
 end;
 
-procedure ProfileGet(var client:tClient; var a,r:tMemoryStream);
-  var des:tProfileMeta;
+procedure MutableGet(var client:tClient; var a,r:tMemoryStream);
+  var des:tMutableMeta;
   var found:boolean;
   var pid:^tPID;
   begin
   pid:=a.ReadPtr(20);
-  found:=GetProfileMeta(pid^,des);
+  found:=GetMutable(pid^,des);
   if found then begin
     r.WriteByte(0);
     r.Write(des.FID,20);
-    r.Write(des.Update,4);
+    r.Write(des.Ver,4);
   end else begin
     r.WriteByte(opcode.otNotFound);
   end;
 end;
 
-procedure ProfileUpdate(var client:tClient; var a,r:tMemoryStream);
+procedure MutableUpdate(var client:tClient; var a,r:tMemoryStream);
   var pid:^tPID;
   begin
   pid:=a.ReadPtr(20);
-  client.SP1(pid^);
+  New(client.mutator);
+  with client.mutator^ do begin
+    Init(pid^);
+    onEvent:=@client.MutatorEvent;
+    onComplete:=@client.MutatorComplete;
+  end;
   r.WriteByte(0);
-end; procedure tClient.SP1(const pid:tPID);
+end;
+
+procedure tClient.MutatorComplete;
   begin
-  New(search);
-  search^.Init(pid,capProfile,@SP2);
-  writeln('Ctrl.SP1: going to lookup profile ',string(search^.Target));
-  search^.Start;
-end; procedure tCLient.SP2(const Source:tNetAddr; var extra:tMemoryStream);
-  var fid:^tfID;
-  var upd:LongWord;
+end;
+
+procedure tClient.MutatorEvent( ev:tMutEvt; ver:longword; const fid:tFID; const Src:tNetAddr );
   var r:tMemoryStream;
   begin
-  if Source.isNil then begin
-    r.Init(3);r.WriteWord(1,2);
-    r.WriteByte(1);
-    SendTo(r);r.Free;
-    writeln('Ctrl.SP2: exhausted');
-    {todo: fetch}
-  end else if extra.left>=24 then begin
-    fid:=extra.ReadPtr(20);
-    upd:=extra.ReadWord(4);
-    r.Init(50);r.skip(2);
-    r.WriteByte(2);
-    r.WriteWord(upd,4);
-    r.Write(source,sizeof(tNetAddr));
-    r.Write(fid^,20);
-    r.Seek(0);r.WriteWord(r.Length,2);SendTo(r);r.Free;
-    writeln('Ctrl.SP2: ',upd,' from ',string(Source),' fid ',string(fid^));
-    {todo: save}
-  end else writeln('Ctrl.SP2: invalid from ',string(Source));
-end;*)
+  r.Init(49);
+  r.WriteByte(ORD(ev));
+  r.WriteWord(ver,4);
+  r.Write(fid,20);
+  r.Write(Src,24);
+  SendTo(r);r.free;
+  if ev=meSendEnd then mutator:=nil;
+end;
 
 procedure tClient.Init2; begin
   SndObjLeft:=0;
-  search:=nil;
+  mutator:=nil;
   //trans:=nil;
+end;
+procedure tCLient.Int; begin
+  if assigned(mutator) then mutator^.done; mutator:=nil;
 end;
 BEGIN
  Server1.Init;
@@ -192,8 +190,8 @@ BEGIN
  {ethods[09] StorePut}
  methods[10].Init(@StoreGet,28);
  {ethods[11] StoreRef}
- {methods[12].Init(@ProfileGet,sizeof(tPID));}
- {methods[13].Init(@ProfileSet,sizeof(tFID));}
+ methods[12].Init(@MutableGet,sizeof(tPID));
+ methods[13].Init(@MutableSet,sizeof(tFID));
  {ethods[14].Init(@ProfileList,0);}
  {methods[15].Init(@ProfileUpdate,sizeof(tFID));}
 END.
