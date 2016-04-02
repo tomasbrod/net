@@ -10,8 +10,8 @@ uses cthreads,ServerLoop
 	,ECC
 	,Ctrl
   ,dhlt
-  ,TestPRC
-  ,TestPRL
+  ,TestMutable
+  //,TestMutator
 	;
 
 BEGIN

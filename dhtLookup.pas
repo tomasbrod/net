@@ -159,7 +159,7 @@ end;
 
 procedure tSearch.Close;
   begin
-  {$hint todo check for identical search and mark as active if active}
+  {$hint todo check for identical search and mark as active if self.active}
   Closed:=true;
 end;
 
@@ -191,6 +191,7 @@ procedure RecvCapable(msg:tSMsg);
     if (sr^.caps=caps)and(sr^.Target=sTarget^) then begin
       sr^.AddPeer(sID^,msg.Source^,true);
       writeln('dhtLookup.AddCapable@',string(sr),' ',string(msg.Source^),' caps=',caps,' exl=',msg.stream.left);
+      {$warning todo filter multiple results from same peer}
       if assigned(sr^.callback) then sr^.Callback(msg.Source^,msg.stream);
     end;
     sr:=sr^.next;

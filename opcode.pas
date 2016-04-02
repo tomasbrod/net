@@ -26,7 +26,8 @@ const {ObjectTransfer magic numbers}
  otSINC=otInfo+4; {DLE Explicit Ack Request}
  otRateInfo=otInfo+5; {DLE Rate Adjust Debug info}
 const {dht node Capabilities}
- capProfile=1;
+ capProfile=1 deprecated;
+ capMutable=1;
  capTest=32;
 
 IMPLEMENTATION
