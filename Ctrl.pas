@@ -6,7 +6,6 @@ USES ServerLoop,opcode
     ,SysUtils
     ,dht,dhtLookup
     ,Store2
-    ,ProfileCache
     //,Fetch
     ;
 
@@ -23,8 +22,8 @@ type tClient=object
   procedure Event(ev:word);
   procedure SendTo(msg:tMemoryStream);
   procedure SendObject(var o:tStoreObject; ilen:LongWord);
-  procedure SP1(const pid:tPID);
-  procedure SP2(const Source:tNetAddr; var extra:tMemoryStream);
+  {procedure SP1(const pid:tPID);
+  procedure SP2(const Source:tNetAddr; var extra:tMemoryStream);}
 end;
 {$I CtrlLow.pas}
 
@@ -98,7 +97,7 @@ procedure StoreGet(var client:tClient; var a,r:tMemoryStream);
   o.Close;
 end;
 
-procedure ProfileSet(var client:tClient; var a,r:tMemoryStream);
+(*procedure ProfileSet(var client:tClient; var a,r:tMemoryStream);
   var fid:^tFID;
   var pid:tPID;
   var o:tStoreObject;
@@ -171,7 +170,7 @@ end; procedure tCLient.SP2(const Source:tNetAddr; var extra:tMemoryStream);
     writeln('Ctrl.SP2: ',upd,' from ',string(Source),' fid ',string(fid^));
     {todo: save}
   end else writeln('Ctrl.SP2: invalid from ',string(Source));
-end;
+end;*)
 
 procedure tClient.Init2; begin
   SndObjLeft:=0;
@@ -193,10 +192,10 @@ BEGIN
  {ethods[09] StorePut}
  methods[10].Init(@StoreGet,28);
  {ethods[11] StoreRef}
- methods[12].Init(@ProfileGet,sizeof(tPID));
- methods[13].Init(@ProfileSet,sizeof(tFID));
+ {methods[12].Init(@ProfileGet,sizeof(tPID));}
+ {methods[13].Init(@ProfileSet,sizeof(tFID));}
  {ethods[14].Init(@ProfileList,0);}
- methods[15].Init(@ProfileUpdate,sizeof(tFID));
+ {methods[15].Init(@ProfileUpdate,sizeof(tFID));}
 END.
 {profile update:
   - async query

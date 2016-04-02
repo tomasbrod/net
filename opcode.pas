@@ -10,6 +10,7 @@ const {dgram opcode}
  dhtRequest=10;
  dhtPeers=11;
  dhtCapable=16;
+ mutableUpdate=17;
 const {chat init}
  upFileServer=2 deprecated;
  crAuthReq=3;

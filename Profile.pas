@@ -1,4 +1,4 @@
-UNIT Profile;
+UNIT Profile deprecated;
 {
   structures of User Profile
 }
