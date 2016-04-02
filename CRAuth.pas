@@ -1,5 +1,6 @@
 unit CRAuth;
 {Challenge-Response Authenticator}
+{This should be reimplemented without Chat and in 1 Roundtrip}
 INTERFACE
 USES NetAddr,ECC,SHA512,Chat,ServerLoop,MemStream,opcode;
 type

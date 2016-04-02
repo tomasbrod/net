@@ -26,6 +26,8 @@ tFetch=object
   Error: tErr;
   procedure Abort(callback:tCb1); experimental;
   procedure AddSource(const srce:tNetAddr); unimplemented;
+  procedure SetMaxSize(i:LongWord); unimplemented;
+  function FID:tFID;
   {$hint get fraction done, total size, rate, size}
   private
   observers: array of tCb1;
@@ -43,19 +45,19 @@ uses SysUtils,opcode,MemStream;
 var Running:^tFetch;
 
 function FetchObject(fid:tFID; srce:tNetAddr; prio:Byte; callback:tCb1): pFetch;
-  var f:file of byte;
-  var iores:word;
+  var so:tStoreObject;
   var p:^tFetch;
   var oi:word;
   begin
   result:=nil;
-  {$I-}
-  AssignObject(f, fid);
-  Reset(f); Close(f);
-  iores:=IOResult;
-  {$I+}
-  if IORes=0 then exit;
-  if IORes>3 then raise eInOutError.Create('I/O Error '+IntToStr(iores));
+  try
+    so.Init(fid);
+    so.Close;
+    exit;
+  except
+    on eObjectNF do;
+    else raise;
+  end;
   {check for running transfer}
   p:=Running;
   while assigned(p) do if p^.transfer.fid=fid then break else p:=p^.next;
@@ -83,6 +85,13 @@ function FetchObject(fid:tFID; srce:tNetAddr; prio:Byte; callback:tCb1): pFetch;
   result:=p;
 end;
 
+function tFetch.FID:tFID;
+  begin
+  FID:=Transfer.FID;
+end;
+procedure tFetch.SetMaxSize(i:LongWord);
+  begin
+end;
 procedure tFetch.AddSource(const srce:tNetAddr);
   begin
 end;
@@ -92,7 +101,7 @@ procedure tFetch.OTJobHandler;
   begin
   case transfer.error of
     1:begin
-      if HashObjectCheckID(transfer.dataf,transfer.fid)
+      if HashObjectRenameCheckID(transfer.dataf,transfer.fid)
       then begin
         done:=true;
         if length(observers)>1 then Reference(transfer.fid,length(observers)-1);
@@ -106,8 +115,10 @@ procedure tFetch.OTJobHandler;
     else AbstractError;
   end;
   writeln('Fetch.OTJobHandler: ',done,error);
-  {$note the fetch should be unlinked now and deleted after callbacks}
+  if assigned(prev) then prev^.next:=next;
+  if assigned(next) then next^.prev:=prev;
   for i:=0 to high(observers) do observers[i];
+  FreeMem(@self,sizeof(self));
 end;
 
 procedure tFetch.Abort(callback:tCb1);
