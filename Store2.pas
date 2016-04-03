@@ -140,7 +140,10 @@ procedure tStoreObject.Reference(const adj: integer);
     System.Seek(handle,0);
     System.BlockRead(handle,hdr,sizeof(hdr));
     nref:=adj+word(hdr.RefCount);
-    if nref<0 then nref:=0;
+    if nref<0 then begin
+      nref:=0;
+      writeln('Store2.Reference: Refcount going negative on ',string(fid));
+    end;
     hdr.RefCount:=nref;
     hdr.mark:=cMark;
     System.Seek(handle,0);
