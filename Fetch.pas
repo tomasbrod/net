@@ -101,10 +101,11 @@ procedure tFetch.OTJobHandler;
   begin
   case transfer.error of
     1:begin
+       {$hint todo use StoreObject interface and expose it to callback}
       if HashObjectRenameCheckID(transfer.dataf,transfer.fid)
       then begin
         done:=true;
-        if length(observers)>1 then Reference(transfer.fid,length(observers)-1);
+        Reference(transfer.fid,length(observers));
       end else error:=errCorrupt;
     end;
     2:error:=errFileSys;
