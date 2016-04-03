@@ -379,7 +379,9 @@ procedure recvUpdate(msg:tSMsg);
   mid:=s.readPtr(20);
   fid:=s.readPtr(20);
   {Consult DB}
-  GetMutable(mid^,meta); mver:=meta.ver;
+  if GetMutable(mid^,meta)
+  then mver:=meta.ver
+  else mver:=0;
   if mver<ver then begin
     if UpdatesInProgress>=16 then begin
       writeln('Mutable.recvUpdate: too many updates');
