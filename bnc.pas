@@ -18,7 +18,7 @@ procedure CopySP(var s1:tCommonStream; var s2:tMemoryStream);
   var l:word;
   begin
   s1.Read(l,2);l:=ntohs(l);
-  s2.Trunc;
+  s2.Seek(0);s2.Trunc;
   if l>s2.WrBufLen then raise eInvalidMemStreamAccess.Create('Write out of bounds');
   s1.Read(s2.WrBuf^, l);
   s2.WrEnd(l);
@@ -75,15 +75,19 @@ type tMutEvt=(
              );
 procedure ShowPUPD;
   var st:byte;
+  var ve:LongWord;
   var id:tKey20;
   var ad:tNetAddr;
+  var tb:tDateTime;
   begin
+  tb:=Now;
   repeat
     CopySP(sck,rpl); rpl.seek(0);
     st:=rpl.ReadByte;
+    ve:=rpl.ReadWord(4);
     rpl.Read(id,20);
     rpl.read(ad,24);
-    writeln(tMutEvt(st),' ',string(id),' ',string(ad));
+    writeln(round((Now-tb)*MsecsPerDay),' ',st,' ',ve,' ',string(id),' ',string(ad));
   until tMutEvt(st)=meSendEnd;
 end;
 BEGIN

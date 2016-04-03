@@ -158,12 +158,15 @@ end;
 procedure tClient.MutatorEvent( ev:tMutEvt; ver:longword; const fid:tFID; const Src:tNetAddr );
   var r:tMemoryStream;
   begin
-  r.Init(49);
+  r.Init(51);r.WriteWord(49,2);
   r.WriteByte(ORD(ev));
   r.WriteWord(ver,4);
-  r.Write(fid,20);
-  r.Write(Src,24);
-  SendTo(r);r.free;
+  if @fid<>nil then r.Write(fid,20) else r.Wrend(20);
+  if @src<>nil then r.Write(Src,24) else r.Wrend(24);
+  assert(r.length=51);
+  writeln('Ctrl.tClient.MutatorEvent: ',ev, ' ',r.Length);
+  SendTo(r);
+  r.free;
   if ev=meSendEnd then mutator:=nil;
 end;
 
@@ -193,7 +196,7 @@ BEGIN
  methods[12].Init(@MutableGet,sizeof(tPID));
  methods[13].Init(@MutableSet,sizeof(tFID));
  {ethods[14].Init(@ProfileList,0);}
- {methods[15].Init(@ProfileUpdate,sizeof(tFID));}
+ methods[15].Init(@MutableUpdate,sizeof(tFID));
 END.
 {profile update:
   - async query
