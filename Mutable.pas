@@ -411,7 +411,7 @@ procedure tMutableUpdate.ev;
     else writeln('Mutable.Update.ev: ',string(Src),' invalid signature!');
     so.Reference(-1);
   end else begin
-    writeln('Mutable.Update.ev: ',string(Src),' Fetch failed');
+    writeln('Mutable.Update.ev: ',string(Src),' Fetch failed ',J^.Error);
   end;
   FreeMem(@self,sizeof(self));
 end;

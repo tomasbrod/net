@@ -116,7 +116,7 @@ procedure tFetch.OTJobHandler;
     else AbstractError;
   end;
   writeln('Fetch.OTJobHandler: ',done,' ',error);
-  if assigned(prev) then prev^.next:=next;
+  if assigned(prev) then prev^.next:=next else Running:=next;
   if assigned(next) then next^.prev:=prev;
   for i:=0 to high(observers) do observers[i];
   FreeMem(@self,sizeof(self));
