@@ -355,7 +355,6 @@ function CapHMutable(const source:tNetAddr; caps:byte; const Target:tPID; var ex
     SendMessage(r.base^,r.length,source);
     FreeMem(r.base,r.size);
   end;
-  result:=true;
 end;
 
 (****** Upate on Notify ******)
