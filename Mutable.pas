@@ -270,11 +270,9 @@ procedure tMutator.DoSendLocals;
   var dbMeta:tMutableMeta;
   begin
   Sending:=true;
-  if GetMutable(Target,dbMeta) and (LongWord(dbMeta.Ver)>LongWord(FinalMeta.Ver)) then begin
-    FinalMeta:=dbMeta;
-    if assigned(OnEvent) then OnEvent(meSendOld,FinalMeta.Ver,FinalMeta.Fid,tNetAddr(nil^));
-  end
-  else if assigned(OnEvent) then OnEvent(meSendNew,FinalMeta.Ver,FinalMeta.Fid,tNetAddr(nil^));
+  if GetMutable(Target,dbMeta) then FinalMeta:=dbMeta;
+  writeln('Mutable.DoSendLocals: Will send ',string(FinalMeta.FID),' v',LongWord(FinalMeta.Ver));
+  if assigned(OnEvent) then OnEvent(meSendNew,FinalMeta.Ver,FinalMeta.Fid,tNetAddr(nil^));
   {send update to Found and Peers}
   Shedule(300,@DoSendLocals2);
   OnComplete; {signal success, may destroy self, must be called last}
@@ -286,12 +284,12 @@ procedure tMutator.DoSendLocals2;
   procedure SendTo(const trg:tNetAddr);
     var pk:tMemoryStream;
     begin
-    if assigned(OnEvent) then OnEvent(meSendTo,CurrentFetch.Ver,CurrentFetch.Fid,Trg);
+    if assigned(OnEvent) then OnEvent(meSendTo,FinalMeta.Ver,FinalMeta.Fid,Trg);
     pk.Init(45);
     pk.WriteByte(opcode.mutableUpdate);
-    pk.WriteWord(CurrentFetch.Ver,4);
+    pk.WriteWord(FinalMeta.Ver,4);
     pk.Write(Target,20);
-    pk.Write(CurrentFetch.FID,20);
+    pk.Write(FinalMeta.FID,20);
     ServerLoop.SendMessage(pk.base^,pk.Length, Trg );
     pk.Free;
   end;
@@ -373,7 +371,6 @@ procedure recvUpdate(msg:tSMsg);
   var fid,mid:^tFID;
   var meta:tMutableMeta;
   var o:^tMutableUpdate;
-  var f:^tFetch;
   begin
   s.skip(1);
   ver:=s.readword(4);

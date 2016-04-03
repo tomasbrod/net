@@ -156,7 +156,7 @@ procedure tStoreObject.Reference(const adj: integer);
   end;
 end;
 destructor tStoreObject.Close;
-  begin System.Close(handle) end;
+  begin try System.Close(handle) except end end;
 procedure tStoreObject.Seek(abs:longword);
   begin
   vpos:=abs;

@@ -115,7 +115,7 @@ procedure tFetch.OTJobHandler;
     opcode.otNotFound:error:=errNotFound;
     else AbstractError;
   end;
-  writeln('Fetch.OTJobHandler: ',done,error);
+  writeln('Fetch.OTJobHandler: ',done,' ',error);
   if assigned(prev) then prev^.next:=next;
   if assigned(next) then next^.prev:=prev;
   for i:=0 to high(observers) do observers[i];
