@@ -250,18 +250,25 @@ function DoSock(var p:tPollFD):boolean;
  end;
 end;
 
-var GetMTimeOffset:QWORD=0;
+var GetMTimeOffsetSec:DWORD=0;
 function GetMTime:tMTime;
  {$IFDEF UNIX}
  var time:UnixType.timespec;
  var trans:QWORD;
  begin
  assert(clock_gettime(CLOCK_MONOTONIC,@time)=0);
- trans:=(time.tv_sec*1000)+(time.tv_nsec div 1000000);
- trans:=(trans-GetMTimeOffset);
+ trans:=((time.tv_sec-GetMTimeOffsetSec)*1000)+(time.tv_nsec div 1000000);
  GetMTime:=trans and $FFFFFFFF;
  {$ELSE}{$ERROR Not Implemented on non unix}
  begin GetMTime:=0;
+{$ENDIF}end;
+procedure InitMTime; {$IFDEF UNIX}
+ var time:UnixType.timespec;
+ begin
+ assert(clock_gettime(CLOCK_MONOTONIC,@time)=0);
+ GetMTimeOffsetSec:=time.tv_sec;
+ {$ELSE}{$ERROR Not Implemented on non unix}
+ begin
 {$ENDIF}end;
 
 {$IFDEF Linux}
@@ -463,7 +470,7 @@ BEGIN
  pollTop:=1; {1 for basic listen}
  ShedTop:=nil;
  ShedUU:=nil; {todo: allocate a few to improve paging}
- GetMTimeOffset:=GetMTime;
+ InitMTime;
  LastShed:=GetMTime;
  if OptIndex('-h')>0 then DoShowOpts:=true;
  OnTerminate:=nil;
