@@ -369,6 +369,7 @@ end;
 procedure recvUpdate(msg:tSMsg);
   var s:tMemoryStream absolute msg.stream;
   var ver,mver:LongWord;
+  var has:boolean;
   var fid,mid:^tFID;
   var meta:tMutableMeta;
   var o:^tMutableUpdate;
@@ -379,10 +380,8 @@ procedure recvUpdate(msg:tSMsg);
   mid:=s.readPtr(20);
   fid:=s.readPtr(20);
   {Consult DB}
-  if GetMutable(mid^,meta)
-  then mver:=meta.ver
-  else mver:=0;
-  if mver<ver then begin
+  has:=GetMutable(mid^,meta); mver:=meta.ver;
+  if (not has) or (mver<ver) then begin
     if UpdatesInProgress>=16 then begin
       writeln('Mutable.recvUpdate: too many updates');
     exit end;
