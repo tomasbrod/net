@@ -1,6 +1,6 @@
 unit dhtLookup;
 INTERFACE
-uses ServerLoop,dht,NetAddr;
+uses ServerLoop,dht,NetAddr,MemStream;
 
 type
   tPID=dht.tPID;
@@ -9,15 +9,17 @@ type
     reqc,
     rplc:byte;{1=replied with cap, 2=replied with peers}
     end;
+  tSearchCB=procedure(const Source:tNetAddr; var extra:tMemoryStream) of object;
   tSearch=object
     Target:tPID;
     Caps:byte;
     Extra:string[48];
     Peers:array [0..10] of tSearchPeer;
     Passive,Closed:boolean;
-    Callback:procedure(const Source:tNetAddr; scaps:byte; exl:word; exp:pointer) of object;
+    Callback:tSearchCB;
     ObjectPointer:pointer;
     procedure Init;
+    procedure Init( const iTarget: tPID; iCaps:byte; iCallback: tSearchCB );
     procedure Start;
     procedure Close;
     private
@@ -27,7 +29,7 @@ type
     procedure Periodic;
     end;
 IMPLEMENTATION
-uses MemStream,opcode,Store2;
+uses opcode,Store2;
 var Searches:^tSearch;
 
 procedure tSearch.Init;
@@ -39,6 +41,13 @@ procedure tSearch.Init;
   Closed:=false;
   Callback:=nil;
   for i:=high(peers) to 0 do Peers[i].Addr.Clear;
+end;
+procedure tSearch.Init( const iTarget: tPID; iCaps:byte; iCallback: tSearchCB );
+  begin
+  Init;
+  Target:=iTarget;
+  Caps:=iCaps;
+  Callback:=iCallback;
 end;
 
 procedure tSearch.Start;
@@ -135,9 +144,10 @@ procedure tSearch.Step;
   end; inc(again);
   until (again>1)or(rqc>=3)or(rpc>=6);
   if (rqc)=0 then begin
-    writeln('search failed'); Close;
     //search failed or exhausted
-    {$warning notify of search failure}
+    writeln('search failed');
+    if assigned(callback) then Callback('//nil',r);
+    Close;
   end else writeln;
 end;
 
@@ -149,7 +159,7 @@ end;
 
 procedure tSearch.Close;
   begin
-  {$hint todo check for identical search and mark as active if active}
+  {$hint todo check for identical search and mark as active if self.active}
   Closed:=true;
 end;
 
@@ -171,20 +181,18 @@ procedure RecvCapable(msg:tSMsg);
   var sr:^tSearch;
   var sID,sTarget:^tPID;
   var caps:byte;
-  var exl:word;
-  var exp:pointer;
+  var ex:tMemoryStream;
   begin
   msg.stream.skip(1);
   sID:=msg.stream.readptr(sizeof(tPID));
   sTarget:=msg.stream.readptr(sizeof(tPID));
   caps:=msg.stream.readByte;
-  exl:=msg.stream.RdBufLen;
-  exp:=msg.stream.readptr(exl);
   sr:=Searches; while assigned(sr) do begin
     if (sr^.caps=caps)and(sr^.Target=sTarget^) then begin
       sr^.AddPeer(sID^,msg.Source^,true);
-      writeln('dhtLookup.AddCapable@',string(sr),' ',string(msg.Source^),' caps=',caps,' exl=',exl);
-      if assigned(sr^.callback) then sr^.Callback(msg.Source^,caps,exl,exp);
+      writeln('dhtLookup.AddCapable@',string(sr),' ',string(msg.Source^),' caps=',caps,' exl=',msg.stream.left);
+      {$warning todo filter multiple results from same peer}
+      if assigned(sr^.callback) then sr^.Callback(msg.Source^,msg.stream);
     end;
     sr:=sr^.next;
   end;

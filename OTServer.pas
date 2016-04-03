@@ -459,6 +459,7 @@ function FindClient(const addr:tNetAddr; creat:boolean):tClient_ptr;
  result:=Clients;
  while assigned(result) do begin
   if result^.addr=addr then exit;
+  result:=result^.next;
  end;
  if creat then begin
   new(result);

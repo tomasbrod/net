@@ -3,17 +3,19 @@ INTERFACE
 USES MemStream,NetAddr,Store2;
 type tProfID=tKey20;
      tProfileID=tProfID;
-
-function CacheProfile( var so:tStoreObject; out id: tProfileID ): boolean;
-
-IMPLEMENTATION
-USES opcode,ServerLoop,DHT,HKVS,sha512,ed25519,Profile;
-var db:tHKVS;
-type tProfDesc=packed record
+type tProfileMeta=packed record
   fid:tFID;
   Update:Word4;
   pad: packed array [1..8] of byte;
   end;
+
+function CacheProfile( var so:tStoreObject; out id: tProfileID ): boolean;
+function GetProfileMeta(id: tProfileID; out meta:tProfileMeta): boolean;
+
+IMPLEMENTATION
+USES opcode,ServerLoop,DHT,HKVS,sha512,ed25519,Profile;
+var db:tHKVS;
+type tProfDesc=tProfileMeta;
 
 function CacheProfile( var so:tStoreObject; out id: tProfileID ): boolean;
   var ph:tProfileHeader;
@@ -63,6 +65,12 @@ function CacheProfile( var so:tStoreObject; out id: tProfileID ): boolean;
   {reference the new object and dereference the old one}
   so.Reference(+1);
   result:=true;
+end;
+
+
+function GetProfileMeta(id: tProfileID; out meta:tProfileMeta): boolean;
+  begin
+  result:=db.GetVal(id,meta);
 end;
 
 function CaphProfile(const source:tNetAddr; caps:byte; const Target:tPID; var extra:tMemoryStream):boolean;

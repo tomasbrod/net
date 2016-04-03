@@ -10,6 +10,7 @@ const {dgram opcode}
  dhtRequest=10;
  dhtPeers=11;
  dhtCapable=16;
+ mutableUpdate=17;
 const {chat init}
  upFileServer=2 deprecated;
  crAuthReq=3;
@@ -26,7 +27,8 @@ const {ObjectTransfer magic numbers}
  otSINC=otInfo+4; {DLE Explicit Ack Request}
  otRateInfo=otInfo+5; {DLE Rate Adjust Debug info}
 const {dht node Capabilities}
- capProfile=1;
+ capProfile=1 deprecated;
+ capMutable=1;
  capTest=32;
 
 IMPLEMENTATION

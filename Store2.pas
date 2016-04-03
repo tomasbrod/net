@@ -5,9 +5,11 @@ UNIT Store2;
 }
 INTERFACE
 USES Sha512,MemStream,SysUtils;
+const enablePack:boolean=false;
+{^do not change in runtime, typed only to remove cvompiler warning}
 
 type tFID=MemStream.tKey20;
-const cObjHeaderSize=64;
+const cObjHeaderSize=16;
 const cObjDir='obj/';
 type tStoreObject=object(MemStream.tCommonStream)
   fid:tFID; {these vars are READ ONLY for "reasons"}
@@ -16,7 +18,7 @@ type tStoreObject=object(MemStream.tCommonStream)
   constructor Init(id: tFID);
   
   destructor  Close;
-  procedure Reference(adj: integer);
+  procedure Reference(const adj: integer);
   procedure Seek(abs:longword); virtual;
   function  Tell:LongWord; virtual;
   procedure Read(out blk; len:word); virtual;
@@ -31,14 +33,13 @@ type tStoreObject=object(MemStream.tCommonStream)
   eObjectNF=class(eXception)
   end;
 
-procedure assignObject(var f:file; const id: tFID); deprecated;
 procedure assignTempObject(var f:file; const id: tFID; const ext:string);
 procedure Reference(const id: tFID; adj: integer);
 
 //procedure HashObject2(var f:file; out id:tFID);
-//function  HashObject2CheckID(var f:file; const id:tFID):boolean;
+function  HashObjectRenameCheckID(var f:file; const id:tFID):boolean;
 
-procedure HashObjectCopy(const fn:string; out id:tFID);
+procedure HashObjectCopy(const fn:ansistring; out id:tFID);
 
 IMPLEMENTATION
 USES NetAddr,HKVS;
@@ -71,6 +72,7 @@ procedure mkfn(const id: tFID; fn:pchar);
 end;
 
 procedure assignObject(var f:file; const id: tFID);
+  deprecated;
   var fn:array [0..44] of char;
   begin
   mkfn(id,@fn);
@@ -93,9 +95,11 @@ constructor tStoreObject.Init(id: tFID);
   var e2:word;
   begin
   Inherited Init;
-  EnterCriticalSection(lock);
-  small:=db.GetVal(id,des);
-  LeaveCriticalSection(lock);
+  if enablePack then begin
+    EnterCriticalSection(lock);
+    small:=db.GetVal(id,des);
+    LeaveCriticalSection(lock);
+  end else small:=false;
   if small then begin
     System.Assign(handle, cStoreDat);
     System.Reset(handle,1);
@@ -115,34 +119,44 @@ constructor tStoreObject.Init(id: tFID);
   end;
   Seek(0);
   fid:=id;
+  //writeln('Store2.Open: ',string(fid),' small=',small,' base=',base);
 end;
-procedure tStoreObject.Reference(adj: integer);
+procedure tStoreObject.Reference(const adj: integer);
   var hdr:tHeader;
   var des:tDescr;
+  var nref:integer;
   begin
   {$note refc may get below zero and then some refs may be lost}
   if small then begin
     EnterCriticalSection(lock);
     db.GetVal(fid,des);
-    adj:=adj+Word(des.RefCount);
-    if adj<0 then adj:=0;
-    des.RefCount:=adj;
+    nref:=adj+Word(des.RefCount);
+    if nref<0 then nref:=0;
+    des.RefCount:=nref;
     db.SetVal(fid,des);
     LeaveCriticalSection(lock);
+    if adj<0 then self.Close;
   end else begin
     System.Seek(handle,0);
     System.BlockRead(handle,hdr,sizeof(hdr));
-    adj:=adj+word(hdr.RefCount);
-    if adj<0 then adj:=0;
-    hdr.RefCount:=adj;
+    nref:=adj+word(hdr.RefCount);
+    if nref<0 then begin
+      nref:=0;
+      writeln('Store2.Reference: Refcount going negative on ',string(fid));
+    end;
+    hdr.RefCount:=nref;
     hdr.mark:=cMark;
     System.Seek(handle,0);
     System.BlockWrite(handle,hdr,sizeof(hdr));
     Seek(vpos);
+    if adj<0 then begin
+      self.Close;
+      if nref<=0 then System.Erase(handle);
+    end else assert(nref>0,'Refcount went to 0 by non-negative adjustment');
   end;
 end;
 destructor tStoreObject.Close;
-  begin System.Close(handle) end;
+  begin try System.Close(handle) except end end;
 procedure tStoreObject.Seek(abs:longword);
   begin
   vpos:=abs;
@@ -167,10 +181,11 @@ function CacheKeep(id:tFID; var f:file):boolean;
 procedure Reference(const id: tFID; adj: integer);
   var so:tStoreObject;
   begin
+  //writeln('Store2.DirectReference: ',string(id),' ',adj);
   if adj=0 then exit;
   so.Init(id);
   so.Reference(adj);
-  so.Close;
+  if adj>=0 then so.Close;
 end;
 
 procedure HashAndCopy(var inf,outf:file; out id:tFID; icopy:boolean);
@@ -188,16 +203,17 @@ procedure HashAndCopy(var inf,outf:file; out id:tFID; icopy:boolean);
   Sha512Final(ctx,id,length(id));
 end;
 
-procedure HashObjectCopy(const fn:string; out id:tFID);
+procedure HashObjectCopy(const fn:ansistring; out id:tFID);
   var inf,outf:file of byte;
   var dlen,dofs:LongWord;
   var hdr:tHeader;
+  var outfn:array [0..44] of char;
   var des:tDescr;
   begin
   Assign(inf,fn);
   Reset(inf,1);
   dlen:=FileSize(inf);
-  if dlen<(4*1048576) then begin
+  if (dlen<(4*1048576)) and enablePack then begin
     Assign(outf,cStoreDat);
     Reset(outf,1);
     dofs:=FileSize(outf);
@@ -217,8 +233,52 @@ procedure HashObjectCopy(const fn:string; out id:tFID);
       //writeln('hash ',string(id));
     end;
     LeaveCriticalSection(lock);
-  end else AbstractError {$note unimplemented};
+    System.Close(outf);
+  end else begin
+    {prepare output file}
+    Assign(outf,cObjDir+'insert.tmp');
+    ReWrite(outf,1);
+    Seek(outf,cObjHeaderSize+dlen-1); BlockWrite(outf,dlen,1);{reserve space}
+    Seek(outf,cObjHeaderSize);
+    {hash and copy}
+    HashAndCopy(inf,outf,id,true);
+    {write header}
+    System.Seek(outf,0);
+    hdr.Mark:=cMark;
+    hdr.RefCount:=0;
+    BlockWrite(outf,hdr,sizeof(hdr));
+    System.Close(outf);
+    {check for duplicate and rename}
+    mkfn(id,@outfn);
+    if FileExists(pchar(@outfn))
+    then System.Erase(outf)
+    else System.Rename(outf,@outfn);
+  end;
+  System.Close(inf);
 end;
+
+function  HashObjectRenameCheckID(var f:file; const id:tFID):boolean;
+  var realid:tFID;
+  var hdr:tHeader;
+  var outfn:array [0..44] of char;
+  begin
+  if enablePack then AbstractError;
+  System.Seek(f,cObjHeaderSize);
+  HashAndCopy(f,file(nil^),realid,false);
+  {write header}
+  System.Seek(f,0);
+  hdr.Mark:=cMark;
+  hdr.RefCount:=0;
+  BlockWrite(f,hdr,sizeof(hdr));
+  System.Close(f);
+  {check for duplicate and rename}
+  mkfn(realid,@outfn);
+  result:=id=realid;
+  if (not result) or FileExists(pchar(@outfn))
+    then System.Erase(f)
+    else System.Rename(f,@outfn);
+end;
+  
 
 procedure InitBlob;
   var outf:file of byte;
