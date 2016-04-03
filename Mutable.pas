@@ -287,9 +287,10 @@ procedure tMutator.DoSendLocals2;
     var pk:tMemoryStream;
     begin
     if assigned(OnEvent) then OnEvent(meSendTo,CurrentFetch.Ver,CurrentFetch.Fid,Trg);
-    pk.Init(25);
+    pk.Init(45);
     pk.WriteByte(opcode.mutableUpdate);
     pk.WriteWord(CurrentFetch.Ver,4);
+    pk.Write(Target,20);
     pk.Write(CurrentFetch.FID,20);
     ServerLoop.SendMessage(pk.base^,pk.Length, Trg );
     pk.Free;
@@ -357,9 +358,71 @@ function CapHMutable(const source:tNetAddr; caps:byte; const Target:tPID; var ex
   result:=true;
 end;
 
+(****** Upate on Notify ******)
+var UpdatesInProgress:Word;
+type tMutableUpdate=object
+  J:^tFetch;
+  FID,MID:tFID;
+  Src:tNetAddr;
+  procedure ev;
+end;
+
+procedure recvUpdate(msg:tSMsg);
+  var s:tMemoryStream absolute msg.stream;
+  var ver,mver:LongWord;
+  var fid,mid:^tFID;
+  var meta:tMutableMeta;
+  var o:^tMutableUpdate;
+  var f:^tFetch;
+  begin
+  s.skip(1);
+  ver:=s.readword(4);
+  mid:=s.readPtr(20);
+  fid:=s.readPtr(20);
+  {Consult DB}
+  GetMutable(mid^,meta); mver:=meta.ver;
+  if mver<ver then begin
+    if UpdatesInProgress>=16 then begin
+      writeln('Mutable.recvUpdate: too many updates');
+    exit end;
+    writeln('Mutable.recvUpdate: ',string(mid^),' v',ver,' ',string(fid^));
+    {Start Fetch from source}
+    new(O);
+    O^.MID:=mid^;
+    O^.FID:=fid^;
+    O^.Src:=msg.source^;
+    O^.J:=FetchObject(fid^, msg.source^, 9, @O^.ev);
+    if O^.J=nil then O^.EV; {todo...}
+  end else writeln('Mutable.recvUpdate: ',string(msg.source^),' v',ver,'<=',mver);
+end;
+procedure tMutableUpdate.ev;
+  var so:tStoreObject;
+  var meta:tMutableMeta;
+  var valid:boolean;
+  begin
+  if (J=nil) or (J^.Done) then begin
+    so.Init(FID);
+    valid:=SetMutable(so,meta);
+    if valid then begin
+      if meta.fid=mid
+      then writeln('Mutable: ',string(meta.fid),' updated to v',LongWord(meta.ver),' ',string(FID))
+      else begin
+        writeln('Mutable.Update.ev: ',string(Src),' MutID mismatch!');
+        {...delete?}
+      end;
+    end
+    else writeln('Mutable.Update.ev: ',string(Src),' invalid signature!');
+    so.Reference(-1);
+  end else begin
+    writeln('Mutable.Update.ev: ',string(Src),' Fetch failed');
+  end;
+  FreeMem(@self,sizeof(self));
+end;
+
 BEGIN
   db.Init('mutable.dat',sizeof(tMutableMeta), 128);
   writeln('Mutable: Database initialized, valsz=',db.valsz,' bktsz=',db.bucksz);
-  //dht.RegisterCapability(capMutable,@CapHMutable);
-  //SetMsgHandler(opcode.mutableUpdate,@recvUpdate);
+  dht.RegisterCapability(capMutable,@CapHMutable);
+  SetMsgHandler(opcode.mutableUpdate,@recvUpdate);
+  UpdatesInProgress:=0;
 END.
