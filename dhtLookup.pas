@@ -40,7 +40,7 @@ procedure tSearch.Init;
   Passive:=false;
   Closed:=false;
   Callback:=nil;
-  for i:=high(peers) to 0 do Peers[i].Addr.Clear;
+  for i:=high(peers) downto 0 do Peers[i].Addr.Clear;
 end;
 procedure tSearch.Init( const iTarget: tPID; iCaps:byte; iCallback: tSearchCB );
   begin
@@ -199,6 +199,7 @@ procedure RecvCapable(msg:tSMsg);
 end;
 
 BEGIN
+  Searches:=nil;
   dht.OnNewPeer:=@UpdateSearch;
   ServerLoop.SetMsgHandler(opcode.dhtCapable,@recvCapable);
 END.
