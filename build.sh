@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 mkdir -p bin
-gitver=$(git describe --always --dirty --abbrev=16 --tags || true)
+gitver=$(git describe --always --long --dirty --abbrev=16 --tags || true)
 const(){ eval "$1"; }
 BUILD_VERSION=0
 source gitver.inc||: 2>/dev/null
