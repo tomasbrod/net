@@ -1,10 +1,15 @@
 #!/bin/bash
 set -e
 mkdir -p bin
-make -C ed25519
 gitver=$(git describe --always --dirty --abbrev=16 --tags || true)
-echo Git version: $gitver
-echo "const GIT_VERSION='$gitver';" >gitver.inc
+const(){ eval "$1"; }
+BUILD_VERSION=0
+source gitver.inc||: 2>/dev/null
+(( buildver= BUILD_VERSION + 1 ))
+echo Git version: $gitver Build: $buildver
+echo "const GIT_VERSION='$gitver';
+const BUILD_VERSION=$buildver;" >gitver.inc
+make -C ed25519
 fpc @fpopt.cfg bnprof.pas
 fpc @fpopt.cfg bnmut.pas
 fpc @fpopt.cfg bnc.pas

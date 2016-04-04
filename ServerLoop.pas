@@ -457,8 +457,8 @@ var i:byte;
 var nb:array [0..0] of byte;
 {$I gitver.inc}
 BEGIN
- writeln('ServerLoop: ',VersionBrand,' ',GIT_VERSION);
- VersionString:=GIT_VERSION;
+ VersionString:=GIT_VERSION+'-'+IntToStr(BUILD_VERSION);
+ writeln('ServerLoop: ',VersionBrand,' ',VersionString);
  mNow:=0;
  Randomize;
  fpSignal(SigInt,@SignalHandler);
