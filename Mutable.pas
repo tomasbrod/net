@@ -27,9 +27,8 @@ type tMutatorRslt=record
   end;
 type tMutEvt=(
       meSearchEnd=1, meSearchFound, meSearchInvalid, meFetchStart,
-      meFetchLocal,  meFetchSource, meFetchDone,     meFetchError,
-      meCheckOK,     meCheckOld,    meFetchBad,      meSendOld,
-      meSendNew,     meSendTo,      meSendEnd
+      meFetchLocal,  meFetchSource, meFetchError,    meCheckOK,
+      meCheckOld,    meCheckBad,    meNotify,      meSendEnd
              );
 type tMutator=object
   Target:tFID; {id of mutable}
@@ -170,7 +169,7 @@ procedure tMutator.SRslt(const Source:tNetAddr; var extra:tMemoryStream);
       if (b>high(Peers))and Search^.Peers[a].addr.isNil then break;
       Peers[b]:=Search^.Peers[a]; inc(b);
     end; if b<=high(Peers) then Peers[b].Addr.Clear;
-    if assigned(OnEvent) then OnEvent(meSearchEnd,0,tKey20(nil^),tNetAddr(nil^));
+    if assigned(OnEvent) then OnEvent(meSearchEnd,0,tFID(nil^),tNetAddr(nil^));
     search:=nil;
     Shedule(10,@FetchStart);
   end else if extra.left>=24 then begin
@@ -187,7 +186,7 @@ procedure tMutator.SRslt(const Source:tNetAddr; var extra:tMemoryStream);
       {grop same FIDs together}
       if (p^.Ver=Ver) and (p^.FID=FID^) then break;
     end;
-    new(n);  n^.next:=p;  pp^:=p;
+    new(n);  n^.next:=p;  pp^:=n;
     n^.Ver:=ver;
     n^.Fid:=fid^;
     n^.Src:=Source;
@@ -234,7 +233,7 @@ procedure tMutator.FetchEvent;
   var check:boolean;
   begin
   if FetchJ^.Done then begin
-    if assigned(OnEvent) then OnEvent(meFetchDone,CurrentFetch.Ver,CurrentFetch.Fid,tNetAddr(nil^));
+    //if assigned(OnEvent) then OnEvent(meFetchDone,CurrentFetch.Ver,CurrentFetch.Fid,tNetAddr(nil^));
     {download is OK, proceed to check mutable}
     so.Init(CurrentFetch.FID);
     FetchJ:=nil;
@@ -256,26 +255,30 @@ procedure tMutator.FetchEvent;
 end;
 function tMutator.DoCheck( var so:tStoreObject ):boolean;
   begin
-  if SetMutable( so, FinalMeta ) then begin
+  if SetMutable( so, FinalMeta )and(FinalMeta.Fid=Target) then begin
     {sender may lie about his version, check if >= than expected}
     if (LongWord(FinalMeta.Ver)>=CurrentFetch.Ver) then begin
       Result:=true;
-      if assigned(OnEvent) then OnEvent(meCheckOK,FinalMeta.Ver,FinalMeta.Fid,tNetAddr(nil^));
+      if assigned(OnEvent) then OnEvent(meCheckOK,FinalMeta.Ver,CurrentFetch.Fid,tNetAddr(nil^));
     end
-    else if assigned(OnEvent) then OnEvent(meCheckOld,FinalMeta.Ver,FinalMeta.Fid,tNetAddr(nil^));
+    else if assigned(OnEvent) then OnEvent(meCheckOld,FinalMeta.Ver,CurrentFetch.Fid,tNetAddr(nil^));
   end
-  else if assigned(OnEvent) then OnEvent(meFetchBad,CurrentFetch.Ver,CurrentFetch.Fid,tNetAddr(nil^));
+  else if assigned(OnEvent) then OnEvent(meCheckBad,0,CurrentFetch.Fid,tNetAddr(nil^));
 end;
 procedure tMutator.DoSendLocals;
   var dbMeta:tMutableMeta;
   begin
-  Sending:=true;
-  if GetMutable(Target,dbMeta) then FinalMeta:=dbMeta;
-  writeln('Mutable.DoSendLocals: Will send ',string(FinalMeta.FID),' v',LongWord(FinalMeta.Ver));
-  if assigned(OnEvent) then OnEvent(meSendNew,FinalMeta.Ver,FinalMeta.Fid,tNetAddr(nil^));
-  {send update to Found and Peers}
-  Shedule(300,@DoSendLocals2);
-  OnComplete; {signal success, may destroy self, must be called last}
+  Sending:=true;{$note dont Notify if no-result and not in db}
+  if GetMutable(Target,dbMeta) then begin
+    FinalMeta:=dbMeta;
+    {send update to Found and Peers}
+    Shedule(300,@DoSendLocals2);
+    OnComplete; {signal success, may destroy self, must be called last}
+  end else begin
+    OnComplete; {signal success, may destroy self, must be called last}
+    if assigned(OnEvent) then OnEvent(meSendEnd,0,tFID(nil^),tNetAddr(nil^));
+    Destroy;
+  end;
 end;
 procedure tMutator.DoSendLocals2;
   var p:^tMutatorRslt;
@@ -284,7 +287,7 @@ procedure tMutator.DoSendLocals2;
   procedure SendTo(const trg:tNetAddr);
     var pk:tMemoryStream;
     begin
-    if assigned(OnEvent) then OnEvent(meSendTo,FinalMeta.Ver,FinalMeta.Fid,Trg);
+    if assigned(OnEvent) then OnEvent(meNotify,FinalMeta.Ver,FinalMeta.Fid,Trg);
     pk.Init(45);
     pk.WriteByte(opcode.mutableUpdate);
     pk.WriteWord(FinalMeta.Ver,4);
@@ -310,7 +313,7 @@ procedure tMutator.DoSendLocals2;
   end;
   Shedule(250,@DoSendLocals2);
   if ded then begin
-    if assigned(OnEvent) then OnEvent(meSendEnd,0,tFID(nil^),tNetAddr(nil^));
+    if assigned(OnEvent) then OnEvent(meSendEnd,FinalMeta.VER,FinalMeta.FID,tNetAddr(nil^));
     Destroy;
   end;
 end;

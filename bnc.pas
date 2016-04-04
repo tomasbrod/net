@@ -67,18 +67,13 @@ var op:word;
 var pl:tMemoryStream;
 var rpl:tMemoryStream;
 var path:string;
-type tMutEvt=(
-      meSearchEnd=1, meSearchFound, meSearchInvalid, meFetchStart,
-      meFetchLocal,  meFetchSource, meFetchDone,     meFetchError,
-      meCheckOK,     meCheckOld,    meFetchBad,      meSendOld,
-      meSendNew,     meSendTo,      meSendEnd
-             );
 procedure ShowPUPD;
   var st:byte;
   var ve:LongWord;
   var id:tKey20;
   var ad:tNetAddr;
   var tb:tDateTime;
+  var t:string;
   begin
   tb:=Now;
   repeat
@@ -87,8 +82,13 @@ procedure ShowPUPD;
     ve:=rpl.ReadWord(4);
     rpl.Read(id,20);
     rpl.read(ad,24);
-    writeln(round((Now-tb)*MsecsPerDay),' ',st,' ',ve,' ',string(id),' ',string(ad));
-  until tMutEvt(st)=meSendEnd;
+    case st of
+      1:t:='LkpEnd';2:t:='Found';3:t:='InvMsg';4:t:='Fetch';
+      5:t:='Local';6:t:='AltSrc';7:t:='FFail';8:t:='Valid';
+      9:t:='InvOld';10:t:='Inval';11:t:='Notify';12:t:='End';
+      else t:='?'+IntToStr(st); end;
+    writeln(round((Now-tb)*MsecsPerDay):4,' ',t:6,ve:5,string(id):41,string(ad));
+  until st=12;
 end;
 BEGIN
   if paramcount=0 then begin writeln('Invalid parameters'); halt(1) end;
