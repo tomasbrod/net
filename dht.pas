@@ -131,7 +131,7 @@ end;
 
 procedure VerifyInit(b:tBucket_ptr; i:byte); forward;
 
-function CheckNode(const id: tPID; const addr: tNetAddr): boolean;
+function CheckNode(const id: tPID; const addr: tNetAddr; recv:boolean): boolean;
  {return false if node is banned}
  {update or insert}
  {initiate auth on insert and also on id conflict}
@@ -161,7 +161,7 @@ function CheckNode(const id: tPID; const addr: tNetAddr): boolean;
    if (b^.peer[i].Ban) and (b^.peer[i].Addr=addr) then exit;
    if (fr=0)and(b^.peer[i].Addr.isNil) then fr:=i;
    if (b^.peer[i].ID=id)or(b^.peer[i].Addr=Addr) then begin
-     fr:=i;dup:=(b^.peer[i].ReqDelta<2);break
+     fr:=i;dup:=(b^.peer[i].ReqDelta<5);break
    end;
  end;
  if fr=0 then for i:=1 to high(b^.peer) do begin {check for old/banned}
@@ -175,6 +175,7 @@ function CheckNode(const id: tPID; const addr: tNetAddr): boolean;
   end (*else bucket is full and not splittable*)
  end else begin
   if dup then begin
+   if recv then begin
    if (b^.peer[i].addr=addr) then begin
      b^.peer[i].LastMsgFrom:=mNow;
      b^.peer[i].ReqDelta:=0;
@@ -182,6 +183,7 @@ function CheckNode(const id: tPID; const addr: tNetAddr): boolean;
    end else begin
      {todo conflict}
      VerifyInit(b,fr);
+   end
    end
   end else begin
    {add node here}
@@ -204,7 +206,7 @@ end;
 
 procedure InsertNode(const peer:tPeerPub);
  begin
- CheckNode(peer.id,peer.addr);
+ CheckNode(peer.id,peer.addr,true);
 end;
 
 type tPeerList=object
@@ -283,7 +285,7 @@ procedure RecvRequest(msg:tSMsg);
   Target:=s.ReadPtr(20);
   caps:=s.ReadByte;
   //writeln('DHT: ',string(msg.source^),' Request for ',string(Target^));
-  if not CheckNode(sID^,msg.source^) then exit;
+  if not CheckNode(sID^,msg.source^,true) then exit;
   if (caps>0)and(caps<=high(CapHandler))and assigned(CapHandler[caps])
   then if CapHandler[caps](msg.source^,caps,Target^,s) then exit;
   list.Init(Target^);
@@ -307,7 +309,7 @@ procedure SendRequest(const contact:tNetAddr; const forid: tPID; caps:byte);
  var r:tMemoryStream;
  begin
  //writeln('DHT: Request to ',string(contact),' for ',string(forid),' caps=',caps);
- r.Init(42);{$note todo}
+ r.Init(42);
  r.WriteByte(opcode.dhtRequest);
  r.Write(MyID,sizeof(tFID));
  r.Write(ForID,sizeof(tFID));
@@ -324,12 +326,12 @@ procedure RecvPeers(msg:tSMsg);
   s.skip(1);
   ID:=s.ReadPtr(20);
   //writeln('DHT: ',string(msg.source^),' is ',string(ID^),' Peers');
-  if not CheckNode(ID^,msg.source^) then exit;
+  if not CheckNode(ID^,msg.source^,true) then exit;
   if assigned(OnNewPeer) then OnNewPeer(ID^,msg.source^,true);
   while s.RdBufLen>44 do begin
     Addr:=s.ReadPtr(24);
     ID:=s.ReadPtr(20);
-    CheckNode(ID^,Addr^);
+    CheckNode(ID^,Addr^,false);
     if assigned(OnNewPeer) then OnNewPeer(ID^,Addr^,false);
   end;
 end;
@@ -410,7 +412,7 @@ procedure tPeer.VerifyCallback;
  begin
  if Verify^.error>0 then begin
   writeln('DHT: Verificator error ',string(Addr),Verify^.error);
-  ReqDelta:=3;
+  if ReqDelta<5 then ReqDelta:=4 else inc(ReqDelta);
  end else begin
  writeln('DHT: ',copy(string(id),1,6),' version ',Verify^.Version);
  Sha512Buffer(Verify^.RemotePub,sizeof(tEccKey),PubHash,sizeof(PubHash));
