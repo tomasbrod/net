@@ -182,6 +182,7 @@ function CheckNode(const id: tPID; const addr: tNetAddr; recv:boolean): boolean;
      CheckNode:=true;
    end else begin
      {todo conflict}
+     {$note don't start CRa too often}
      VerifyInit(b,fr);
    end
    end

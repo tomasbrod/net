@@ -86,6 +86,7 @@ procedure ShowPUPD;
       1:t:='LkpEnd';2:t:='Found';3:t:='InvMsg';4:t:='Fetch';
       5:t:='Local';6:t:='AltSrc';7:t:='FFail';8:t:='Valid';
       9:t:='InvOld';10:t:='Inval';11:t:='Notify';12:t:='End';
+      13:t:='Peer'
       else t:='?'+IntToStr(st); end;
     writeln(round((Now-tb)*MsecsPerDay):4,' ',t:6,ve:5,string(id):41,string(ad));
   until st=12;

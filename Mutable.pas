@@ -28,7 +28,8 @@ type tMutatorRslt=record
 type tMutEvt=(
       meSearchEnd=1, meSearchFound, meSearchInvalid, meFetchStart,
       meFetchLocal,  meFetchSource, meFetchError,    meCheckOK,
-      meCheckOld,    meCheckBad,    meNotify,      meSendEnd
+      meCheckOld,    meCheckBad,    meNotify,      meSendEnd,
+      meSearchPeer
              );
 type tMutator=object
   Target:tFID; {id of mutable}
@@ -45,6 +46,7 @@ type tMutator=object
   Peers:array [0..5] of tSearchPeer;
   CurrentFetch:tMutatorRslt;
   procedure SRslt(const Source:tNetAddr; var extra:tMemoryStream);
+  procedure SProgr(pfl:byte; const p:tSearchPeer);
   procedure FetchStart;
   procedure FetchEvent;
   procedure DoSendLocals;
@@ -139,9 +141,10 @@ procedure tMutator.Init(aTarget:tFID);
   OnEvent:=nil;
   OnComplete:=nil;
   search^.Init(Target,capMutable,@SRslt);
+  search^.OnProgress:=@SProgr;
   Fetchj:=nil;
-  search^.Start;
   Found:=nil;
+  Shedule(1,@search^.Start);
 end;
 procedure tMutator.Done;
   begin
@@ -155,6 +158,10 @@ procedure tMutator.Done;
     OnEvent:=nil;
     {}
   end;
+end;
+procedure tMutator.SProgr(pfl:byte; const p:tSearchPeer);
+  begin
+  if assigned(onEvent) then OnEvent(meSearchPeer,pfl,p.id,p.addr);
 end;
 procedure tMutator.SRslt(const Source:tNetAddr; var extra:tMemoryStream);
   var p,n:^tMutatorRslt;
@@ -215,8 +222,10 @@ procedure tMutator.FetchStart;
       Dispose(Found);
       Found:=p;
       if (p=nil) or (CurrentFetch.fid<>p^.fid) then break;
-      if assigned(FetchJ) then FetchJ^.AddSource(p^.Src);
-      if assigned(OnEvent) then OnEvent(meFetchSource,CurrentFetch.Ver,CurrentFetch.Fid,p^.Src);
+      if assigned(FetchJ) then begin
+        FetchJ^.AddSource(p^.Src);
+        if assigned(OnEvent) then OnEvent(meFetchSource,CurrentFetch.Ver,CurrentFetch.Fid,p^.Src);
+      end;
     until false;
     {value was found, if job is nil, is already opened from store}
     if FetchJ=nil then begin

@@ -153,6 +153,7 @@ end;
 
 procedure tClient.MutatorComplete;
   begin
+  {result sent in meCheckOK}
 end;
 
 procedure tClient.MutatorEvent( ev:tMutEvt; ver:longword; const fid:tFID; const Src:tNetAddr );
@@ -164,7 +165,6 @@ procedure tClient.MutatorEvent( ev:tMutEvt; ver:longword; const fid:tFID; const 
   if @fid<>nil then r.Write(fid,20) else r.Wrend(20);
   if @src<>nil then r.Write(Src,24) else r.Wrend(24);
   assert(r.length=51);
-  writeln('Ctrl.tClient.MutatorEvent: ',ev, ' ',r.Length);
   SendTo(r);
   r.free;
   if ev=meSendEnd then mutator:=nil;
@@ -198,13 +198,4 @@ BEGIN
  {ethods[14].Init(@ProfileList,0);}
  methods[15].Init(@MutableUpdate,sizeof(tFID));
 END.
-{profile update:
-  - async query
-  - another query on same connection causes error
-  - status messages returned immediatly:
-  	(1/2) Searching DHT
-  	capProfile: [num] from [ip] fid [fid]
-  	(2/2) Fetching version [update]: [fid]
-  	[ip]: success/failure/abort
-  	* file corrupt or not a profile
-}
+

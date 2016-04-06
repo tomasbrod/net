@@ -17,6 +17,7 @@ type
     Peers:array [0..10] of tSearchPeer;
     Passive,Closed:boolean;
     Callback:tSearchCB;
+    OnProgress: procedure (pfl:byte; const p:tSearchPeer) of object;
     ObjectPointer:pointer;
     procedure Init;
     procedure Init( const iTarget: tPID; iCaps:byte; iCallback: tSearchCB );
@@ -31,6 +32,15 @@ type
 IMPLEMENTATION
 uses opcode,Store2;
 var Searches:^tSearch;
+const
+  cInitAdd=6; {n of peers to add from dht}
+  cInitWait=800; {Init to Step delay}
+  cAddWait=1; {new peers to Step delay}
+  cStepRqc=3; {max requests per step}
+  cStepMinDelay=800; {min delta of requests to same peer}
+  cStepPeerReqc=6; {max (unsuccessful) requests to peer}
+  cStepRplc=6; {?}
+  cStepPeriod=900; {max period between steps}
 
 procedure tSearch.Init;
   var i:integer;
@@ -40,6 +50,7 @@ procedure tSearch.Init;
   Passive:=false;
   Closed:=false;
   Callback:=nil;
+  OnProgress:=nil;
   for i:=high(peers) downto 0 do Peers[i].Addr.Clear;
 end;
 procedure tSearch.Init( const iTarget: tPID; iCaps:byte; iCallback: tSearchCB );
@@ -63,14 +74,14 @@ procedure tSearch.Start;
   GetFirstNode(list,target);
   adc:=0;
   writeln('dhtLookup.Start@',string(@self),' target=',string(target),' caps=',caps,' exl=',length(extra));
-  while adc<6 do begin
+  while adc<cInitAdd do begin
     GetNextNode(list,ipeer);
     if ipeer.addr.isnil then break;
     inc(adc);
     self.AddPeer(ipeer.id,ipeer.addr,false);
   end;
   DoneGetNextNode(list);
-  Shedule(800,@Periodic);
+  Shedule(cInitWait,@Periodic);
 end;
 
 function tSearch.AddPeer(const iID:tPID; const iAddr:tNetAddr; setrepl:boolean): pointer;
@@ -78,26 +89,26 @@ function tSearch.AddPeer(const iID:tPID; const iAddr:tNetAddr; setrepl:boolean):
   begin
   idx:=0; result:=nil;
   tpfl:=PrefixLength(iid,Target);
-  write('dhtLookup.AddPeer@',string(@self),' tpfl=',tpfl,' addr=',string(iaddr));
+  {write('dhtLookup.AddPeer@',string(@self),' tpfl=',tpfl,' addr=',string(iaddr));}
   for idx:=0 to high(peers) do begin
-    write('[',string(peers[idx].addr),']');
     if peers[idx].addr.isNil then break;
     if peers[idx].addr=iaddr then begin
       if setrepl then Inc(peers[idx].rplc);
       result:=@peers[idx];
-      writeln(' update ',idx);
+      {writeln(' update ',idx);}
     exit end;
     if PrefixLength(peers[idx].id,Target)<tpfl then break;
   end;
   if not setrepl then begin
-    writeln(' insert ',idx);
+    {writeln(' insert ',idx);}
     for j:=high(peers)-1 downto idx do peers[j+1]:=peers[j];
     peers[idx].id:=iid; peers[idx].addr:=iaddr;
     peers[idx].reqc:=0; peers[idx].rplc:=0;
     result:=@peers[idx];
-    UnShedule(@Step);
-    Shedule(1,@Step);
-  end else writeln(' discard');
+    UnShedule(@Periodic);
+    Shedule(cAddWait,@Periodic);
+    if assigned(OnProgress) then OnProgress(tpfl,peers[idx]);
+  end {else writeln(' discard')};
 end;
 
 procedure tSearch.Step;
@@ -121,13 +132,13 @@ procedure tSearch.Step;
   repeat
   for ix:=0 to high(peers) do begin
     if peers[ix].addr.isNil then break;
-    if (rqc>=3)or(rpc>=6) then break;
+    if (rqc>=cStepRqc)or(rpc>=cStepRplc) then break;
     if peers[ix].rplc>=2 then inc(rpc)
-    else if (peers[ix].reqc<7)
-         and(rqc<3)
+    else if (peers[ix].reqc<=cStepPeerReqc)
+         and(rqc<cStepRqc)
     then begin
         inc(rqc);
-        if (mNow-peers[ix].LastReq)<800 then continue;
+        if (mNow-peers[ix].LastReq)<cStepMinDelay then continue;
         r.Init(@buf,0,sizeof(buf));
         r.WriteByte(opcode.dhtRequest);
         r.Write(dht.MyID,sizeof(tPID));
@@ -142,10 +153,9 @@ procedure tSearch.Step;
         ServerLoop.SendMessage(r.base^,r.length,peers[ix].Addr);
     end;
   end; inc(again);
-  until (again>1)or(rqc>=3)or(rpc>=6);
-  if (rqc)=0 then begin
-    //search failed or exhausted
-    writeln('search failed');
+  until (again>1)or(rqc>=cStepRqc)or(rpc>=cStepRplc);
+  if rqc=0 then begin
+    writeln('search exhausted');
     if assigned(callback) then Callback('//nil',r);
     Close;
   end else writeln;
@@ -153,7 +163,7 @@ end;
 
 procedure tSearch.Periodic;
   begin
-  Shedule(900,@Periodic);
+  Shedule(cStepPeriod,@Periodic);
   Step;
 end;
 
@@ -190,7 +200,7 @@ procedure RecvCapable(msg:tSMsg);
   sr:=Searches; while assigned(sr) do begin
     if (sr^.caps=caps)and(sr^.Target=sTarget^) then begin
       sr^.AddPeer(sID^,msg.Source^,true);
-      writeln('dhtLookup.AddCapable@',string(sr),' ',string(msg.Source^),' caps=',caps,' exl=',msg.stream.left);
+      {writeln('dhtLookup.AddCapable@',string(sr),' ',string(msg.Source^),' caps=',caps,' exl=',msg.stream.left);}
       {$warning todo filter multiple results from same peer}
       if assigned(sr^.callback) then sr^.Callback(msg.Source^,msg.stream);
     end;
