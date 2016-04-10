@@ -29,6 +29,9 @@ type tCommonStream=object
   function  Left:LongWord;
   function  ReadByte:byte;
   procedure WriteByte(v:byte);
+  function ReadShortString:shortstring;
+  function ReadStringAll:shortstring;
+  procedure WriteShortString(s:shortstring);
   //procedure WriteKey(v:tKey20);
   //procedure ReadKey(v:tKey20);
   end;
@@ -231,7 +234,26 @@ procedure tCommonStream.WriteByte(v:byte);
   begin self.Write(v,1) end;
 function tCommonStream.Left:LongWord;
   begin Left:=Length-Tell end;
-
+function tCommonStream.ReadShortString:shortstring;
+  var l:byte;
+  begin
+  l:=ReadByte;
+  SetLength(result,l);
+  Read(result[1],l);
+end;
+function tCommonStream.ReadStringAll:shortstring;
+  var l:byte;
+  begin
+  l:=Left;
+  SetLength(result,l);
+  Read(result[1],l);
+end;
+procedure tCommonStream.WriteShortString(s:shortstring);
+  begin
+  WriteByte(System.Length(s));
+  Write(s[1],System.Length(s));;
+end;
+  
 const
   HexTbl: array[0..15] of char='0123456789ABCDEF';
 procedure BinToHex(hexValue:pChar; const orig; len:word);
