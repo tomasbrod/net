@@ -1,6 +1,7 @@
 UNIT Profile;
 {
   structures of User Profile
+  todo: copy from m_file/Profile.pas
 }
 INTERFACE
 USES NetAddr,MemStream,ExpOps,SysUtils;
