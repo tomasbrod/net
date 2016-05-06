@@ -16,7 +16,7 @@ const cDig3PowMask=%0000;
 const cPoWValidDays=5;
 const cTSEpoch=40179;
 procedure CreateChallenge(out Challenge: tEccKey);
-procedure CreateResponse(const Challenge: tEccKey; out Response: tSha512Digest; const srce:tEccKey);
+procedure CreateResponse(const Challenge: tEccKey; out Response: tKey32; const srce:tEccKey);
 function VerifyPoW(const proof:tPoWRec; const RemotePub:tEccKey):boolean;
 
 IMPLEMENTATION
@@ -28,7 +28,7 @@ procedure CreateChallenge(out Challenge: tEccKey);
  for i:=0 to 31 do challenge[i]:=Random(256);
 end;
 
-procedure CreateResponse(const Challenge: tEccKey; out Response: tSha512Digest; const srce:tEccKey);
+procedure CreateResponse(const Challenge: tEccKey; out Response: tKey32; const srce:tEccKey);
  var Shared:tEccKey;
  var shactx:tSha512Context;
  begin
@@ -36,7 +36,7 @@ procedure CreateResponse(const Challenge: tEccKey; out Response: tSha512Digest; 
  Sha512Init(shactx);
  Sha512Update(shactx,challenge,sizeof(challenge));
  Sha512Update(shactx,shared,sizeof(shared));
- Sha512Final(shactx,Response);
+ Sha512Final(shactx,Response,32);
 end;
 
 var TSNow:LongWord;

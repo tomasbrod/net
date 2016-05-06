@@ -31,16 +31,15 @@ procedure InsertNode(const peer:tPeerPub);
 procedure RegisterCapability(cap:byte; handler:tCapHandler);
 
 IMPLEMENTATION
-uses Chat,opcode,ECC,sha512,CRAuth;
+uses Chat,opcode,ECC,sha512;
 
 type
  tPeer=object(tPeerPub)
    ReqDelta:word;
    LastMsgFrom,
    LastResFrom  :tMTime;
-   Ban:boolean;
-   Verify: ^CRAuth.tAuth; {nil when verified}
-   procedure VerifyCallback;
+   Banned,Verified:boolean;
+   Challenge:tEccKey;
  end;
  tPeer_ptr=^tPeer;
  tBucket_ptr=^tBucket;
@@ -55,6 +54,22 @@ type
    function MatchPrefix(const tp:tFID):boolean;
    procedure Refresh;
  end;
+
+const
+  crdRecvd=0;           {ReqDelta set on message reception}
+  crdDoPingThr=1;       {ping often when rd>this}
+  crdDontPingThr=4;     {ping less often whien rd>this}
+  crdVerifyError=5;     {set on verify error}
+  crdOthersCanReAddThr=6;{peer reinitialized when rd>this and suggested by other peer}
+  crdInvalidateThr=4;   {request verify when rd>this}
+  crdReplacableThr=2;   {new peer can replace old when rd>this}
+  cBanDuration=10*60*1000;
+  cStichRar=7;
+  cNudgeQuietThr=12*1000;
+  cRefreshWaitBase=18*1000;
+  cRefreshWaitMul=600;
+  cRefreshWaitOther=30*1000;
+  cRefreshWaitRtrDiv=3;
 
 var Table:^tBucket;
 var CapHandler: array [1..32] of tCapHandler;
@@ -133,76 +148,78 @@ procedure VerifyInit(b:tBucket_ptr; i:byte); forward;
 
 function CheckNode(const id: tPID; const addr: tNetAddr; recv:boolean): boolean;
  {return false if node is banned}
- {update or insert}
- {initiate auth on insert and also on id conflict}
- {replace only old, banned and free slots}
- var b:^tBucket;
- var i,fr:byte;
- var dup:boolean;
- label again;
- begin
- if id=MyID then exit;
- CheckNode:=false;
- again:
- b:=FindBucket(id);
- fr:=0; dup:=false;
- if not assigned(b) then begin
-   New(Table); b:=Table;
-   b^.Prefix:=MyID;
-   b^.Depth:=0;
-   b^.ModifyTime:=mNow;
-   b^.next:=nil;
-   b^.desperate:=3;
-   for i:=1 to high(b^.peer) do b^.peer[i].addr.Clear;
-   for i:=1 to high(b^.peer) do b^.peer[i].ban:=false;
-   Shedule(2000,@b^.Refresh);
- end;
- for i:=1 to high(b^.peer) do begin {check for ban and dup}
-   if (b^.peer[i].Ban) and (b^.peer[i].Addr=addr) then exit;
-   if (fr=0)and(b^.peer[i].Addr.isNil) then fr:=i;
-   if (b^.peer[i].ID=id)or(b^.peer[i].Addr=Addr) then begin
-     fr:=i;dup:=(b^.peer[i].ReqDelta<5);break
-   end;
- end;
- if fr=0 then for i:=1 to high(b^.peer) do begin {check for old/banned}
-   if (b^.peer[i].ReqDelta>=2) then fr:=i;
-   if (fr=0) and (b^.peer[i].Ban) then fr:=i;
- end;
- if fr=0 then begin
-  if b^.MatchPrefix(MyID) then begin
-    SplitBucket(b);
-    goto again;
-  end (*else bucket is full and not splittable*)
- end else begin
-  if dup then begin
-   if recv then begin
-   if (b^.peer[i].addr=addr) then begin
-     b^.peer[i].LastMsgFrom:=mNow;
-     b^.peer[i].ReqDelta:=0;
-     CheckNode:=true;
-   end else begin
-     {todo conflict}
-     {$note don't start CRa too often}
-     VerifyInit(b,fr);
-   end
-   end
+  var b:^tBucket;
+  var i,ifree,idup,iold:byte;
+  var adm,idm:boolean;
+  label again;
+  begin
+  if id=MyID then exit;
+  CheckNode:=false;
+  again:
+  b:=FindBucket(id);
+  if not assigned(b) then begin
+    New(Table); b:=Table;
+    b^.Prefix:=MyID;
+    b^.Depth:=0;
+    b^.ModifyTime:=mNow;
+    b^.next:=nil;
+    b^.desperate:=3;
+    for i:=1 to high(b^.peer) do b^.peer[i].addr.Clear;
+    for i:=1 to high(b^.peer) do b^.peer[i].banned:=false;
+    Shedule(2000,@b^.Refresh);
+  end;
+  {order: update, free, banned, split, bad}
+  ifree:=0;idup:=0;iold:=0;
+  for i:=1 to high(b^.peer) do begin
+    adm:=(b^.peer[i].Addr=addr);
+    idm:=(b^.peer[i].ID=ID);
+    if adm and (b^.peer[i].Banned) then exit;
+    if (ifree=0)and((b^.peer[i].Addr.isNil)or(b^.peer[i].Banned))
+      then ifree:=i;
+    if adm or idm then begin
+      idup:=i;break;end;
+    if (ifree=0)and(iold=0)and (b^.peer[i].ReqDelta>crdReplacableThr)
+      then iold:=i;
+  end;
+  if (idup>0) and (recv) and (b^.peer[i].ReqDelta>crdReplacableThr) then begin
+    ifree:=idup; idup:=0 end;
+  if (idup>0) and (not recv) and (b^.peer[i].ReqDelta>crdOthersCanReAddThr) then begin
+    ifree:=idup; idup:=0 end; {not iold, iold causes splits}
+  if idup>0 then begin
+    {updating}
+    if adm and idm then begin
+      CheckNode:=true;
+      if recv and b^.peer[idup].Verified then begin
+        {only update by self and verified, else waiting for auth}
+        b^.peer[idup].LastMsgFrom:=mNow;
+        b^.peer[idup].ReqDelta:=0;
+      end else {dont refresh by others};
+    end else begin
+        (*{$note don't start CRa too often}
+        VerifyInit(b,idup);*)
+    end;
   end else begin
-   {add node here}
-   if (not b^.peer[fr].Addr.isNil)and assigned(b^.peer[fr].Verify)
-    then b^.peer[fr].Verify^.Cancel;
-   writeln('DHT: AddNode ',string(id),string(addr),' to ',string(b^.prefix),'/',b^.depth,'#',fr);
-   b^.ModifyTime:=mNow;
-   b^.peer[fr].ID:=ID;
-   b^.peer[fr].Addr:=Addr;
-   b^.peer[fr].LastMsgFrom:=mNow;
-   b^.peer[fr].LastResFrom:=0;
-   b^.peer[fr].ReqDelta:=0;
-   b^.peer[fr].ban:=false;
-   b^.peer[fr].Verify:=nil;
-   VerifyInit(b,fr);
-   CheckNode:=true;
+    {inserting}
+    if (ifree=0) and b^.MatchPrefix(MyID) then begin
+      SplitBucket(b);
+      goto again;
+    end;
+    if ifree>0 then i:=ifree
+    else if iold>0 then i:=iold
+    else exit;
+    {add node here}
+    writeln('DHT: AddNode ',string(id),string(addr),' to ',string(b^.prefix),'/',b^.depth,'#',i);
+    b^.ModifyTime:=mNow;
+    b^.peer[i].ID:=ID;
+    b^.peer[i].Addr:=Addr;
+    b^.peer[i].LastMsgFrom:=mNow;
+    b^.peer[i].LastResFrom:=0;
+    b^.peer[I].ReqDelta:=0;
+    b^.peer[I].banned:=false;
+    b^.peer[I].Verified:=false;
+    VerifyInit(b,i);
+    CheckNode:=true;
   end
- end
 end;
 
 procedure InsertNode(const peer:tPeerPub);
@@ -253,7 +270,7 @@ procedure tPeerList.Next;
   {FIXME: list returns nodes from The bucket second time}
  until (not bkt^.peer[ix].Addr.isNil)
        and(bkt^.peer[ix].ReqDelta<=maxrd)
-       and(bans or(bkt^.peer[ix].ban=false));
+       and(bans or(bkt^.peer[ix].banned=false));
  if assigned(bkt) then p:=@bkt^.peer[ix] else p:=nil;
 end;
 
@@ -337,21 +354,116 @@ procedure RecvPeers(msg:tSMsg);
   end;
 end;
 
+{Messages:
+ d)VfyCh: op, SendPub, PoWork, Challenge, Ver
+ e)VfyRe: op, SendPub, PoWork, Respoonse, Ver
+           1,      32,     36,        32, =101    +35    
+}
+procedure SendVfyCh(var p:tPeer);
+  var r:tMemoryStream;
+  begin
+  r.Init(999);
+  r.WriteByte(opcode.dhtVfyCh);
+  r.Write(ECC.PublicKey,sizeof(ECC.PublicKey));
+  r.Write(ECC.PublicPoW,sizeof(ECC.PublicPoW));
+  r.Write(p.Challenge,sizeof(tEccKey));
+  r.Write(ServerLoop.VersionString[1],Length(ServerLoop.VersionString));
+  //writeln('DHT.CR: Send request to ',string(p.addr),' ',r.length,'B');
+  SendMessage(r.base^,r.length,p.Addr);
+  r.Free;
+end;
+
+procedure RecvVfyCh(msg:tSMsg);
+  var id:tPID;
+  var pub:^tEccKey;
+  var pow:^tPoWRec;
+  var challenge:^tEccKey;
+  var right_resp:tEccKey;
+  var r:tMemoryStream;
+  begin
+  msg.stream.skip(1);
+  pub:=msg.stream.ReadPtr(sizeof(tEccKey));
+  pow:=msg.stream.ReadPtr(sizeof(tPoWRec));
+  challenge:=msg.stream.ReadPtr(sizeof(tEccKey));
+  {Pub->ID}
+  Sha512Buffer(Pub^,sizeof(pub^),id,sizeof(id));
+  {CheckNode}
+  if not CheckNode(id,msg.source^,true) then exit;
+  {Verify PoW}
+  if not ECC.VerifyPoW(pow^,pub^) then begin
+    writeln('DHT.CR: Invalid PoW in request from ',string(msg.source^));
+  exit end;
+  {Solve C/R}
+  ECC.CreateResponse(Challenge^, right_resp, pub^);
+  {reply}
+  r.Init(999);
+  r.WriteByte(opcode.dhtVfyRe);
+  r.Write(ECC.PublicKey,sizeof(ECC.PublicKey));
+  r.Write(ECC.PublicPoW,sizeof(ECC.PublicPoW));
+  r.Write(right_resp,sizeof(right_resp));
+  r.Write(ServerLoop.VersionString[1],Length(ServerLoop.VersionString));
+  //writeln('DHT.CR: Send response to ',string(msg.source^),' ',r.length,'B');
+  SendMessage(r.base^,r.length,msg.source^);
+  r.Free;
+end;
+
+procedure RecvVfyRe(msg:tSMsg);
+  var b:^tBucket;
+  var i:byte;
+  var id:tPID;
+  var pub:^tEccKey;
+  var pow:^tPoWRec;
+  var resp:^tEccKey;
+  var right_resp:tEccKey;
+  begin
+  msg.stream.skip(1);
+  pub:=msg.stream.ReadPtr(sizeof(tEccKey));
+  pow:=msg.stream.ReadPtr(sizeof(tPoWRec));
+  resp:=msg.stream.ReadPtr(sizeof(tEccKey));
+  {Pub->ID}
+  Sha512Buffer(Pub^,sizeof(pub^),id,sizeof(id));
+  {ID->bkt:idx}
+  b:=FindBucket(id);
+  if not assigned(b) then exit;
+  i:=1; while b^.peer[i].ID<>ID do begin
+    inc(i); if i>high(b^.peer) then exit;
+  end;
+  {drop banned n unknown}
+  if b^.peer[i].Banned then exit;
+  b^.peer[i].LastMsgFrom:=mNow;
+  {Verify PoW}
+  if not ECC.VerifyPoW(pow^,pub^) then begin
+    b^.peer[i].Banned:=true;
+  writeln('DHT.CR: Invalid PoW in reqest from ',string(msg.source^));
+  exit end;
+  {Verify C/R}
+  ECC.CreateResponse(b^.peer[i].Challenge, right_resp, pub^);
+  if CompareByte(resp^,right_resp,sizeof(right_resp))<>0 then begin
+    b^.peer[i].Banned:=true;
+  exit end;
+  {set node verified, rqd, last}
+  b^.peer[i].Verified:=true;
+  b^.peer[i].ReqDelta:=0;
+  writeln('DHT.CR: Valid response from ',string(msg.source^));
+end;
+
+
 procedure NodeBootstrap(const contact:tNetAddr);
  begin
  SendRequest(contact,MyID,0);
  SendRequest(contact,MyID,0); {xD}
 end;
 
-const cStichRar=10;
 procedure tBucket.Refresh;
  var my,rtr,stich:boolean;
- var i,ol,rv:byte;
+ var i,ol:byte;
  var wait:LongWord;
  var list:tPeerList;
  procedure lSend(var peer:tPeer; const trg:tPID);
   begin
-  SendRequest(peer.Addr,trg,0);
+  if peer.Verified 
+  then SendRequest(peer.Addr,trg,0)
+  else SendVfyCh(peer);
   Inc(peer.ReqDelta);
  end;
  begin
@@ -360,9 +472,9 @@ procedure tBucket.Refresh;
  {1 of 10 times try to contact dead nodes in attempt to recover from network split}
  stich:=Random(cStichRar)=0;
  for i:=1 to high(tBucket.peer)
-  do if (not peer[i].Addr.isNil) and (not peer[i].Ban) then begin
-   if peer[i].ReqDelta>0 then begin
-    if (peer[i].ReqDelta<=3)xor stich then begin {$warning magic constants}
+  do if (not peer[i].Addr.isNil) and (not peer[i].Banned) then begin
+   if peer[i].ReqDelta>=crdDoPingThr then begin
+    if (peer[i].ReqDelta<=crdDontPingThr) xor stich then begin
      {this will get rid of half-dead nodes}
      writeln('DHT: Refresh (R',peer[i].ReqDelta,') ',copy(string(peer[i].id),1,6),string(peer[i].addr));
      lSend(peer[i],prefix);
@@ -373,7 +485,7 @@ procedure tBucket.Refresh;
         then ol:=i;
  end;
  {now nudge the most quiet peer, but not too often}
- if (ol>0) and ((mNow-peer[ol].LastMsgFrom)>10000) then begin
+ if (ol>0) and ((mNow-peer[ol].LastMsgFrom)>cNudgeQuietThr) then begin
   //writeln('DHT: Refresh (T',mNow-peer[ol].LastMsgFrom,') #',ol,' ',string(peer[ol].addr));
   lSend(peer[ol],MyID);
  end;
@@ -388,44 +500,23 @@ procedure tBucket.Refresh;
   end else inc(desperate);
  end else desperate:=3;
  if my
-  then wait:=18000+(depth*600)
-  else wait:=30000;
- if rtr and(not stich) then wait:=wait div 3;
+  then wait:=cRefreshWaitBase+(depth*cRefreshWaitMul)
+  else wait:=cRefreshWaitOther;
+ if rtr and(not stich) then wait:=wait div cRefreshWaitRtrDiv;
  Shedule(wait,@Refresh);
 end;
 
 {to bootstrap: ping address to get ID and insert to bucket/il
 ping may get lost: separate bootstrap unit :)
 now jut Ass-U-Me wont get lost}
-
+ 
 procedure VerifyInit(b:tBucket_ptr; i:byte);
- begin
- with b^.peer[i] do begin
-  if assigned(Verify) then exit;
-  new(Verify);
-  Verify^.Callback:=@VerifyCallback;
-  Verify^.Init(Addr);
-  //writeln('DHT: Starting Verificator for ',string(Addr));
- end
-end;
-procedure tPeer.VerifyCallback;
- var PubHash:tPID;
- begin
- if Verify^.error>0 then begin
-  writeln('DHT: Verificator error ',string(Addr),Verify^.error);
-  if ReqDelta<5 then ReqDelta:=4 else inc(ReqDelta);
- end else begin
- writeln('DHT: ',copy(string(id),1,6),' version ',Verify^.Version);
- Sha512Buffer(Verify^.RemotePub,sizeof(tEccKey),PubHash,sizeof(PubHash));
- if Verify^.Valid and Verify^.PowValid and (CompareWord(ID,PubHash,10)=0) then
-  Ban:=false
- else begin
-  Ban:=true;
-  writeln('DHT: Verificator failed for ',string(Addr),Verify^.Valid,Verify^.PoWValid,Verify^.error);
- end; end;
- Verify:=nil; {it will free itelf}
-end;
-
+  unimplemented;
+  begin with b^.peer[i] do begin
+    Verified:=false;
+    ECC.CreateChallenge(challenge);
+    SendVfyCh(b^.peer[i]);
+end end;
 
 procedure RegisterCapability(cap:byte; handler:tCapHandler);
   begin
@@ -438,6 +529,8 @@ BEGIN
   assert((sizeof(tNetAddr)+sizeof(tPID))=44);
   SetMsgHandler(opcode.dhtRequest,@recvRequest);
   SetMsgHandler(opcode.dhtPeers,@recvPeers);
+  SetMsgHandler(opcode.dhtVfyCh,@recvVfyCh);
+  SetMsgHandler(opcode.dhtVfyRe,@recvVfyRe);
   Sha512Buffer(PublicKey,sizeof(PublicKey),MyID,sizeof(MyID));
   writeln('DHT: set ID to ',string(MyID),' from ECC');
 END.

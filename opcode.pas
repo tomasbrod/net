@@ -9,6 +9,9 @@ const {dgram opcode}
  {10-16 reserved for dht}
  dhtRequest=10;
  dhtPeers=11;
+ dhtVfyCh=12;
+ dhtVfyRe=13;
+ dhtVfySt=14;
  dhtCapable=16;
  mutableUpdate=17;
 const {chat init}
