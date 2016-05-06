@@ -303,7 +303,10 @@ end;
 
 BEGIN
   InitCriticalSection(lock);
-  db.Init('storeidx.dat',sizeof(tDescr), 256);
-  writeln('Store2: Database initialized, valsz=',db.valsz,' bktsz=',db.bucksz);
-  InitBlob;
+  CreateDir(cObjDir);
+  if enablePack then begin
+    db.Init('storeidx.dat',sizeof(tDescr), 256);
+    writeln('Store2: Database initialized, valsz=',db.valsz,' bktsz=',db.bucksz);
+    InitBlob;
+  end;
 END.
