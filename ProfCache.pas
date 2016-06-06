@@ -2,14 +2,7 @@ UNIT ProfCache;
 {
 
 }
-{ New mutable:
-  used only for (user,group) profiles
-  metadata stored in files
-    1) profile meta (fixed-length)
-    2) n*[NodeRef] for something
-  updater in separate unit
-
-
+{
   unit ProfCache  (store)
   unit ProfUpdate (search and fetch and publish)
   unit Profile    (read (write?) profile files)
@@ -19,92 +12,89 @@ INTERFACE
 USES MemStream,NetAddr,Store2;
 type tFID=Store2.tFID;
      tProfileID=tFID;
-type tMutableMeta=packed record {size=32B}
-  Magic: array [1..8] of char;
-  Ver:Word4;
-  Fid:tFID;
-  end;
-const cProfDir='prof/';
-const cProfMagic:array [1..8] of char='BNProMe'#26;
+     tProfID=tFID;
+const cProfDir=4;
 
 {result = profile file valid}
-function SetMutable( var so:tStoreObject; out id: tProfileID ): boolean;
-function SetMutable( var so:tStoreObject; out ID: tProfileID; out Ver: LongWord ): boolean;
+function SetProf( var so:tStoreObject; out id: tProfileID ): boolean;
+function SetProf( var so:tStoreObject; out ID: tProfileID; out Ver: LongWord ): boolean;
 {result = found}
-function GetMutable( id: tFID; out FID: tFID; out Ver: LongWord ): boolean;
-function GetMutable( id: tFID; out FID: tFID         ): boolean;
-function GetMutable( id: tFID; out so:  tStoreObject ): boolean; experimental;
+function GetProf( id: tFID; out FID: tFID; out Ver: LongWord ): boolean;
+function GetProf( id: tFID; out FID: tFID         ): boolean;
+function GetProf( id: tFID; out so:  tStoreObject ): boolean; experimental;
 
 IMPLEMENTATION
-USES sha512,ed25519,SysUtils;
+USES sha512,ed25519,SysUtils,Profile,Database;
 
-function GetMutable( id: tFID; out FID: tFID; out Ver: LongWord ): boolean;
-  var Meta:tMutableMeta;
-  var f:file of byte;
+function GetProf( id: tFID; out FID: tFID; out Ver: LongWord ): boolean;
   begin
   result:=false;
-  Assign(f,cProfDir+string(id));
-  {$I-}
-  ReSet(f);
-  if IOResult>0 then exit;
-  BlockRead(f,Meta,sizeof(Meta));
-  if IOResult>0 then begin writeln('ProfCache: truncated metadata file '+string(id)); exit end;
-  {$I+}
-  if CompareByte(Meta.Magic,cProfMagic,8)<>0 then begin writeln('ProfCache: invalid signature in metadata file '+string(id)); exit end;
-  result:=true;
-  FID:=Meta.FID;
-  Ver:=Meta.Ver;
+  with dbGet(cProfDir,id,20) do if Length>0 then begin
+    Read(FID,20);
+    Ver:=ReadWord4;
+    result:=true;
+    Free;
+  end;
 end;
 
-function SetMutable( var so:tStoreObject; out meta:tMutableMeta ): boolean;
+function SetMutable( var so:tStoreObject; out ID: tProfileID; out Ver: LongWord ): boolean;
   {no-op if same file ID}
   {full parse of profile file using Profile to validate format}
-  var ph:tMutHdr;
-  var hash:tSha512Context;
-  var buf:packed array [0..1023] of byte;
-  var oldfid:tFID;
-  var oldis:boolean;
-  var mid:tFID;
-  var hbs:LongInt;
+  var de:tProfileRead;
+  var pubkey:tKey32;
+  var isold:boolean;
+  var OldFid:tFID;
+  var OldVer,NewVer,hbs:LongWord;
+  var buf:array [0..511] of byte;
+  var hash:tSha512context;
+  var signature:tKey64 absolute buf;
+  var meta:tMutableMeta absolute buf;
+  var pID:tFID absolute meta.fid;
+  var f:file of tMutableMeta;
   begin
   result:=false;
-  so.Seek(0);
-  if so.left<Sizeof(ph) then exit;
-  {read the header}
-  so.Read(ph,sizeof(ph));
-  if CompareByte(ph.Magic,cMutHdrMagic,4)<>0 then exit;
-  {calculate id (loginpubhash)}
-  Sha512Init(hash);
-  Sha512Update(hash,ph.Pub,sizeof(ph.Pub));
-  Sha512Final(hash,mid,sizeof(mid));
-  {check if newer than db}
-  oldis:=db.GetVal(mid,meta);
-  if oldis then begin
-    oldfid:=meta.fid;
-    if DWord(meta.Ver)>=DWord(ph.Ver) then begin
-      meta.fid:=mid;
-      result:= true; exit end;
+  de.Init; de.blk:=@so; de.Init2;
+  de.Select(pfLogin);
+  de.Read(Pubkey,32);
+  de.Read(NewVer,4); NewVer:=BEtoN(NewVer);
+  SHA512Buffer(Pubkey,32,pID,sizeof(pID));
+  isold:=GetMutable(pID,OldFid,OldVer);
+  if isold then begin
+    if (OldVer>=NewVer)or(pID=so.fid) then begin
+      ID:=pID; Ver:=OldVer;
+      result:=true;
+    exit end;
   end;
+  
   {hash for signature check}
   Sha512Init(hash);
-  Sha512Update(hash,ph,64);
+  so.Seek(0);
   while so.left>0 do begin
     hbs:=so.left;
     if hbs>sizeof(buf) then hbs:=sizeof(buf);
     so.Read(buf,hbs);
     Sha512Update(hash,buf,hbs);
   end;
+  
   {load signature}
-  if not ed25519.Verify2(hash, ph.Sig, ph.Pub) then exit;
+  de.Select(pfSignature);
+  de.Read(signature,64);
+  if not ed25519.Verify2(hash, signature, pubkey) then exit;
+  
   {update db if all checks passed}
   meta.FID:=so.fid;
-  meta.Ver:=ph.Ver;
-  db.SetVal(mid,meta);
-  if oldis then Store2.Reference(oldfid,-1);
+  meta.Ver:=NewVer;
+  meta.Magic:=cProfMagic;
+  Assign(f,cProfDir+string(id));
+  {$I-}ReSet(f);{$I+} if IOResult>0 then ReWrite(f);
+  Write(f,meta); Close(f);
+  
   {reference the new object and dereference the old one}
+  if isold then Store2.Reference(oldfid,-1);
   so.Reference(+1);
-  meta.fid:=mid;
-  result:=true;
+  ID:=pID;
+  Ver:=NewVer;
+  RESULT:=TRUE;
 end;
 
 

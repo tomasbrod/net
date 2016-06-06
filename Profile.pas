@@ -1,97 +1,145 @@
 UNIT Profile;
-{
-  structures of User Profile
-  todo: copy from m_file/Profile.pas
-}
+
 INTERFACE
-USES NetAddr,MemStream,ExpOps,SysUtils;
+USES NetAddr,MemStream,SysUtils;
 
-const
-  pfHeader:packed array [1..4] of byte=($42,$4E,$50,$1A);
-  pfName=2;{1..1}
-  pfHost=4;{0..n}
-  pfLink=5;{0..n}
-  pfMotd=6;{0..1}
-  pfSig=127;
+const cMagic:packed array [1..7] of char='BNProf'#26;
+const cFormatVer=5;
+type tProfID=tKey20;
 
-type tProfileHeader=record
-  Magic:packed array [1..4] of byte;
-  Nick:string[11];
-  end;
-type tProfileField=packed record
-  tag:byte;
-  len:Word2;
-  end;
-
-type tProfileRead=object(tCommonStream)
-  mut:boolean;
-  blk:tCommonStream;
-  tag:byte;
-  flen,vofs:LongWord;
-  Nick:string[11];
-  constructor Init(const initstream:tCommonStream);
-  function NextEntry:boolean;
-  function NextEntry(itag:byte):boolean;
-  procedure Seek(absolute:LongWord); virtual;
-  function  Tell:LongWord; virtual;
-  function  Length:LongWord; virtual;
-  procedure Read(out buf; cnt:Word); virtual; overload;
+type tProfKeys=packed record
+  cert:tKey32;
+  sign:tKey32;
+  expire:Word4;
+  sigkeycert:tKey64;
 end;
 
+type tProfileRead=object
+  format:byte;
+  version:LongWord;
+  Modified:tDateTime;
+  nick:string[8];
+  ProfID:tProfID;
+  sigexpire:tDateTime;
+  key:tProfKeys;
+  enckey:tKey32;
+  valid,CertExpired,CertInval,SigInval:boolean;
+  FullName:string[79];
+  TextNote:ansistring;
+  hosts:^tKey20;
+  hostsCount,backupCount,filesCount:byte;
+  files:^tKey20;
+  files_id:^Word;
+  constructor ReadFrom(var src:tCommonStream; parseLevel:byte);
+  constructor InitEmpty;
+  procedure WriteTo(var dst:tCommonStream; const priv:tKey64);
+  destructor Done;
+  {0=readAll+sigvfy 1=readAll 9=fixed+name 99=vfy-only}
+end;
+
+{File Struct
+identifier:string[7]
+format:b1
+version:w4
+daymodif:w4
+nick:string[8]
+certkey:32
+sigkey:32
+sigexpire:w4
+sigkeycert:64
+enckey:32
+--end of fixed length--
+fullname:string[b1]
+hosts_count:b1;
+backups_count:b1;
+hosts:array[hosts_count+backups_count] of 20
+textnote:string[b1]
+filerefs:array[b1] of 2,20
+signature:64
+}
 
 IMPLEMENTATION
+uses Sha512,ed25519;
 
-constructor tProfileRead.Init(const initstream:tCommonStream);
-  var hd:tProfileHeader;
+constructor tProfileRead.InitEmpty;
   begin
-  flen:=0;
-  vofs:=0;
-  blk:=initstream;
-  blk.Read(hd,sizeof(hd));
-  if CompareWord(hd.magic,cMutHdrMagic,3)=0 then begin
-    blk.skip(sizeof(tMutHdr)-sizeof(hd));
-    blk.Read(hd,sizeof(hd));
-    mut:=true;
-  end else mut:=false;
-  if CompareDWord(hd.magic,pfHeader,1)<>0
+  SetLength(TextNote,0);
+  hosts:=nil;files:=nil;files_id:=nil;
+  hostsCount:=0;backupCount:=0;filesCount:=0;
+  valid:=false;
+  FillChar(nick,sizeof(nick),0);
+  modified:=40179;
+  sigexpire:=40179;
+end;
+
+constructor tProfileRead.ReadFrom(var src:tCommonStream; parseLevel:byte);
+  var Magic:packed array [1..8] of char;
+  var i:longword;
+  begin
+  InitEmpty;
+  src.Read(Magic,8);
+  if CompareByte(Magic,cMagic,7)<>0
     then raise eFormatError.create('Invalid magic sequence');
-  Nick:=hd.Nick;
+  format:=byte(Magic[8]);
+  if Format=5 then begin
+    {load into tMemoryStream for better parformace}
+    version:=src.ReadWord4;
+    Modified:=src.ReadWord4+40179;
+    src.Read(nick[1],8);SetLength(nick,8);
+    for i:=1 to 8 do if nick[i]=#0 then break;SetLength(nick,i-1);
+    src.Read(key,sizeof(key));
+    sigexpire:=tDateTime(dword(key.expire))+40179;
+    src.Read(enckey,32);
+    fullname:=src.ReadShortString;
+    if parselevel<9 then begin
+      hostsCount:=src.ReadByte;
+      backupCount:=src.ReadByte;
+      hosts:=GetMem((backupCount+hostsCount)*20);
+      src.Read(hosts^,(backupCount+hostsCount)*20);
+      textnote:=src.ReadShortString;
+      //filerefs:array[b1] of 2,20 TODO
+      SHA512Buffer(key.cert, 32, ProfID, 20 );
+    end;
+    if parseLevel=0 then begin
+      //TODO: check signature
+      {$warning SECURITY VIOLATION, signature check not implemented}
+    end;
+  end else raise eFormatError.create('Unknown format  version');
 end;
-function tProfileRead.NextEntry:boolean;
-  var eh:tProfileField;
+
+destructor tProfileRead.Done;
   begin
-  try
-  {skip rest of entry}
-  blk.Skip(flen-vofs);
-  {read header}
-  blk.Read(eh,sizeof(eh));
-  except on eReadPastEoF do begin result:=false; exit end end;
-  flen:=word(eh.len);
-  vofs:=0;
-  tag:=eh.tag;
-  result:=true;
+  SetLength(TextNote,0);
+  if assigned(hosts) then FreeMem(hosts);
+  if assigned(files) then FreeMem(files);
+  if assigned(files_id) then FreeMem(files_id);
 end;
-function tProfileRead.NextEntry(itag:byte):boolean;
+
+procedure tProfileRead.WriteTo(var dst:tCommonStream; const priv:tPrivKey);
+  var s:tMemoryStream;
+  var signature:tSig;
   begin
-  result:=false;{wtf?}
-  repeat
-    result:=NextEntry;
-  until (not result)or(tag=itag);
-end;
-procedure tProfileRead.Seek(absolute:LongWord);
-  begin
-  if absolute>=flen then raise eReadPastEoF.create('Seek out of Bounds');
-  vofs:=absolute;
-end;
-function  tProfileRead.Tell:LongWord;
-  begin result:=vofs end;
-function  tProfileRead.Length:LongWord;
-  begin result:=flen end;
-procedure tProfileRead.Read(out buf; cnt:Word);
-  begin
-  if (vofs+cnt)>=flen then raise eReadPastEoF.create('Read out of Bounds');
-  blk.Read(buf,cnt);
-  vofs:=vofs+cnt;
+  s.Init(9999);//FIXME
+  with s do begin
+  Write(cMagic,7);
+  WriteByte(5);
+  WriteWord4(Version);
+  WriteWord4(system.trunc(Modified)-40179);
+  Write(nick[1],8);
+  //system.trunc(sigexpire)-40179;
+  Write(key,sizeof(key));
+  Write(enckey,32);
+  WriteShortString(fullname);
+  WriteByte(hostsCount);
+  WriteByte(backupCount);
+  Write(hosts^,(backupCount+hostsCount)*20);
+  WriteShortString(textnote);
+  FilesCount:=0; WriteByte(filesCount);
+  //filerefs:array[b1] of 2,20 TODO
+  end;
+  Sign(signature, s.base^, s.vlength, key.sign, priv);
+  dst.Write(s.base^, s.vlength);
+  dst.Write(signature,64);
 end;
 
 END.

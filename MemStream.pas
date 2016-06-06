@@ -1,5 +1,5 @@
 unit MemStream;
-
+{$mode objfpc}
 INTERFACE
 uses SysUtils;
 
@@ -28,13 +28,18 @@ type tCommonStream=object
   procedure Skip(dis:LongInt);
   function  Left:LongWord;
   function  ReadByte:byte;
+  function  ReadWord2:word;
+  function  ReadWord4:dword;
   procedure WriteByte(v:byte);
+  procedure WriteWord2(v:word);
+  procedure WriteWord4(v:dword);
   function ReadShortString:shortstring;
   function ReadStringAll:shortstring;
   procedure WriteShortString(s:shortstring);
   //procedure WriteKey(v:tKey20);
   //procedure ReadKey(v:tKey20);
   end;
+  pCommonStream=^tCommonStream;
 type tMemoryStream=object(tCommonStream)
  vlength: LongWord;
  size: LongWord;
@@ -45,14 +50,14 @@ type tMemoryStream=object(tCommonStream)
  function  Length:LongWord; virtual;
  procedure Read(out buf; cnt:Word); virtual;
  procedure Write(const buf; cnt:word); virtual;
- function  ReadWord(cnt:byte): LongWord;
+ function  ReadWord(cnt:byte): LongWord; deprecated;
  function  ReadPtr(cnt:Word):pointer;
  procedure Trunc;
  procedure Append;
- procedure WriteWord(v:LongWord; cnt:byte);
+ procedure WriteWord(v:LongWord; cnt:byte); deprecated;
  constructor Init(ibuf:pointer; ilen,isize:LongWord);
  constructor Init(isize:LongWord);
- procedure Free;
+ procedure Free; virtual;
  function WRBuf:pointer;
  function WRBufLen:LongWord;
  procedure WREnd(used:LongWord);
@@ -125,7 +130,7 @@ end;
 
 procedure tMemoryStream.Read(out buf; cnt:Word);
  begin
- if (position+cnt)>length then raise eReadPastEoF.Create('Read out of bounds');
+ if (position+cnt)>vlength then raise eReadPastEoF.Create('Read out of bounds');
  Move((base+position)^,buf,cnt);
  position:=position+cnt;
 end;
@@ -137,21 +142,13 @@ function tMemoryStream.ReadPtr(cnt:Word):pointer;
 end;
 
 function  tMemoryStream.ReadWord(cnt:byte): LongWord;
- {$IFDEF ENDIAN_LITTLE}
- var tm:packed array [0..3] of byte;
- var i:byte;
- begin
- FillChar(tm,4,0);
- if (position+cnt)>length then raise eReadPastEoF.Create('Read out of bounds');
- for i:=cnt-1 downto 0 do begin
-  tm[i]:=byte((base+position)^);
-  inc(position);
- end;
- {$ELSE}
- begin
- Read(tm[4-cnt],cnt);
- {$ENDIF}
- ReadWord:=LongWord(pointer(@tm)^);
+  begin
+  case cnt of
+    1:Read(result,1);
+    2:result:=ReadWord2;
+    4:result:=ReadWord4;
+    else AbstractError;
+  end;
 end;
  
 procedure tMemoryStream.Trunc;
@@ -170,19 +167,13 @@ procedure tMemoryStream.Write(const buf; cnt:word);
 end;
 
 procedure tMemoryStream.WriteWord(v:LongWord; cnt:byte);
- var tm:packed array [0..3] of byte absolute v;
- var i:byte;
- begin
- {$IFDEF ENDIAN_LITTLE}
- if (position+cnt)>size then raise eInvalidMemStreamAccess.Create('Write out of bounds');
- for i:=cnt-1 downto 0 do begin
-  byte((base+position)^):=tm[i];
-  inc(position);
- end;
- if position>length then vlength:=position;
- {$ELSE}
- Write(tm[4-cnt],cnt);
- {$ENDIF}
+  begin
+  case cnt of
+    1: Write(v,1);
+    2: WriteWord2(v);
+    4: WriteWord4(v);
+    else AbstractError;
+  end;
 end;
 
 constructor tMemoryStream.Init(ibuf:pointer; ilen,isize:LongWord);
@@ -252,6 +243,28 @@ procedure tCommonStream.WriteShortString(s:shortstring);
   begin
   WriteByte(System.Length(s));
   Write(s[1],System.Length(s));;
+end;
+
+function tCommonStream.ReadWord2:word;
+  begin
+  Read(result,2);
+  result:=beton(result);
+end;
+  function tCommonStream.ReadWord4:dword;
+  begin
+  Read(result,4);
+  result:=beton(result);
+end;
+
+procedure tCommonStream.WriteWord2(v:word);
+  begin
+  v:=ntobe(v);
+  Write(v,2);
+end;
+procedure tCommonStream.WriteWord4(v:dword);
+  begin
+  v:=ntobe(v);
+  Write(v,4);
 end;
   
 const
