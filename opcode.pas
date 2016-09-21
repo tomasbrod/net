@@ -2,23 +2,30 @@ UNIT opcode;
 INTERFACE
 
 const {dgram opcode}
- {4-8 for TC deprecated}
- {8-9 for ObjectTransfer}
- otCtrl=9; {server->client}
- otData=8; {client->server}
- {10-16 reserved for dht}
- dhtRequest=10;
- dhtPeers=11;
- dhtVfyCh=12;
- dhtVfyRe=13;
- dhtVfySt=14;
- dhtCapable=16;
- mutableUpdate=17;
+ {note: opcodes >=$80 are a reply and have transaction id so they can overlap}
+ (*Object Transfer*)
+ otCtrl=$09; {client->server}
+ otData=$08; {server->client}
+  (*Distributed Hash Table*)
+  dhtBeatQ=$0A;
+  dhtBeatR=$0B;
+  dhtCheckQ=$0C;
+  dhtCheckR=$0D;
+  dhtCheckS=$0E;
+  dhtResult=$0F;
+  dhtGetNodes=$10;
+  dhtTestQuery=$11;
+  dhtNodes=$90;
+  (*Mutable/Profile*)
+  mutableQuery=$12;
+  mutableNotify=$13;
+  (*Messages*)
+
 const {chat init}
  upFileServer=2 deprecated;
  crAuthReq=3;
  testChat=32;
-const {ObjectTransfer magic numbers}
+const (*ObjectTransfer magic numbers*)
  otSPEED=1; {control type speed report}
  otSIACK=2; {control type size increase ack}
  otFin=3;   {control type finish}
@@ -29,10 +36,13 @@ const {ObjectTransfer magic numbers}
  otEoT=otInfo+3;  {DLE type End Off Transmission}
  otSINC=otInfo+4; {DLE Explicit Ack Request}
  otRateInfo=otInfo+5; {DLE Rate Adjust Debug info}
-const {dht node Capabilities}
- capProfile=1 deprecated;
- capMutable=1;
- capTest=32;
+const {Ctrl opcodes}
+ crtlGetInfo=0;
+ crtlTerminate=1;
+ crtlDhtPeer=2;
+ crtlStoreLocalCopy=3;
+ crtlStorePut=8;
+ crtlStoreGet=4;
 
 IMPLEMENTATION
 END.

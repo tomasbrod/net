@@ -1,37 +1,37 @@
 unit dhtLookup;
 INTERFACE
-uses ServerLoop,dht,NetAddr,MemStream;
+uses ServerLoop,dht,ObjectModel;
 
 type
   tPID=dht.tPID;
-  tSearchPeer=object(dht.tPeerPub)
+  tSearchNode=object
+    ID   :tPID;
+    Addr :tNetAddr;
     LastReq:tMTime;
-    reqc,
+    reqc:byte;
     rplc:byte;{1=replied with cap, 2=replied with peers}
     end;
-  tSearchCB=procedure(const Source:tNetAddr; var extra:tMemoryStream) of object;
-  tSearch=object
+  tSearch=object(tTask)
     Target:tPID;
-    Caps:byte;
-    Extra:string[48];
-    Peers:array [0..10] of tSearchPeer;
-    Passive,Closed:boolean;
-    Callback:tSearchCB;
-    OnProgress: procedure (pfl:byte; const p:tSearchPeer) of object;
-    ObjectPointer:pointer;
-    procedure Init;
-    procedure Init( const iTarget: tPID; iCaps:byte; iCallback: tSearchCB );
-    procedure Start;
-    procedure Close;
-    private
-    next,prev:^tSearch;
-    function AddPeer(const iID:tPID; const iAddr:tNetAddr; setrepl:boolean): pointer;
+    TrID:Word;
+    Query:tMemoryStream;
+    Nodes:array [0..10] of tSearchNode;
+    constructor Init; {for use in descendants}
+    constructor Init(const iTarget:tPID);
+    protected
+    procedure Cleanup; virtual;
+    function  AddNode(const iID:tPID; const iAddr:tNetAddr) :integer;
+    procedure AddNodes(var s:tMemoryStream);
+    procedure LoadNodes; {from dht and node cache}
     procedure Step;
-    procedure Periodic;
+    procedure HandleReply(var sAddr: tNetAddr; var sPID: tPID; op:byte; var st:tMemoryStream); virtual;
+    private
+    procedure IntHandleReply(msg:tSMsg);
     end;
+
 IMPLEMENTATION
 uses opcode,Store2;
-var Searches:^tSearch;
+
 const
   cInitAdd=6; {n of peers to add from dht}
   cInitWait=800; {Init to Step delay}
@@ -42,174 +42,196 @@ const
   cStepRplc=6; {?}
   cStepPeriod=900; {max period between steps}
 
-procedure tSearch.Init;
+constructor tSearch.Init;
   var i:integer;
   begin
-  Caps:=0;
-  Extra:='';
-  Passive:=false;
-  Closed:=false;
-  Callback:=nil;
-  OnProgress:=nil;
-  for i:=high(peers) downto 0 do Peers[i].Addr.Clear;
+  for i:=high(nodes) downto 0 do Nodes[i].Addr.Clear;
+  NewMsgTr(TrID, @IntHandleReply);
+  tTask.Init;
 end;
-procedure tSearch.Init( const iTarget: tPID; iCaps:byte; iCallback: tSearchCB );
+constructor tSearch.Init( const iTarget: tPID );
   begin
-  Init;
+  tSearch.Init;
   Target:=iTarget;
-  Caps:=iCaps;
-  Callback:=iCallback;
-end;
-
-procedure tSearch.Start;
-  var list:pointer;
-  var adc:byte;
-  var ipeer:tPeerPub;
-  begin
-  {$hint todo check for identical search and mark as passive}
-  next:=Searches;
-  prev:=nil;
-  if assigned(Searches) then Searches^.prev:=@self;
-  Searches:=@self;
-  GetFirstNode(list,target);
-  adc:=0;
-  writeln('dhtLookup.Start@',string(@self),' target=',string(target),' caps=',caps,' exl=',length(extra));
-  while adc<cInitAdd do begin
-    GetNextNode(list,ipeer);
-    if ipeer.addr.isnil then break;
-    inc(adc);
-    self.AddPeer(ipeer.id,ipeer.addr,false);
+  with Query do begin
+    Init(43);
+    WriteByte(opcode.dhtGetNodes);
+    Write(TrID,2);
+    Write(DHT.MyID,20);
+    Write(Target,20);
   end;
-  DoneGetNextNode(list);
-  Shedule(cInitWait,@Periodic);
+  LoadNodes;
+  Step;
 end;
 
-function tSearch.AddPeer(const iID:tPID; const iAddr:tNetAddr; setrepl:boolean): pointer;
+function tSearch.AddNode(const iID:tPID; const iAddr:tNetAddr) :integer;
   var tpfl,idx,j:byte;
   begin
-  idx:=0; result:=nil;
+  idx:=0; result:=-1;
   tpfl:=PrefixLength(iid,Target);
   {write('dhtLookup.AddPeer@',string(@self),' tpfl=',tpfl,' addr=',string(iaddr));}
-  for idx:=0 to high(peers) do begin
-    if peers[idx].addr.isNil then break;
-    if peers[idx].addr=iaddr then begin
-      if setrepl then Inc(peers[idx].rplc);
-      result:=@peers[idx];
+  for idx:=0 to high(nodes) do begin
+    if nodes[idx].addr.isNil then break;
+    if nodes[idx].addr=iaddr then begin
+      result:=idx;
       {writeln(' update ',idx);}
     exit end;
-    if PrefixLength(peers[idx].id,Target)<tpfl then break;
+    if PrefixLength(nodes[idx].id,Target)<tpfl then break;
   end;
-  if not setrepl then begin
-    {writeln(' insert ',idx);}
-    for j:=high(peers)-1 downto idx do peers[j+1]:=peers[j];
-    peers[idx].id:=iid; peers[idx].addr:=iaddr;
-    peers[idx].reqc:=0; peers[idx].rplc:=0;
-    result:=@peers[idx];
-    UnShedule(@Periodic);
-    Shedule(cAddWait,@Periodic);
-    if assigned(OnProgress) then OnProgress(tpfl,peers[idx]);
-  end {else writeln(' discard')};
+  {writeln(' insert ',idx);}
+  for j:=high(nodes)-1 downto idx do nodes[j+1]:=nodes[j];
+  nodes[idx].id:=iid; nodes[idx].addr:=iaddr;
+  nodes[idx].reqc:=0; nodes[idx].rplc:=0;
+  result:=idx;
+  {if assigned(OnProgress) then OnProgress(tpfl,nodes[idx]);}
 end;
 
 procedure tSearch.Step;
   var ix:byte;
   var rqc,rpc,again:byte;
-  var r:tMemoryStream;
-  var buf:array [1..66] of byte;
   begin
-  if closed then begin
-    if assigned(prev) then prev^.next:=next
-    else Searches:=next;
-    if assigned(next) then next^.prev:=prev;
-    UnShedule(@Periodic);
-    FreeMem(@self,sizeof(self));
-  exit end;
-  write('dhtLookup.Step@',string(@self),': ');
   {send request to at most 3 peers,
    count nodes that replied
   }
   rqc:=0;rpc:=0; again:=0;
   repeat
-  for ix:=0 to high(peers) do begin
-    if peers[ix].addr.isNil then break;
+  for ix:=0 to high(nodes) do begin
+    if nodes[ix].addr.isNil then break;
     if (rqc>=cStepRqc)or(rpc>=cStepRplc) then break;
-    if peers[ix].rplc>=2 then inc(rpc)
-    else if (peers[ix].reqc<=cStepPeerReqc)
+    if nodes[ix].rplc>=2 then inc(rpc)
+    else if (nodes[ix].reqc<=cStepPeerReqc)
          and(rqc<cStepRqc)
+         {and again...}
     then begin
         inc(rqc);
-        if (mNow-peers[ix].LastReq)<cStepMinDelay then continue;
-        r.Init(@buf,0,sizeof(buf));
-        r.WriteByte(opcode.dhtRequest);
-        r.Write(dht.MyID,sizeof(tPID));
-        r.Write(self.Target,sizeof(tPID));
-        if peers[ix].rplc=0
-        then  r.WriteByte(self.caps)
-        else  r.WriteByte(0);
-        r.Write(extra[1],length(extra));
-        write('[',rqc,':',ix,':',string(peers[ix].addr),' ',peers[ix].rplc,'/',peers[ix].reqc,']');
-        inc(peers[ix].reqc);
-        peers[ix].LastReq:=MNow;
-        ServerLoop.SendMessage(r.base^,r.length,peers[ix].Addr);
+        if (mNow-nodes[ix].LastReq)<cStepMinDelay then continue;
+        {if nodes[ix].rplc=0 then begin}
+          ServerLoop.SendMessage(Query.base^,Query.length,nodes[ix].Addr);
+        {end else begin
+          ...
+        end;}
+        writeln('Search@',string(@self),': [',rqc,',',ix,',',nodes[ix].reqc,'] ',string(nodes[ix].addr));
+        inc(nodes[ix].reqc);
+        nodes[ix].LastReq:=MNow;
     end;
   end; inc(again);
   until (again>1)or(rqc>=cStepRqc)or(rpc>=cStepRplc);
   if rqc=0 then begin
-    writeln('search exhausted');
-    if assigned(callback) then Callback('//nil',r);
-    Close;
-  end else writeln;
+    writeln('Lookup@',string(@self),': Exhausted');
+    SendEvent(tevError,nil);
+  end
+  else Shedule(cStepPeriod,@Step);
 end;
 
-procedure tSearch.Periodic;
+procedure tSearch.IntHandleReply(msg:tSMsg);
+  var sender:^tPID;
+  var op:byte;
   begin
-  Shedule(cStepPeriod,@Periodic);
-  Step;
+  op:=msg.st.readbyte;
+  msg.st.skip(2{trid});
+  sender:=msg.st.readptr(20);
+  if not DHT.CheckNode(sender^, msg.source, true) then exit;
+  HandleReply(msg.source,sender^,op, msg.st);
 end;
 
-procedure tSearch.Close;
+procedure tSearch.AddNodes(var s:tMemoryStream);
+  var id:^tPID;
+  var ad:^tNetAddr;
+  var node:integer;
   begin
-  {$hint todo check for identical search and mark as active if self.active}
-  Closed:=true;
+  while s.left>=44 do begin
+    id:=s.readptr(20);
+    ad:=s.readptr(24);
+    if DHT.CheckNode(id^, ad^, false) then continue; {is this needed?}
+    node:=self.AddNode(id^, ad^);
+    if node<>-1 then ;
+  end;
+  UnShedule(@Step);
+  Shedule(cAddWait,@Step);
 end;
 
-procedure UpdateSearch(const ID: tPID; const Addr:tNetAddr; rpc:boolean);
-  var sr:^tSearch;
-  var p:^tSearchPeer;
-  //called by dhr.RecvPers with sender info
+procedure tSearch.HandleReply(var sAddr: tNetAddr; var sPID: tPID; op:byte; var st:tMemoryStream);
+  var node:integer;
   begin
-  sr:=Searches; while assigned(sr) do begin
-    p:=sr^.AddPeer(ID,Addr,rpc);
-    if assigned(p)and rpc then inc(p^.rplc); {mark it as exhausted}
-    sr:=sr^.next;
+  node:=self.AddNode(sPID, sAddr);
+  if {node=0} sPID=Target then begin
+    writeln('Lookup@',string(@self),': Target Found');
+    SendEvent(tevComplete,nil);
+  exit end;
+  if OP=opcode.dhtNodes then begin
+    if node<>-1 then nodes[node].rplc:=2;
+    self.AddNodes(st);
+  end else begin
+    {not expecting any values}
+    {warning, prehaps?}
   end;
 end;
 
-{c) op, SenderID, Target, caps, extra}
-procedure RecvCapable(msg:tSMsg);
-  unimplemented;
-  var sr:^tSearch;
-  var sID,sTarget:^tPID;
-  var caps:byte;
-  var ex:tMemoryStream;
+procedure tSearch.Cleanup;
   begin
-  msg.stream.skip(1);
-  sID:=msg.stream.readptr(sizeof(tPID));
-  sTarget:=msg.stream.readptr(sizeof(tPID));
-  caps:=msg.stream.readByte;
-  sr:=Searches; while assigned(sr) do begin
-    if (sr^.caps=caps)and(sr^.Target=sTarget^) then begin
-      sr^.AddPeer(sID^,msg.Source^,true);
-      {writeln('dhtLookup.AddCapable@',string(sr),' ',string(msg.Source^),' caps=',caps,' exl=',msg.stream.left);}
-      {$warning todo filter multiple results from same peer}
-      if assigned(sr^.callback) then sr^.Callback(msg.Source^,msg.stream);
+  Query.Free;
+  SetMsgTr(TrID, nil);
+  UnShedule(@Step); {this is very important}
+end;
+
+procedure tSearch.LoadNodes;
+  var bucket:tBucket_ptr;
+  var i,n:integer;
+  var ctrl:byte;
+  begin
+  ctrl:=0;
+  bucket:=DHT.FindBucket(Target);
+  while assigned(bucket) do begin
+    for i:=1 to high(bucket^.peer) do begin
+      n:=AddNode(bucket^.peer[i].ID,bucket^.peer[i].Addr);
+      if n>cInitAdd then exit;
     end;
-    sr:=sr^.next;
+    bucket:=bucket^.next;
+    if (bucket=nil) and (ctrl=0) then begin
+      bucket:=GetDhtTable;
+      ctrl:=1;
+    end;
   end;
+  {not enough nodes in best bucket, add whole dht,
+  this is not fast operation optimize?}
+end;
+
+procedure RecvGetNodes(Msg:tSMsg);
+  var bucket:tBucket_ptr;
+  var i,ctrl:integer;
+  var r:tMemoryStream;
+  var trid:word;
+  var sID:^tPID;
+  var Target:^tKey20;
+  begin
+  msg.st.skip(1);
+  msg.st.read(trid,2);
+  sID:=msg.st.ReadPtr(20);
+  if not DHT.CheckNode(sID^, msg.source, true) then exit;
+  Target:=msg.st.ReadPtr(20);
+  r.Init(999);
+  r.WriteByte(opcode.dhtNodes);
+  r.Write(trid,2);
+  r.Write(dht.MyID,20);
+  ctrl:=0;
+  bucket:=DHT.FindBucket(Target^);
+  while assigned(bucket) do begin
+    if r.WRBufLen<44 then break;
+    for i:=1 to high(bucket^.peer) do begin
+      if r.WRBufLen<44 then break;
+      r.Write(bucket^.peer[i].Addr,24);
+      r.Write(bucket^.peer[i].ID,20);
+    end;
+    bucket:=bucket^.next;
+    if (bucket=nil) and (ctrl=0) then begin
+      bucket:=GetDhtTable;
+      ctrl:=1;
+    end;
+  end;
+  ServerLoop.SendMessage(r.base^,r.length,msg.source);
+  r.Free;
 end;
 
 BEGIN
-  Searches:=nil;
-  dht.OnNewPeer:=@UpdateSearch;
-  ServerLoop.SetMsgHandler(opcode.dhtCapable,@recvCapable);
+  ServerLoop.SetupOpcode(opcode.dhtGetNodes,@recvGetNodes);
 END.
