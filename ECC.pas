@@ -1,7 +1,7 @@
 unit ECC;
 
 INTERFACE
-uses ed25519,Sha512,MemStream;
+uses ed25519,Sha512,ObjectModel;
 type tEccKey=tKey32;
 type tPoWRec=packed record
  data:tKey32;
@@ -15,6 +15,7 @@ var ZeroDigest:tSha512Digest;
 const cDig3PowMask=%0000;
 const cPoWValidDays=5;
 const cTSEpoch=40179;
+const cHostIdent:array [1..8] of char='BNHosSW'#26;
 procedure CreateChallenge(out Challenge: tEccKey);
 procedure CreateResponse(const Challenge: tEccKey; out Response: tKey32; const srce:tEccKey);
 function VerifyPoW(const proof:tPoWRec; const RemotePub:tEccKey):boolean;
@@ -41,9 +42,10 @@ end;
 
 var TSNow:LongWord;
 
-function VerifyPoW(const proof:tPoWRec; const RemotePub:tEccKey; out digest:tSha512Digest ):boolean;
+function VerifyPoW(const proof:tPoWRec; const RemotePub:tEccKey ):boolean;
  var shactx:tSha512Context;
  var delta:Integer;
+ var digest:tSha512Digest;
  begin
  delta:=TSNow-BEtoN(proof.stamp);
  if (delta<=cPoWValidDays) and (delta>=-1) then begin
@@ -55,106 +57,91 @@ function VerifyPoW(const proof:tPoWRec; const RemotePub:tEccKey; out digest:tSha
  end else result:=false;
 end;
 
-function VerifyPoW(const proof:tPoWRec; const RemotePub:tEccKey):boolean;
- var digest:tSha512Digest;
- begin
- result:=VerifyPoW(proof,RemotePub,digest);
-end;
-
-const cPoWFN='proof.dat';
-procedure PoWLoadFromFile;
- var f:file of tPoWRec;
- begin
- assign(f,cPoWFN);
- reset(f);
- read(f,PublicPoW);
- close(f);
-end;
+const cSeckeyFN='hostkey.dat';
 
 procedure PoWGenerate;
- var f:file of tPoWRec;
- var i:byte;
- var counter:LongWord;
- var start:tDateTime;
- var digest:tSha512Digest;
- begin
- assign(f,cPoWFN);
- rewrite(f);
- write('ECC: Generating PoW, this may take a while...');
- PublicPow.stamp:=NtoBE(TSNow);
- Start:=Now; counter:=0;
- for i:=0 to 31 do digest[i]:=Random(256);
- repeat
-  Move(digest,PublicPoW.data,32);
-  inc(counter);
- until VerifyPoW(PublicPoW,PublicKey,digest);
- writeln(' PoW found in ',(Now-start)*SecsPerDay:1:0,'s speed=',counter/((Now-start)*SecsPerDay):1:0,'h/s');
- write(f,PublicPoW);
- close(f);
+  var i:byte;
+  var start:tDateTime;
+  var digest:tSha512Digest;
+  var shactx:tSha512Context;
+  var wp:tPoWRec;
+  var counter:LongWord absolute wp.data;
+  begin
+  //write('ECC: Generating PoW, this may take a while...');
+  wp.stamp:=NtoBE(TSNow);
+  for i:=0 to 31 do wp.data[i]:=Random(256);
+  Start:=Now; counter:=0;
+  repeat
+    inc(counter);
+    Sha512Init(shactx);
+    Sha512Update(shactx,wp,sizeof(wp));
+    Sha512Update(shactx,PublicKey,sizeof(PublicKey));
+    Sha512Final(shactx,digest);
+ until (CompareByte(digest,ZeroDigest,3)=0)and((digest[3]and cDig3PoWMask)=0);
+ PublicPoW:=wp;
+ writeln(#13'ECC: PoW found in ',(Now-start)*SecsPerDay:3:0,'s speed=',counter/((Now-start)*SecsPerDay):7:0,
+ 'h/s','                               ');
 end;
 
-const cSeckeyFN='secret.dat';
-procedure LoadFromFile;
- var f:file of ed25519.tPrivKey;
- begin
- assign(f,cSecKeyFN);
- reset(f);
- read(f,SecretKey);
- close(f);
+procedure GetOSRandom(buf:pointer; cnt:word);
+  {$IFDEF UNIX}
+  var f:tHANDLE;
+  var q:longint;
+  begin
+  f:=FileOpen('/dev/random',fmOpenRead or fmShareDenyNone);
+  while (cnt>0)and(f>=0) do begin
+    q:=FileRead(f,buf^,cnt);
+    if q<=0 then break; cnt:=cnt-q; buf:=buf+q;
+  end;
+  if (f<0) or (q<=0) then begin
+    writeln('ERROR reading /dev/random');
+    halt(8);
+  end else FileClose(f);
+  {$ELSE}
+  begin
+  {$WARNING Random on non-UNIX unimplemented}
+  writeln('[WARNING: No random source! Using all zeros, generated keys will be shit.]');
+  FillChar(out,0,cnt);
+  {$ENDIF}
 end;
 
-procedure SaveGenerated;
- var f:file of ed25519.tPrivKey;
- begin
- assign(f,cSecKeyFN);
- rewrite(f);
- //fpchmod
- write(f,SecretKey);
- close(f);
+procedure Load;
+  var f:tFileStream;
+  var ident:array [1..8] of char;
+  begin
+  f.OpenRW(cSeckeyFN);
+  try
+    f.Read(ident,sizeof(cHostIdent));
+    if CompareByte(ident,cHostIdent,8)<>0 then raise eInOutError.Create(cSeckeyFN+' invalid');
+    f.Read(SecretKey,sizeof(SecretKey));
+  except on e:eInOutError do begin
+    writeln('ECC: Host key ',e.message,', Generating');
+    f.Seek(0);
+    GetOSRandom(@SecretKey,64);
+    f.Write(cHostIdent,8);
+    f.Write(SecretKey,64);
+  end end;
+  CreatekeyPair(PublicKey,SecretKey);
+  writeln('ECC: pubkey is ',string(PublicKey));
+  try
+    f.Read(PublicPoW,sizeof(PublicPoW));
+    if not VerifyPoW(PublicPoW,PublicKey) then raise eInOutError.Create('invalid or expired');
+    if (TSNow-BEtoN(PublicPow.Stamp))>=cPoWValidDays then raise eInOutError.Create('about to expire');
+  except on e:eInOutError do begin
+    write('ECC: Generate new PoW (',e.message,'), this may take a while...');
+    f.Seek(72);
+    PoWGenerate;
+    f.Write(PublicPoW,sizeof(PublicPoW));
+  end end;
+  Assert(VerifyPoW(PublicPoW,PublicKey));
+  f.Done;
 end;
-
-procedure Generate;
- {$IFDEF UNIX}
- var f:file of ed25519.tPrivKey;
- begin
- assign(f,'/dev/urandom');
- reset(f);
- read(f,SecretKey);
- close(f);
- {$ELSE}
- begin
- {$WARNING Not enough Random in windows license key}
- {$ERROR This unit requires UNIX-compatile operating system}
- {$ENDIF}
-end;
-
-procedure DerivePublic;
- begin
- CreatekeyPair(PublicKey,SecretKey);
-end;
+    
 
 BEGIN
  FillChar(ZeroDigest,sizeof(ZeroDigest),0);
  TSNow:=trunc(Now-cTSEpoch);
- writeln('ECC: Today is D',TSNow);
- try LoadFromFile;
- except on e:Exception do begin
-  writeln('ECC: '+cSecKeyFN+' '+e.message+' while loading secret key, generating new keypair');
-  Generate;
-  (*until (PublicKey[31]=0)and(PublicKey[30]=0);*)
-  SaveGenerated;
- end end;
- DerivePublic;
- writeln('ECC: pubkey is ',string(PublicKey));
- try
-  PoWLoadFromFile;
-  if not VerifyPoW(PublicPoW,PublicKey)
-   then raise eXception.Create('invalid or expired proof');
-  if (TSNow-BEtoN(PublicPow.Stamp))>=cPoWValidDays
-   then raise eXception.Create('proof about to expire');
- except on e:Exception do begin
-  writeln('ECC: '+cPOWFN+' '+e.message+' while loading proof');
-  PoWGenerate;
- end end;
- //writeln('ECC: ProofOfWork valid for W',BEtoN(PublicPow.Stamp));
+  //writeln('ECC: Today is D',TSNow);
+  Load;
+  //writeln('ECC: ProofOfWork valid for W',BEtoN(PublicPow.Stamp));
 END.

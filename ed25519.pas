@@ -1,7 +1,7 @@
 {$mode objfpc}
 UNIT ed25519;
 INTERFACE
-uses MemStream,Sha512;
+uses ObjectModel,Sha512;
 
 type
  tPubKey=tKey32;

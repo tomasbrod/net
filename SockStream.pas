@@ -1,8 +1,8 @@
 UNIT SockStream;
 INTERFACE
-USES Sockets,BaseUnix,MemStream;
+USES Sockets,BaseUnix,ObjectModel;
 
-type tSocketStream=object(MemStream.tCommonStream)
+type tSocketStream=object(tCommonStream)
   h:tSocket;
   constructor Init(isck:tSocket);
   procedure Read(out blk; len:word); virtual;

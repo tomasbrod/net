@@ -3,7 +3,7 @@ UNIT ObjTrans;
   Object Transfer Client
 }
 INTERFACE
-uses NetAddr,Store2,ServerLoop,MemStream;
+uses ObjectModel,Store2,ServerLoop;
 
 type
 tAggr_ptr=^tAggr;
@@ -15,7 +15,7 @@ tJob=object
   Received:LongWord;
   Total:LongWord;
   error:word;{0progress,1done,2ioerror,3timeout,4full,OT-DLEs}
-  dataf:file of byte; {do not touch while active}
+  dataf:tFileStream; {do not touch while active}
   FID:tFID;
   procedure Init(const srce:tNetAddr; const iFID:tFID);
   procedure Start;
@@ -42,6 +42,7 @@ tAggr=object
   DgrCnt:LongWord;
   DgrCntCheck:LongWord;
   StartT:tMTime;
+  ReadyForData:boolean;
   procedure Init(const src:tNetAddr);
   procedure Add(var job: tJob);
   procedure Del(var job: tJob);
@@ -89,14 +90,11 @@ procedure tJob.Init(const srce:tNetAddr; const iFID:tFID);
   MaxReqCnt:=99;
   RetryCounter:=0;
   FID:=iFID;
-  AssignTempObject(dataf,fid,'prt');
-  {$I-}ReWrite(dataf,1);
-  Seek(dataf,cObjHeaderSize);{$I+}
-  if IOResult>0 then begin error:=2; exit end;
   {$note Open SEG file and read it  ToDo}
   aggr:=GetAggr(srce);
   if not assigned(aggr) then begin
     new(aggr);
+    aggr^.ReadyForData:=false;
     aggr^.next:=AggrChain;
     AggrChain:=aggr;
     aggr^.Init(srce);
@@ -119,7 +117,7 @@ end;
 
 procedure tJob.Done;
   begin
-  if error<>1 then Close(dataf);
+  if error<>1 then dataf.Done;
   UnShedule(@OnTimeout);
   aggr^.Del(self);
 end;
@@ -141,7 +139,7 @@ procedure tJob.MakeRequest(diag:byte);
   seg:=nil;
   ReqLen:=0;
   ReqCnt:=0;
-  s.Init(180);
+  s.Init(185); {23+(18*99)}
   s.WriteByte(opcode.otCtrl);
   s.WriteByte(opcode.otReq+Weight);
   s.WriteByte(ch);
@@ -163,8 +161,8 @@ procedure tJob.MakeRequest(diag:byte);
     if (ReqLen+l)>ReqLenLim then l:=ReqLenLim-ReqLen;
     write(' ',b,'+',l);
     s.WriteByte(0);
-    s.WriteWord(b,4);
-    s.WriteWord(l,4);
+    s.WriteWord4(b);
+    s.WriteWord4(l);
     inc(ReqLen,l);
     inc(ReqCnt);
   until (s.WrBufLen<9)or(ReqLen>=ReqLenLim)or(ReqCnt>=MaxReqCnt);
@@ -218,10 +216,10 @@ procedure tJob.OnData(msg:tMemoryStream);
   begin
   hiOfs:=msg.ReadByte;
   if hiOfs<otInfo then begin
-    Offset:=msg.ReadWord(4);
+    Offset:=msg.ReadWord4;
     dtlen:=msg.RdBufLen;
-    Seek(dataf,Offset+cObjHeaderSize);
-    BlockWrite(dataf,msg.RdBuf^,dtlen);{$note iocheck todo}
+    dataf.Seek(Offset+cObjHeaderSize);
+    dataf.Write(msg.RdBuf^,dtlen);{$note iocheck todo}
     SetSegment(Offset,Offset+dtlen);
     RetryCounter:=0;
     Inc(DgrCntSinceReq);
@@ -229,7 +227,8 @@ procedure tJob.OnData(msg:tMemoryStream);
   {otSINC handled in Aggr}
   end else if hiOfs=otInfo then begin
     hiOfs:=msg.ReadByte;
-    Offset:=msg.ReadWord(4);
+    Offset:=msg.ReadWord4;
+    {ttl:=msg.ReadByte;}
     MaxReqCnt:=msg.ReadByte;
     Total:=Offset; {$hint dangerous}
   end else if (hiOfs=otFail) or (hiOfs=otNotFound) then begin
@@ -261,13 +260,12 @@ procedure tAggr.OnData(msg:tSMsg);
   var sm:Word;
   var slen:LongWord;
   var rate:single;
-  var s:tMemoryStream absolute msg.stream;
+  var s:tMemoryStream absolute msg.st;
   var debugmsg:string[127];
   begin
   s.Skip(1);
   chn:=s.ReadByte;
   oh:=s.ReadByte;
-  assert(chn<=high(channel));
   if DgrCnt=0 then StartT:=mNow;
   Inc(ByteCnt,s.Length);
   Inc(DgrCnt); Inc(DgrCntCheck);
@@ -277,7 +275,7 @@ procedure tAggr.OnData(msg:tSMsg);
     writeln('ObjTrans.',string(remote),'#',chn,'.ServerDebug: '+debugmsg);
   exit end;
   if chn=0 then exit;
-  if not assigned(channel[chn]) then begin
+  if (chn>high(channel)) or (not assigned(channel[chn])) then begin
     s.Seek(0); s.Trunc;
     s.WriteByte(otCtrl);
     s.WriteByte(otFin);
@@ -291,13 +289,13 @@ procedure tAggr.OnData(msg:tSMsg);
     s.Seek(0); s.Trunc;
     s.WriteByte(otCtrl); s.WriteByte(otSIACK);
     s.Write(sm,2);
-    s.WriteWord(slen,2);
+    s.WriteWord2(slen);
     SendMessage(s.base^,s.length,Remote);
   end else if (DgrCnt>=8) and ((mNow-StartT)>=400) then begin
     s.Seek(0); s.Trunc;
     s.WriteByte(otCtrl); s.WriteByte(otSPEED);
     rate:=(ByteCnt/(mNow-StartT))*16;
-    s.WriteWord(round(rate),4);
+    s.WriteWord4(round(rate));
     ByteCnt:=1;
     DgrCnt:=0;
     SendMessage(s.base^,s.length,Remote);
@@ -310,7 +308,7 @@ procedure tAggr.Init(const src:tNetAddr);
   begin
   Remote:=src;
   refc:=0; ncpt:=0;
-  ServerLoop.SetMsgHandler(opcode.otData,Remote,@OnData);
+  ReadyForData:=true;
   Shedule(915,@Periodic);
   for i:=1 to high(channel) do channel[i]:=nil;
   ByteCnt:=0;
@@ -362,11 +360,72 @@ procedure tAggr.Periodic;
         if a=@self then begin p^:=next; break end;
         p:=@a^.next;a:=p^;
       end;
-      SetMsgHandler(otData,Remote,nil);
+      ReadyForData:=false;
       FreeMem(@self,sizeof(self)); EXIT;
     end else inc(idletick);
   end;
   Shedule(700,@Periodic);
 end;
 
+procedure DataHandler(msg:tSMsg);
+  var aggr:^tAggr;
+  begin
+  aggr:=AggrChain;
+  while assigned(aggr) do begin
+    if (aggr^.ReadyForData)
+    and (aggr^.Remote=Msg.Source) then begin
+      aggr^.OnData(Msg);
+      break;
+    end;
+  end;
+end;
+
+BEGIN
+  SetupOpcode(opcode.otData,@DataHandler);
 END.
+
+{
+
+type tPeerTableBucket=record
+ handler:tObjMessageHandler;
+ remote:tNetAddr;
+ len:word;
+ opcode:byte;
+end;
+var PT:array [0..255] of ^tPeerTableBucket;
+const PT_mod=high(pt)+1;
+
+function FindPT(prefix:pointer; prefixlen:word; const from:tNetAddr ):word;
+  var h:longword;
+  var i,o:word;
+  begin
+  h:=IntHash(0,from,from.length); h:=IntHash(h,prefix^,prefixlen);
+  i:=(h and $FFFF) xor (h shr 16) mod pt_mod;
+  for o:=0 to high(PT) do begin
+    result:=(i+o) mod pt_mod;
+    if  PT[result]=nil then exit;
+    if  (PT[result]^.opcode=byte(prefix^))
+    and (PT[result]^.remote=from)
+    and ((prefixlen=1)or(CompareByte(PT[result]^.opcode,prefix^,prefixlen)=0))
+    then exit;
+  end;
+  result:=$FFFF;
+end;
+  
+procedure SetMsgHandler(Prefix:pointer; PrefixLen:word; const From:tNetAddr; handler:tObjMessageHandler);
+  var i:word;
+  begin
+  Assert(PrefixLen>0);
+  Assert(OpDesc[byte(Prefix^)].match>0);
+  i:=FindPT(prefix,prefixlen,from);
+  if i=$FFFF then exit;
+  if PT[i]<>nil then begin FreeMem(PT[i]); PT[i]:=nil end;
+  if handler<>nil then begin
+    PT[i]:=GetMem(sizeof(PT[i]^)+PrefixLen-1);
+    PT[i]^.handler:=Handler;
+    PT[i]^.remote:=From;
+    PT[i]^.Len:=PrefixLen;
+    Move(Prefix^,PT[i]^.opcode,PrefixLen);
+  end;
+end;
+}

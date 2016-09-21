@@ -1,19 +1,22 @@
 PROGRAM brodnetd;
 
 { Poll loop. Read message, get handler, exec handler. }
-uses cthreads,ServerLoop
+uses cthreads,ServerLoop, ObjectModel
+  ,Database
+  ,Store2
+	,ECC
 	,OTServer
  	,ObjTrans
+  ,Fetch
 	,dht
-	,dhtBootStatic
-	,dhtPersist
-	,ECC
 	,Ctrl
-  ,dhlt
-  ,TestMutable
+  //,ott
+  //,dhlt
+  //,TestMutable
   //,TestMutator
 	;
 
 BEGIN
- ServerLoop.Main;
+ Database.FreeKeyList;
+ ServerLoop.Main
 END.

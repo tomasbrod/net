@@ -1,8 +1,10 @@
 unit OTServer;
 
+{$DEFINE USE_UNIXDGQ}
+
 INTERFACE
 IMPLEMENTATION
-USES Sockets,BaseUnix,ServerLoop,NetAddr,MemStream,opcode,SysUtils,Store2;
+USES Sockets,BaseUnix,ServerLoop,ObjectModel,opcode,SysUtils,Store2;
 
 { Protocol:
  Client init with REQ (op=otCtrl,st=req,ch>0) to server
@@ -22,7 +24,7 @@ USES Sockets,BaseUnix,ServerLoop,NetAddr,MemStream,opcode,SysUtils,Store2;
   op=otCtrl op=otFin ch=x
   op=otCtrl speed/siack
  messages to client:
-  info length:5 max-seg-req:1
+  info length:5 max-seg-req:1 ttl:1
   fail code:1 message:string
   rateinfo message:string
 }
@@ -190,18 +192,19 @@ procedure tChannel.Reset(prio:byte; const cmd:tMemoryStream);
   Finish;  exit end end;
  info.WriteByte(otInfo);
  info.WriteByte(0);
- info.WriteWord(fo.length,4);
+ info.WriteWord4(fo.length);
  info.WriteByte(1);
+ info.WriteByte(0);
  seglen:=0;
  segofs:=0;
  while cmd.RdBufLen>=9 do begin
   cmd.Skip(1);
-  segofs:=cmd.ReadWord(4);
-  seglen:=cmd.ReadWord(4);
+  segofs:=cmd.ReadWord4;
+  seglen:=cmd.ReadWord4;
   seglen:=Clamp(seglen,segofs,fo.length);
   break{singleseg};
  end;
- info.WriteWord(seglen,4);
+ info.WriteWord4(seglen);
  cli^.Send(info.base^,info.length);
  if seglen=0 then Finish else begin
   fo.Seek(segofs);
@@ -223,7 +226,7 @@ procedure tChannel.FillBuff(var s:tMemoryStream; sz:LongWord);
  var msgeot:string[3];
  begin
  s.WriteByte(0);{high part of offset, must be <128}
- s.WriteWord(segofs,4);
+ s.WriteWord4(segofs);
  sz:=sz-5;
  if sz>seglen then sz:=seglen;
  fo.Read(s.WrBuf^,sz); {todo errorcheck}
@@ -293,7 +296,7 @@ procedure tClient.Recv(op:byte; cmd:tMemoryStream);
  end else if op=otSIACK then RecvSIACK(cmd)
  else if op=otSPEED then RecvSPEED(cmd);
  except
-  on MemStream.eReadPastEoF do writeln('OT: uncecked datagram size');
+  on eReadPastEoF do writeln('OT: uncecked datagram size');
  end;
 end;
 procedure tClient.Send(const data; len:Word);
@@ -306,7 +309,7 @@ procedure tClient.RecvSIACK(const s:tMemoryStream);
 	var rMark,rSize:Word;
 	begin
 	s.Read(rMark,2);
-	rSize:=s.ReadWord(2);
+	rSize:=s.ReadWord2;
   IdleTicks:=0;
   Inc(AckCount);
 	if (rMark<>AckMark)or(rsize<=Size) then begin
@@ -326,7 +329,7 @@ end;
 procedure tClient.RecvSPEED(const s:tMemoryStream);
 	var rRate:LongWord;
 	begin
-	rrate:=s.readword(4);
+	rrate:=s.readword4;
 	inc(AckCount);
 	IdleTicks:=0;
 	CalcRates(rRate/16);
@@ -344,19 +347,25 @@ function SFSThread(param:pointer):PtrInt;
  var rc:LongInt;
  var source:^tNetAddr;
  var op:byte;
- var PollStruct:array [0..0] of BaseUnix.pollfd;
  var client:^tClient;
  var p1:^pointer;
+ {$IFDEF USE_UNIXDGQ}
+ var PollStruct:array [0..0] of BaseUnix.pollfd;
+ {$ELSE}
+ {$ENDIF}
  begin
  result:=0;
  SetThreadName('ObjTransServer');
+ {$IFDEF USE_UNIXDGQ}
  PollStruct[0].fd:=sock[1];
  PollStruct[0].Events:=BaseUnix.PollIN;
+ {$ENDIF}
  cmd.Init(@sharedbuf,0,sizeof(sharedbuf));
  mNow:=GetMTime;
  LastSlowTick:=mNow;
  PollTimeout:=0;
  repeat
+  {$IFDEF USE_UNIXDGQ}
   PollStruct[0].rEvents:=0;
   Assert(fpPoll(@PollStruct,1,PollTimeout)>=0);
   mNow:=GetMTime;
@@ -372,6 +381,12 @@ function SFSThread(param:pointer):PtrInt;
     if assigned(client) then Client^.Recv(op,cmd);
    end;
   end;
+  {$ELSE}
+  unlock...
+  sleep...
+  lock...
+  mNow:=GetMTime;
+  {$ENDIF}
   if assigned(clients) then begin
    if (mNow-LastSlowTick)>cSlowTick then begin
     LastSlowTick:=mNow;
@@ -469,22 +484,38 @@ function FindClient(const addr:tNetAddr; creat:boolean):tClient_ptr;
  end;
 end;
 
-procedure CtrlHandler(msg:tSMsg);
+{$IFDEF USE_UNIXDGQ}
+procedure CtrlForward(msg:tSMsg);
  var buf:array [0..1024+sizeof(tNetAddr)] of byte;
  var s:tMemoryStream;
  begin {Forward message to thread with sender addr}
  s.Init(@buf,0,sizeof(buf));
- s.Write(msg.source^,sizeof(tNetAddr));
- msg.stream.skip(1);
- s.Write(msg.stream.RdBuf^,msg.Stream.RdBufLen);
+ s.Write(msg.source,sizeof(tNetAddr));
+ msg.st.skip(1);
+ s.Write(msg.st.RdBuf^,msg.st.RdBufLen);
  fpSend(sock[0],s.base,s.length,0);
 end;
 
+{$ELSE}
+procedure CtrlHandle(msg:tSMsg);
+ begin
+ lock...
+ doit...
+ unlock...
+end;
+{$ENDIF}
+
 BEGIN
+ {$IFDEF USE_UNIXDGQ}
  {$IFDEF windows}{$WARNING Windows does not support AF_LOCAL sockets!}{$ENDIF}
  assert(fpSocketpair(AF_LOCAL,SOCK_DGRAM,0,@sock)=0);
+ SetupOpcode(opcode.otCtrl,@CtrlForward);
  thrid:=BeginThread(@SFSThread);
- if thrid=0 then;
- SetMsgHandler(opcode.otCtrl,@CtrlHandler);
+ {$ELSE}
+ setup_lock...
+ thrid:=BeginThread(@SFSThread);
+ SetupOpcode(opcode.otCtrl,@CtrlHandle);
+ {$ENDIF}
+ Assert(thrid>0);
  clients:=nil;
 END.

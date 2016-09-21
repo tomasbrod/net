@@ -11,6 +11,7 @@ USES SysUtils,Sockets;
 
 (*** Elemental Types ***)
 
+type tKey16=packed array [0..15] of byte;
 type tKey20=packed array [0..19] of byte;
 type tKey32=packed array [0..31] of byte;
 type tKey64=packed array [0..63] of byte;
@@ -25,6 +26,7 @@ type Word8=array [1..8] of byte; {todo}
 
 procedure BinToHex(hexValue:pChar; const orig; len:word);
 function PrefixLength(const a,b:tKey20):byte;
+function SizeToString( v:LongWord):string;
 
 (*** Base Object types ***)
 
@@ -62,11 +64,12 @@ type
   end;
 
   tTask=object
+    typeid:word;
     procedure Attach( subscriber:tTask_ptr; callback:tTaskCallback);
     procedure Attach( callback:tTaskCallback );
     procedure AttachWeak( callback:tTaskCallback );
     procedure Detach( callback:tTaskCallback );
-    function ProgressPct: word; virtual; {scaled by 10000}
+    function ProgressPct: single; virtual; {scaled by 10000}
     function GetSubtaskCount: integer; virtual;
     function GetSubTask(i:integer): tTask_ptr; virtual;
     constructor Init;
@@ -82,6 +85,19 @@ type
     complSent:boolean;
     procedure TaskIntAttach( callback:tTaskCallback; weak:boolean);
   end;
+
+{type
+  tPtrList=object
+    firstn,lastn:^tPtrListNode;
+    constructor Init;
+    destructor Done;
+    function AddHead(a:pointer):pointer;
+    function AddTail(a:pointer):pointer;
+    function PopHead:pointer;
+    function PopTail:pointer;
+    function Head:pointer;
+    function Tail:pointer;
+  end;}
 
 (*** Derived Object Types ***)
 
@@ -100,7 +116,6 @@ type
     procedure FromSocket( var sockaddr :tSockAddrL );
     procedure ToString( var str :String );
     procedure FromString( str :String );
-    function Hash:Word; deprecated;
     procedure LocalHost( af: tFamily );
     procedure Clear;
     function  isNil:boolean;
@@ -157,6 +172,7 @@ type
     function  Tell:LongWord; virtual;
     constructor OpenRO(const fn:string);
     constructor OpenRW(const fn:string);
+    constructor OpenHandle(const ihandle:tHandle);
     destructor Done;
   end;
 
@@ -181,8 +197,30 @@ operator := (host : word) net:Word2;
 operator := (net : Word4) host:Dword;
 operator := (host : Dword) net:Word4;
 
-operator  =(a,b:tKey20) r:boolean;
+operator = (a,b:tKey20) r:boolean;
+Operator = (aa, ab :tNetAddr) b : boolean;
 
+(*** Stream Read/Write Overloads for some types ***)
+{
+procedure WriteBE(var s:tCommonStream; v:Word); overload;
+procedure WriteBE3(var s:tCommonStream; v:DWord); overload;
+procedure WriteBE(var s:tCommonStream; v:DWord); overload;
+procedure WriteBE6(var s:tCommonStream; v:QWord); overload;
+procedure WriteBE(var s:tCommonStream; v:QWord); overload;
+
+procedure WriteBE(var s:tCommonStream; v:Word2); overload;
+procedure WriteBE(var s:tCommonStream; v:Word3); overload;
+procedure WriteBE(var s:tCommonStream; v:Word4); overload;
+procedure WriteBE(var s:tCommonStream; v:Word6); overload;
+procedure WriteBE(var s:tCommonStream; v:Word8); overload;
+
+procedure WriteBE(var s:tCommonStream; v:tKey20); overload;
+procedure WriteBE(var s:tCommonStream; v:tKey32); overload;
+procedure WriteBE(var s:tCommonStream; v:tKey64); overload;
+
+procedure WriteBE(var s:tCommonStream; v:tNetAddr); overload;
+procedure WriteBE(var s:tCommonStream; v:tNetAddr); overload;
+}
 (*** Other ***)
 
 type eInvalidMemStreamAccess=class(Exception)
@@ -193,9 +231,8 @@ type eReadPastEoF=class(Exception)
 type eFileNotFound=class(eInOutError)
   end;
 
-Operator = (aa, ab :tNetAddr) b : boolean;
-
 function ConvertFamily( a:tFamily ): sa_family_t;
+function IntHash(init:LongWord;const data;len:longword):LongWord;
 
 IMPLEMENTATION
 uses StrUtils; {TODO}
@@ -518,7 +555,7 @@ procedure tNetAddr.FromString( str :String );
   i:=pos('/',str); if i=0 then i:=System.Length(str)+1;
   fam:=copy(str,1,i-1);
   delete(str,1,i);
-  data.inet.port:=NTOBE(StrToInt(fam));
+  data.inet.port:=NTOBE(word(StrToInt(fam)));
   
  end else if fam='ip6' then begin
   data.family:=afInet6;
@@ -531,36 +568,26 @@ procedure tNetAddr.FromString( str :String );
   i:=pos('/',str); if i=0 then i:=System.Length(str)+1;
   fam:=copy(str,1,i-1);
   delete(str,1,i);
-  data.inet6.port:=NTOBE(StrToInt(fam));
+  data.inet6.port:=NTOBE(word(StrToInt(fam)));
   
  end else if fam='nil' then begin
   data.family:=afNil;
  end else raise eConvertError.Create('');
 end;
 
-function tNetAddr.Hash:word;
- var h:word;
- var i:byte;
- procedure hashstep(v:byte);
-  begin
-  h:=((h shl 5)and $FFFF) xor ((h shr 2)and $FFFF) xor v;
- end;
- begin
- h:=0;
- assert(sizeof(data.family)=1,'simple set size'+IntToStr(sizeof(data.family)));
- hashstep(byte(data.family));
- case data.Family of
-  afInet: for i:=1 to 4 do HashStep(data.inet.addr.s_bytes[i]);
-  afInet6: for i:=1 to 16 do HashStep(data.inet6.addr.u6_addr8[i]);
-  else AbstractError;
- end;
- case data.Family of
-  afInet,afInet6: begin 
-   HashStep(data.inet.port and $FF);
-   HashStep((data.inet.port shr 8) and $FF);
+function IntHash(init:LongWord;const data;len:longword):LongWord;
+  var h:LongWord absolute init;
+  var i:longword;
+  procedure hashstep(v:byte);
+    inline;
+    begin
+      h:=((h shl 5)and $FFFF) xor ((h shr 2)and $FFFF) xor v;
   end;
- end;
- result:=h;
+  begin
+  for i:=0 to len do begin
+    hashstep(byte((@data+i)^));
+  end;
+  result:=h;
 end;
 
 const cLocalHostIP4:Sockets.tInAddr=( s_bytes:(127,0,0,1) );
@@ -687,6 +714,7 @@ constructor tTask.Init;
   var i:integer;
   begin
   complSent:=false;
+  typeid:=0;
   inSendEvent:=0;
   subscriberSize:=6;
   subscriber:=GetMem(subscriberSize*sizeof(tTask_SubItem));
@@ -707,8 +735,8 @@ procedure tTask.AttachWeak( callback:tTaskCallback );
   begin
   TaskIntAttach(callback,true);
 end;
-function tTask.ProgressPct: word;
-  begin ProgressPct:=5000 end;
+function tTask.ProgressPct: single;
+  begin ProgressPct:=0.5 end;
 function tTask.GetSubtaskCount: integer;
   begin GetSubTaskCount:=0 end;
 function tTask.GetSubTask(i:integer): tTask_ptr;
@@ -727,7 +755,7 @@ procedure tFileStream.Write(const buf; cnt:word);
 constructor tFileStream.OpenRO(const fn:string);
   begin
   Inherited Init;
-  handle:=FileOpen(fn, fmOpenRead);
+  handle:=FileOpen(fn, fmOpenRead or fmShareDenyWrite);
   if handle=-1 then raise eInOutError.Create('File Open for reading Error');
 end;
 function tFileStream.Length:LongWord;
@@ -744,12 +772,34 @@ end;
 constructor tFileStream.OpenRW(const fn:string);
   begin
   Inherited Init;
-  handle:=FileOpen(fn, fmOpenReadWrite);
+  handle:=FileOpen(fn, fmOpenReadWrite or fmShareDenyWrite);
   if handle=-1 then handle:=FileCreate(fn, %0110000000); {mode: -rw-------}
-  if handle=-1 then raise eInOutError.Create('File Open read/write or Create Error');
+  if handle=-1 then raise eInOutError.Create('File Open read/write or Create Error '+fn);
+end;
+constructor tFileStream.OpenHandle(const ihandle:tHandle);
+  begin
+  inherited Init;
+  handle:=ihandle;
 end;
 destructor tFileStream.Done;
   begin FileClose(handle); end;
 
+function SizeToString( v:LongWord):string;
+  var f:LongWord;
+  var e:byte;
+  const chars:array [1..3] of char=('k','M','G');
+  begin
+  e:=0;
+  while v>=1024 do begin
+    inc(e);
+    f:=v mod 1024;
+    v:=v div 1024;
+  end;
+  if e<1
+  then result:=IntToStr(v)+'B'
+  else if f>100
+  then result:=IntToStr(v)+chars[e]+IntToStr(round(f/100))+'B'
+  else result:=IntToStr(v)+chars[e]+'B';
+end;
 
 END.

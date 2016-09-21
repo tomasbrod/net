@@ -1,22 +1,27 @@
 UNIT ServerLoop;
 
 INTERFACE
-uses MemStream,NetAddr,UnixType,Sockets;
+uses ObjectModel,UnixType,Sockets;
 
 procedure Main;
 procedure RequestTerminate(c:byte);
 
 {#Message handling#}
 type tSMsg=object
- Source: ^tNetAddr;
+ Source: tNetAddr;
  Length: {Long}Word;
  Data: pointer;
- stream: tMemoryStream;
+ st: tMemoryStream;
  channel: word;
+ ttl: word;
+ OP: byte;
  end;
 type tMessageHandler=procedure(msg:tSMsg);
-procedure SetMsgHandler(OpCode:byte; handler:tMessageHandler);
-procedure SetHiMsgHandler(handler:tMessageHandler);
+type tObjMessageHandler=procedure(msg:tSMsg) of object;
+procedure SetupOpcode(OpCode:byte; handler:tMessageHandler);
+procedure NewMsgTr(out ID:Word; handler:tObjMessageHandler);
+procedure SetMsgTr(ID:Word; handler:tObjMessageHandler);
+//procedure DelMsgTr(ID:Word);
 
 function GetSocket(const rcpt:tNetAddr):tSocket;
 procedure SendMessage(const data; len:word; const rcpt:tNetAddr );
@@ -32,17 +37,10 @@ procedure Shedule(timeout{ms}: LongWord; h:tOnTimer);
 procedure UnShedule(h:tOnTimer);
  {note unshed will fail when called from OnTimer proc}
 
-type tObjMessageHandler=procedure(msg:tSMsg) of object;
-{deliver message from peer to the object}
-procedure SetMsgHandler(OpCode:byte; from:tNetAddr; handler:tObjMessageHandler); overload;
-function IsMsgHandled(OpCode:byte; from:tNetAddr):boolean;
-
 function OptIndex(o:string):word;
 function OptParamCount(o:word):word;
 
 var OnTerminate:procedure;
-var VersionString:string[63];
-const VersionBrand='BrodNetD';
 
 type tTimeVal=UnixType.timeval;
 type tMTime=DWORD;
@@ -58,6 +56,7 @@ IMPLEMENTATION
 USES SysUtils,BaseUnix
      ,Unix
      ,Linux
+     ,gitver
      ;
 
 {aim for most simple implementation, since could be extended anytime}
@@ -72,8 +71,15 @@ type tFdHndDsc=record
 var pollHnd: array [tPollTop] of tFdHndDsc;
 var pollTop: tPollTop;
 
-var hnd: array [1..36] of tMessageHandler;
-var HiHnd: tMessageHandler;
+type tOpDesc=record
+  hnd: tMessageHandler;
+end;
+var OpDesc: array [1..64] of tOpDesc;
+type tTrDesc=record
+  hnd: tObjMessageHandler;
+end;
+var TrDesc: array [0..223] of tTrDesc;
+{will be dynamic size later :) }
 
 type tSheduled_ptr=^tSheduled; tSheduled=record
  left:LongWord;
@@ -84,6 +90,7 @@ var ShedTop: ^tSheduled;
 var ShedUU: ^tSheduled;
 var LastShed: tMTime;
 var PollTimeout:LongInt;
+var Buffer:array [1..4096] of byte;
 
 procedure SC(fn:pointer; retval:cint);
  begin
@@ -153,101 +160,65 @@ procedure FatalSignalHandler(sig:cint);CDecl;
   Terminated:=true;
 end;
 
-{index=iphash+opcode}
-type tPeerTableBucket=record
- opcode:byte;
- remote:tNetAddr;
- handler:tObjMessageHandler;
-end;
-var PT:array [0..255] of ^tPeerTableBucket;
-var PT_opcodes: set of 1..high(hnd);
+(*** Extended message delegation ***)
 
-function FindPT(opcode:byte; addr:tNetAddr):Word; { $FFFF=fail}
- var i,o:word;
- begin
- i:=(addr.hash+opcode) mod high(PT); {0..63}
- for o:=0 to high(PT) do begin
-  result:=(i+o) mod high(PT);
-  if not assigned(PT[result]) then break;
-  if (PT[result]^.opcode=opcode) and (PT[result]^.remote=addr) then exit;
- end;
- result:=$FFFF;
+procedure SetupOpcode(OpCode:byte; handler:tMessageHandler);
+  begin
+  OpDesc[OpCode].hnd:=handler;
 end;
 
-function IsMsgHandled(OpCode:byte; from:tNetAddr):boolean;
- begin result:=FindPT(opcode,from)<>$FFFF end;
-
-procedure UnSetMsgHandler(const from:tNetAddr; opcode:byte);
- var i,h:word;
- begin
- h:=FindPT(opcode,from);
- if h=$FFFF then exit;
- Dispose(PT[h]);
- PT[h]:=nil;
- {go reverse exit on null, hash them, match: move to H and stop}
- if h=0 then i:=high(PT) else i:=h-1;
- while (i<>h)and assigned(PT[i]) do begin
-  if (PT[i]^.remote.hash+PT[i]^.opcode)=h then begin
-   PT[h]:=PT[i];
-   PT[i]:=nil;
-   break;
+procedure NewMsgTr(out ID:Word; handler:tObjMessageHandler);
+  var i:integer;
+  begin
+  for i:=0 to high(TrDesc) do begin
+    if assigned(TrDesc[i].hnd) then continue;
+    TrDesc[i].hnd:=handler;
+    ID:=i;
+    exit;
   end;
-  if i=0 then i:=high(PT) else dec(i);
- end;
+  raise ERangeError.Create('Too many Transactions (MsgTr)');
 end;
 
-procedure SetMsgHandler(OpCode:byte; from:tNetAddr; handler:tObjMessageHandler);
- var h,o,i:word;
- begin
- UnSetMsgHandler(from,opcode);
- if handler=nil then exit;
- h:=(from.hash+opcode) mod high(PT);
- for o:=0 to high(PT) do begin
-  i:=(h+o) mod high(PT);
-  if not assigned(PT[i]) then break;
- end;
- New(PT[i]);
- PT[i]^.opcode:=OpCode;
- PT[i]^.remote:=from;
- PT[i]^.handler:=handler;
- if opcode<=high(hnd) then Include(PT_opcodes,opcode);
+procedure SetMsgTr(ID:Word; handler:tObjMessageHandler);
+  begin
+  assert(ID>high(TrDesc));
+  TrDesc[ID].hnd:=handler;
 end;
 
-{do not waste stack on statics}
  var EventsCount:integer;
- var Buffer:array [1..4096] of byte;
- var pkLen:LongWord;
- var From:tSockAddrL; {use larger struct so everything fits}
- var FromLen:LongWord;
- var FromG:tNetAddr;
- var curhnd:tMessageHandler;
- var curhndo:tObjMessageHandler;
- var Msg:tSMsg;
  var tp:tPollTop;
 
-function DoSock(var p:tPollFD):boolean;
- var ptidx:word;
- begin
- curhnd:=nil;
- curhndo:=nil;
- result:=false;
- ptidx:=$FFFF;
- if (p.revents and pollIN)=0 then exit else  result:=true;
- FromLen:=sizeof(From);
- pkLen:=fprecvfrom(p.FD,@Buffer,sizeof(Buffer),0,@from,@fromlen);
- SC(@fprecvfrom,pkLen);
- p.revents:=0;
- FromG.FromSocket(from);
- Msg.Source:=@FromG; {!thread}
- Msg.Length:=pkLen;
- Msg.Data:=@Buffer; {!thread}
- Msg.stream.Init(@Buffer,pkLen,sizeof(Buffer));
- Msg.channel:=0; {!multisocket}
- if Buffer[1]>=128 then curhnd:=HiHnd else if Buffer[1]<=high(hnd) then curhnd:=hnd[Buffer[1]];
- if (Buffer[1]>high(hnd))or(Buffer[1] in PT_opcodes) then begin
-  ptidx:=FindPT(Buffer[1],FromG);
-  if ptidx<$FFFF then curhndo:=PT[ptidx]^.handler;
- end;
+procedure Reciever(var p:tPollFD);
+  var pkLen:LongWord;
+  var From:tSockAddrL;
+  var FromLen:LongWord;
+  var Msg:tSMsg;
+  var op :byte absolute Buffer[1];
+  var tr :word;
+  begin
+  if (p.revents and pollIN)=0 then exit;
+  FromLen:=sizeof(From);
+  pkLen:=fprecvfrom(p.FD,@Buffer,sizeof(Buffer),0,@from,@fromlen);
+  SC(@fprecvfrom,pkLen);
+  p.revents:=0;
+  Msg.Source.FromSocket(from);
+  Msg.Length:=pkLen;
+  Msg.Data:=@Buffer;
+  Msg.st.Init(@Buffer,pkLen,sizeof(Buffer));
+  Msg.channel:=0; {!multisocket}
+  Msg.ttl:=0;
+  if op<128 then begin
+    if (op>=low(OpDesc))and(op<=high(OpDesc)) and assigned(OpDesc[op].hnd) then begin
+      OpDesc[op].hnd(Msg);
+    end
+    else writeln('ServerLoop: No handler for opcode '+IntToStr(op));
+  end else begin
+    tr:=(Buffer[2] shl 8) or Buffer[3];
+    if (tr<high(TrDesc)) and assigned(TrDesc[TR].hnd) then begin
+      TrDesc[TR].hnd(Msg);
+    end
+    else writeln('ServerLoop: No handler for transaction '+IntToStr(tr)+' opcode '+IntToStr(op));
+  end;
 end;
 
 var GetMTimeOffsetSec:DWORD=0;
@@ -280,7 +251,7 @@ procedure SetThreadName(name:pchar);
 {$ELSE}begin{$NOTE Custom thread mames not supported}
 {$ENDIF} end;
 
-procedure ShedRun;
+procedure Timer;
  var cur:^tSheduled;
  var pcur:^pointer;
  var delta:LongWord;
@@ -334,17 +305,15 @@ procedure Main;
  s_setupInet;
  while not terminated  do begin
   PollTimeout:=5000;
-  ShedRun;
+  Timer;
+  Flush(OUTPUT);
   EventsCount:=fpPoll(@PollArr[0],PollTop,PollTimeout);
-  ShedRun;
+  Timer;
   if (eventscount=-1)and terminated then break;
   if eventscount=-1 then break;  {fixme: print error}
   if eventscount=0 then continue else begin
    {INET socket}
-   if DoSock(PollArr[0]) then
-   if assigned(curhndo) then curhndo(msg)
-   else if assigned(curhnd) then curhnd(msg)
-   else {raise eXception.Create('}writeln('ServerLoop: No handler for opcode '+IntToStr(Buffer[1]));
+   Reciever(PollArr[0]);
    {INET6...}
    {Generic}
    for tp:=1 to pollTop do if PollArr[tp].revents>0 then begin
@@ -357,11 +326,6 @@ procedure Main;
  CloseSocket(s_inet);
  if ReExec then fpExecv(paramstr(0),argv);
 end;
-
-procedure SetMsgHandler(OpCode:byte; handler:tMessageHandler);
-begin assert(hnd[OpCode]=nil); hnd[OpCode]:=handler; end;
-procedure SetHiMsgHandler(handler:tMessageHandler);
-begin Hihnd:=handler; end;
 
 procedure WatchFD(fd:tHandle; h:tFDEventHandler; e:LongWord);
  var opt: tPollTop;
@@ -453,20 +417,16 @@ begin Terminated:=true;
   if c=9 then ReExec:=true;
 end;
 
-var i:byte;
-var nb:array [0..0] of byte;
-{$I gitver.inc}
+//var nb:array [0..0] of byte;
 BEGIN
- VersionString:=GIT_VERSION+'-'+IntToStr(BUILD_VERSION);
- writeln('ServerLoop: ',VersionBrand,' ',VersionString);
+ writeln('ServerLoop: ','BrodNetD',' ',GIT_VERSION);
  mNow:=0;
  Randomize;
  fpSignal(SigInt,@SignalHandler);
  fpSignal(SigTerm,@SignalHandler);
  fpSignal(SigPipe,baseunix.signalhandler(SIG_IGN));
- for i:=1 to high(hnd) do hnd[i]:=nil;
- for i:=1 to high(PT) do PT[i]:=nil;
- PT_opcodes:=[];
+ FillChar(OpDesc,sizeof(OpDesc),0);
+ FillChar(TrDesc,sizeof(TrDesc),0);
  pollTop:=1; {1 for basic listen}
  ShedTop:=nil;
  ShedUU:=nil; {todo: allocate a few to improve paging}
@@ -475,5 +435,5 @@ BEGIN
  if OptIndex('-h')>0 then DoShowOpts:=true;
  OnTerminate:=nil;
  Flush(OUTPUT);
- SetTextBuf(OUTPUT,nb);
+ //SetTextBuf(OUTPUT,nb);
 END.
