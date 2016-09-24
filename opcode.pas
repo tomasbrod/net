@@ -15,6 +15,7 @@ const {dgram opcode}
   dhtResult=$0F;
   dhtGetNodes=$10;
   dhtTestQuery=$11;
+  dhtTestResult=$91;
   dhtNodes=$90;
   (*Mutable/Profile*)
   mutableQuery=$12;

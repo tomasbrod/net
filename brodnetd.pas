@@ -11,7 +11,7 @@ uses cthreads,ServerLoop, ObjectModel
 	,dht
 	,Ctrl
   //,ott
-  //,dhlt
+  ,dhlt
   //,TestMutable
   //,TestMutator
 	;

@@ -181,7 +181,7 @@ end;
 
 procedure SetMsgTr(ID:Word; handler:tObjMessageHandler);
   begin
-  assert(ID>high(TrDesc));
+  assert(ID<=high(TrDesc));
   TrDesc[ID].hnd:=handler;
 end;
 
