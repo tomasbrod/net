@@ -3,10 +3,8 @@ unit DHT;
  implementation of custom dht, based on pastry and kademlia.
  keyspace is divided into buckets of limited capacity
  node belongs to bucket, where at least 'depth' bits match 'prefix'
- old>new,
- new>dead
+ node priority: old>new>dead
  TODO: weight nodes by IP-Address common prefix length.
- IMPR: REQ send 3 IDs close to trg, rcpt has>0 respond else select
 }
 
 {used by: messages, fileshare}
@@ -850,7 +848,7 @@ procedure tPersist.SaveState;
 end;
 
 BEGIN
-  assert((sizeof(tNetAddr)+sizeof(tPID))=44);
+  assert((sizeof(tNetAddr)+sizeof(tPID))=38);
   SetupOpcode(opcode.dhtBeatQ,@recvBeatQ);
   SetupOpcode(opcode.dhtBeatR,@recvBeatR);
   SetupOpcode(opcode.dhtCheckQ,@recvCheckQ);

@@ -8,7 +8,7 @@ uses cthreads,ServerLoop, ObjectModel
 	,OTServer
  	,ObjTrans
   ,Fetch
-	,dht
+	,DHT
 	,Ctrl
   //,ott
   ,dhlt

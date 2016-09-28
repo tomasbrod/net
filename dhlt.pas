@@ -54,6 +54,7 @@ end;
 
 procedure tSampleSearch.Cleanup;
   begin
+  values:='';
   inherited;
 end;
 
