@@ -335,15 +335,15 @@ procedure RecvBeatQ(msg:tSMsg);
   //writeln('DHT.BeatQ: ',string(msg.source),' Request for ',string(Target^));
   if not CheckNode(sID^,msg.source,true) then exit;
   list.Init(Target^);
-  r.Init(199);
+  r.Init(cDGramSz);
   r.WriteByte(opcode.dhtBeatR);
   r.Write(MyID,20);
   r.Write(mark,2);
-  while r.WrBufLen>=44 do begin
+  while r.WrBufLen>=36 do begin
     list.Next;
     if not assigned(list.bkt) then break; {simply no more peers}
     if list.p^.addr=msg.source then continue;
-    r.Write(list.p^.Addr,24);
+    r.Write(list.p^.Addr,16);
     r.Write(list.p^.ID,20);
   end;
   SendMessage(r.base^,r.length,msg.source);
@@ -372,8 +372,8 @@ procedure RecvBeatR(msg:tSMsg);
   msg.st.skip(2); //todo
   //writeln('DHT.BeatR: ',string(msg.source),' is ',string(ID^));
   if not CheckNode(ID^,msg.source,true) then exit;
-  while msg.st.RdBufLen>44 do begin
-    Addr:=msg.st.ReadPtr(24);
+  while msg.st.RdBufLen>36 do begin
+    Addr:=msg.st.ReadPtr(16);
     ID:=msg.st.ReadPtr(20);
     CheckNode(ID^,Addr^,false);
   end;
@@ -388,7 +388,7 @@ end;
 procedure SendCheck(var p:tPeer);
   var r:tMemoryStream;
   begin
-  r.Init(999);
+  r.Init(cDGramSz);
   r.WriteByte(opcode.dhtCheckQ);
   r.Write(ECC.PublicKey,sizeof(ECC.PublicKey));
   r.Write(ECC.PublicPoW,sizeof(ECC.PublicPoW));
@@ -422,7 +422,7 @@ procedure RecvCheckQ(msg:tSMsg);
   {Solve C/R}
   ECC.CreateResponse(Challenge^, right_resp, pub^);
   {reply}
-  r.Init(999);
+  r.Init(cDGramSz);
   r.WriteByte(opcode.dhtCheckR);
   r.Write(ECC.PublicKey,sizeof(ECC.PublicKey));
   r.Write(ECC.PublicPoW,sizeof(ECC.PublicPoW));
@@ -487,18 +487,18 @@ procedure RecvGetNodes(Msg:tSMsg);
   if not DHT.CheckNode(sID^, msg.source, true) then exit;
   Target:=msg.st.ReadPtr(20);
   writeln('DHT.RecvGetNodes: from ',string(msg.source));
-  r.Init(999);//TODO
+  r.Init(cDGramSz);
   r.WriteByte(opcode.dhtNodes);
   r.Write(trid,2);
   r.Write(dht.MyID,20);
   ctrl:=0;
   bucket:=DHT.FindBucket(Target^);
   while assigned(bucket) do begin
-    if r.WRBufLen<44 then break;
+    if r.WRBufLen<36 then break;
     for i:=1 to high(bucket^.peer) do begin
-      if r.WRBufLen<44 then break;
+      if r.WRBufLen<36 then break;
       if bucket^.peer[i].Addr.isNil then break;
-      r.Write(bucket^.peer[i].Addr,24);
+      r.Write(bucket^.peer[i].Addr,16);
       r.Write(bucket^.peer[i].ID,20);
     end;
     bucket:=bucket^.next;
@@ -691,8 +691,8 @@ procedure tSearch.AddNodes(var s:tMemoryStream);
   var node:integer;
   begin
   writeln('dhtLookup.AddNodes stream offset ',s.tell);
-  while s.left>=44 do begin
-    ad:=s.readptr(24);
+  while s.left>=36 do begin
+    ad:=s.readptr(16);
     id:=s.readptr(20);
     if DHT.CheckNode(id^, ad^, false) then continue; {is this needed?}
     node:=self.AddNode(id^, ad^);

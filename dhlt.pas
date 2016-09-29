@@ -41,7 +41,7 @@ constructor tSampleSearch.Init(const iTarget:tPID);
   tSearch.Init;
   Target:=iTarget;
   with Query do begin
-    Init(200);
+    Init(cDGramSz);
     WriteByte(opcode.dhtTestQuery);
     Write(TrID,2);
     Write(DHT.MyID,20);
