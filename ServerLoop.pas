@@ -51,6 +51,11 @@ function GetMTime:tMTime;
 procedure SetThreadName(name:pchar);
 procedure SC(fn:pointer; retval:cint);
 
+function GetCfgStr(name:pchar):String;
+function GetCfgNum(name:pchar):Double;
+procedure AcquireConfigSection(out sect:tConfigSection; name:pchar);
+procedure ReleaseConfigSection(var sect:tConfigSection);
+
 IMPLEMENTATION
 
 USES SysUtils,BaseUnix
@@ -58,6 +63,7 @@ USES SysUtils,BaseUnix
      ,Linux
      ,gitver
      ;
+
 
 {aim for most simple implementation, since could be extended anytime}
 
@@ -91,6 +97,7 @@ var ShedUU: ^tSheduled;
 var LastShed: tMTime;
 var PollTimeout:LongInt;
 var Buffer:array [1..4096] of byte;
+var Config:tConfigSection;
 
 procedure SC(fn:pointer; retval:cint);
  begin
@@ -107,8 +114,9 @@ procedure s_SetupInet;
   with bind_addr do begin
    sin_family:=AF_INET;
    oi:=OptIndex('-port');
-   if oi=0 then sin_port:=htons(3511)
-   else begin
+   if oi=0 then begin
+    sin_port:=htons(trunc(GetCfgNum('port')));
+   end else begin
     assert(OptParamCount(oi)=1);
     sin_port:=htons(StrToInt(paramstr(oi+1)));
    end;
@@ -303,6 +311,7 @@ var ReExec:boolean=false;
 procedure Main;
  begin
  s_setupInet;
+ ReleaseConfigSection(Config);
  while not terminated  do begin
   PollTimeout:=5000;
   Timer;
@@ -417,6 +426,59 @@ begin Terminated:=true;
   if c=9 then ReExec:=true;
 end;
 
+var ConfigFile:tConfigFile;
+var ConfigRefs:word;
+procedure InitConfig;
+  var fs:tFileStream;
+  begin
+  ConfigRefs:=1;
+  try
+    fs.OpenRO('brodnet.cfg');
+    ConfigFile.Init(fs);
+  except on e:eInOutError do begin
+      writeln('Server.InitConfig(brodnet.cfg): ',e.Message);
+      Raise;
+    end;
+  end;
+  AcquireConfigSection(Config,'');
+  fs.Done;
+  Dec(ConfigRefs);
+  //TODO config:directory
+end;
+procedure AcquireConfigSection(out sect:tConfigSection; name:pchar);
+  begin
+  assert(ConfigRefs>0);
+  Inc(ConfigRefs);
+  sect.Init(ConfigFile,name);
+end;
+procedure ReleaseConfigSection(var sect:tConfigSection);
+  begin
+  Dec(ConfigRefs);
+  if ConfigRefs=0 then begin
+    ConfigFile.Done;
+  end;
+end;
+function GetCfgStr(name:pchar):String;
+  var e:exception;
+  begin
+  result:=config.GetKey(name);
+  if result=#1 then begin
+    e:=eXception.Create('Missing option '+name+' in config file');
+    writeln('Server.Config ',e.message);
+    raise e;
+  end;
+end;
+function GetCfgNum(name:pchar):Double;
+  var e:exception;
+  begin
+  try result:=StrToFloat(GetCfgStr(name));
+  except on x:EConvertError do begin
+    e:=eXception.Create('Numeric option "'+name+'" expected, '+x.message);
+    writeln('Server.Config ',e.message);
+    raise e;
+  end end;
+end;
+
 //var nb:array [0..0] of byte;
 BEGIN
  writeln('ServerLoop: ','BrodNetD',' ',GIT_VERSION);
@@ -434,6 +496,7 @@ BEGIN
  LastShed:=GetMTime;
  if OptIndex('-h')>0 then DoShowOpts:=true;
  OnTerminate:=nil;
- Flush(OUTPUT);
  //SetTextBuf(OUTPUT,nb);
+ InitConfig;
+ Flush(OUTPUT);
 END.

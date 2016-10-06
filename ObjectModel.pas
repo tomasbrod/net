@@ -175,6 +175,22 @@ type
     destructor Done;
   end;
 
+type
+  tConfigFile = object
+    secarr:ppChar;
+    constructor Init(var fs:tFileStream);
+    function GetSection(name:pchar):pchar;
+    destructor Done;
+  end;
+
+  tConfigSection = object
+    sect,line:pchar;
+    constructor Init(var cfg:tConfigFile; name:pchar);
+    function GetKey(name:string):string;
+    function GetLine:string;
+    procedure Reset;
+  end;
+
 (*** to/from-string Conversion Operators ***)
 
 operator :=(a:pointer) r:shortstring;
@@ -440,7 +456,7 @@ end;
 
 operator :=(a:pointer) r:shortstring;
   begin
-  r:=IntToHex(LongInt(a),8);
+  r:=IntToHex(ptrint(a),sizeof(pointer));
 end;
 
 {*** NetAddr ***}
@@ -791,5 +807,7 @@ function SizeToString( v:LongWord):string;
   then result:=IntToStr(v)+chars[e]+IntToStr(round(f/100))+'B'
   else result:=IntToStr(v)+chars[e]+'B';
 end;
+
+{$I ObjectModel-cfg.pas}
 
 END.
