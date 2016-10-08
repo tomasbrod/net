@@ -113,13 +113,7 @@ procedure s_SetupInet;
  begin
   with bind_addr do begin
    sin_family:=AF_INET;
-   oi:=OptIndex('-port');
-   if oi=0 then begin
-    sin_port:=htons(trunc(GetCfgNum('port')));
-   end else begin
-    assert(OptParamCount(oi)=1);
-    sin_port:=htons(StrToInt(paramstr(oi+1)));
-   end;
+   sin_port:=htons(trunc(GetCfgNum('port')));
    sin_addr.s_addr:=0; {any}
    s_inet:=fpSocket(sin_family,SOCK_DGRAM,IPPROTO_UDP);
    SC(@fpSocket,s_inet);
@@ -430,25 +424,36 @@ var ConfigFile:tConfigFile;
 var ConfigRefs:word;
 procedure InitConfig;
   var fs:tFileStream;
+  var fn:ansistring;
+  var oi:word;
   begin
   ConfigRefs:=1;
+  fn:='bn.cfg';
+  oi:=OptIndex('-c');
+  if oi>0 then begin
+    assert(OptParamCount(oi)=1);
+    fn:=ParamStr(oi+1);
+  end;
   try
-    fs.OpenRO('brodnet.cfg');
+    fs.OpenRO(fn);
     ConfigFile.Init(fs);
+    AcquireConfigSection(Config,'');
   except on e:eInOutError do begin
-      writeln('Server.InitConfig(brodnet.cfg): ',e.Message);
+      writeln('Server.Config.Init('+fn+'): ',e.Message);
       Raise;
     end;
   end;
-  AcquireConfigSection(Config,'');
   fs.Done;
   Dec(ConfigRefs);
-  //TODO config:directory
+  if not (SetCurrentDir(ExtractFilePath(fn)) and SetCurrentDir(GetCfgStr('directory'))) then
+    raise eInOutError.Create('ServerLoop: Error changing working directory');
+  writeln('ServerLoop:',' cfg=',fn,' pwd=',GetCurrentDir(),' pid=',GetProcessID);
 end;
 procedure AcquireConfigSection(out sect:tConfigSection; name:pchar);
   begin
   assert(ConfigRefs>0);
   Inc(ConfigRefs);
+  if DoShowOpts then writeln('ConfigSection: ', name);
   sect.Init(ConfigFile,name);
 end;
 procedure ReleaseConfigSection(var sect:tConfigSection);
@@ -461,6 +466,7 @@ end;
 function GetCfgStr(name:pchar):String;
   var e:exception;
   begin
+  if DoShowOpts then writeln('Config: ', name);
   result:=config.GetKey(name);
   if result=#1 then begin
     e:=eXception.Create('Missing option '+name+' in config file');
@@ -482,6 +488,8 @@ end;
 //var nb:array [0..0] of byte;
 BEGIN
  writeln('ServerLoop: ','BrodNetD',' ',GIT_VERSION);
+ if OptIndex('-h')>0 then DoShowOpts:=true;
+ InitConfig;
  mNow:=0;
  Randomize;
  fpSignal(SigInt,@SignalHandler);
@@ -494,9 +502,7 @@ BEGIN
  ShedUU:=nil; {todo: allocate a few to improve paging}
  InitMTime;
  LastShed:=GetMTime;
- if OptIndex('-h')>0 then DoShowOpts:=true;
  OnTerminate:=nil;
  //SetTextBuf(OUTPUT,nb);
- InitConfig;
  Flush(OUTPUT);
 END.
