@@ -105,7 +105,6 @@ const
   cRefreshWaitOther=30*1000;
   cRefreshWaitRtrDiv=3;
   cNodesDat='nodes.dat';
-  cBootTxt='bootstrap.txt';
   cMaxNodesDat=12;
   cInitAdd=6;           {n of peers to add from dht}
   cInitWait=800;        {? Init to Step delay}
@@ -757,11 +756,10 @@ end;
 
 type tPersist=object
   statef:tFileStream;
-  bootf:TextFile;
+  bootf:tConfigSection;
   readcnt:longword;
   procedure OpenState;
   procedure ReadState;
-  procedure OpenBS;
   procedure ReadBS;
   procedure SaveState;
   end;
@@ -770,13 +768,15 @@ var Persist:tPersist;
 procedure tPersist.OpenState;
   begin
   readcnt:=0;
+  AcquireConfigSection(bootf,'bootstrap');
   try
     statef.OpenRO(cNodesDat);
     shedule(1,@ReadState);
   except
     on e:eInOutError do begin
       writeln('DHT.Boot: Cannot open '+cNodesDat+' ',e.Message);
-      shedule(1,@OpenBS);
+      readcnt:=0;
+      shedule(1,@ReadBS);
   end end;
 end;
 procedure tPersist.ReadState;
@@ -790,34 +790,22 @@ procedure tPersist.ReadState;
     shedule(200,@ReadState);
     inc(readcnt);
   except on e: eReadPastEoF do begin
-    writeln('DHT.Boot: Pinged ',readcnt,' nodes from '+cNodesDat);
+    //writeln('DHT.Boot: Pinged ',readcnt,' nodes from '+cNodesDat);
     statef.Done;
-    shedule(1,@OpenBS);
-  end end;
-end;
-procedure tPersist.OpenBS;
-  begin
-  readcnt:=0;
-  try
-    Assign(bootf,cBootTxt);
-    Reset(bootf);
+    readcnt:=0;
     shedule(1,@ReadBS);
-  except
-    on e:eInOutError do begin
-      writeln('DHT.Boot: Cannot open '+cBootTxt+' ',e.Message);
-      shedule(5000,@SaveState);
   end end;
 end;
 procedure tPersist.ReadBS;
   var line:string;
   var addr:tNetAddr;
   begin
-  if eof(bootf) then begin
-    close(bootf);
+  line:=bootf.GetLine;
+  if line='' then begin
     shedule(5000,@SaveState);
-    writeln('DHT.Boot: Pinged ',readcnt,' nodes from '+cBootTxt);
+    //writeln('DHT.Boot: Pinged ',readcnt,' nodes from [bootstrap]');
+    ReleaseConfigSection(bootf);
   end else begin
-    readln(bootf,line);
     addr.FromString(line);
     //writeln('DHT.ReadBoot: ',string(addr));
     NodeBootstrap(addr);
