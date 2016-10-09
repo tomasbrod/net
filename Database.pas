@@ -2,21 +2,27 @@ unit Database;
 { database abstraction for brodnetd }
 {$mode objfpc}
 INTERFACE
-uses cmem,MemStream;
+uses cmem,ObjectModel;
 
-{define TOKYO}
+{$define TOKYO}
 {define GDBM}
 
 type tDbMemStream=object(tMemoryStream)
     procedure Free; virtual;
 end;
-type tDbSect=byte;
+type tDbSect=(dbObject,dbObjData);
 
 function dbGet(sect:tDbSect; const key; ks:longword ): tDbMemStream;
 
 procedure dbSet(sect:tDbSect; const key; ks:longword; s:tMemoryStream );
 procedure dbSet(sect:tDbSect; const key; ks:longword; data:pointer; ds:longword );
 procedure dbDelete(sect:tDbSect; const key; ks:longword );
+
+var dbKeyList: array of record
+    l,vl:longword;
+    v:pointer;
+  end;
+procedure FreeKeyList;
 
 IMPLEMENTATION
 {$IF not (defined(TOKYO) xor defined(GDBM))}
@@ -60,7 +66,7 @@ function dbGet(sect:tDbSect; const key; ks:longword ): tDbMemStream;
   var vs:cint;
   begin
   k:=GetMem(ks+1);
-  byte(k^):=sect;
+  byte(k^):=ord(sect);
   Move(key,(k+1)^,ks);
   v:=tcadbget(dbHandle, k,ks+1, @vs);
   //FreeMem(k);
@@ -86,7 +92,7 @@ procedure dbSet(sect:tDbSect; const key; ks:longword; s:tMemoryStream );
   var k:pointer;
   begin
   k:=GetMem(ks+1);
-  byte(k^):=sect;
+  byte(k^):=ord(sect);
   Move(key,(k+1)^,ks);
   tcadbput(dbHandle, k, ks+1, s.base, s.vlength);
   FreeMem(k);
@@ -110,7 +116,7 @@ procedure dbSet(sect:tDbSect; const key; ks:longword; data:pointer; ds:longword 
   var k:pointer;
   begin
   k:=GetMem(ks+1);
-  byte(k^):=sect;
+  byte(k^):=ord(sect);
   Move(key,(k+1)^,ks);
   tcadbput(dbHandle, k, ks+1, data, ds);
   FreeMem(k);
@@ -132,33 +138,77 @@ procedure dbDelete(sect:tDbSect; const key; ks:longword );
   var k:pointer;
   begin
   k:=GetMem(ks+1);
-  byte(k^):=sect;
+  byte(k^):=ord(sect);
   Move(key,(k+1)^,ks);
   tcadbout(dbHandle, k, ks+1);
   FreeMem(k);
   {$ENDIF}
 end;
+procedure LoadListOfKeys;
+  {$IFDEF GDBM}
+  {$ERROR unimplemented}
+  var k,kn,v:tDatum;
+  var count:LongWord;
+  var i:LongInt;
+  begin
+  count:=gdbm_count;
+  k:=gdbm_firstkey(dbhandle);
+  while assigned(k.dptr) do begin
+    v:=gdbm_fetch(dbhandle, k);
+
+    kn:=gdbm_nextkey(dbhandle, k);
+    FreeMem(v.dptr,v.dsize);
+    FreeMem(k.dptr,k.size);
+    k:=kn;
+  end;
+  {$ENDIF}
+  {$IFDEF TOKYO}
+  var count:LongWord;
+  var i:LongInt;
+  begin
+  count:=tcadbrnum(dbHandle);
+  tcadbiterinit(dbHandle);
+  SetLength(dbKeyList,count);
+  for i:=0 to count-1 do begin
+    dbKeyList[i].v:=tcadbiternext(dbHandle, @dbKeyList[i].l);
+    dbKeyList[i].vl:=tcadbvsiz(dbHandle, dbKeyList[i].v, dbKeyList[i].l);
+  end;
+  {$ENDIF}
+end;
+
+procedure FreeKeyList;
+  var i:longint;
+  begin
+  for i:=0 to length(dbKeyList)-1 do begin
+    LibCFreeMem(dbKeyList[i].v);
+  end;
+end;
+
 {$IFDEF GDBM}
-const filename='dmeta.gdbm';
+{$WARNING Implement mutex-locking for gdbm access}
+const filename='db1.gdbm';
 INITIALIZATION
   dbhandle:=gdbm_open(filename,0, GDBM_WRCREAT or GDBM_FAST, $1B4, nil);
   if dbhandle=nil then begin
     writeln('Database: failed to open or create gdbm file');
     writeln(gdbm_strerror(gdbm_errno));
     halt(1);
-  end else writeln('Database: opened '+filename+' using GDBM.');
+  end {else writeln('Database: GDBM '+filename)};
 FINALIZATION
   gdbm_close(dbhandle);
 {$ENDIF}
 {$IFDEF TOKYO}
-const filename='dmeta.tcb';
+const filename='db1.tcb';
 INITIALIZATION
+  write('Database: TOKYO '+filename+' ');flush(output);
   dbhandle:=tcadbnew;
   if (dbhandle=nil) or (tcadbopen(dbhandle,filename)=false) then begin
     writeln('Database: failed to open or create TOKYO file');
     //writeln(gdbm_strerror(gdbm_errno)); TODO
     halt(1);
-  end else writeln('Database: opened '+filename+' using TOKYO.');
+  end;
+  LoadListOfKeys;
+  writeln(Length(dbKeyList),' records');
 FINALIZATION
   tcadbclose(dbhandle);
   tcadbdel(dbhandle);

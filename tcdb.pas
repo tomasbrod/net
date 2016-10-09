@@ -185,12 +185,12 @@ function tcadbvsiz(adb: pTCADB; kbuf:pointer; ksiz:cint): cint; cdecl;external;
 function tcadbvsiz2(adb: pTCADB; kstr: pchar): cint; cdecl;external;
 
 
-{
+
 (* Initialize the iterator of an abstract database object.
    `adb' specifies the abstract database object.
    If successful, the return value is true, else, it is false.
    The iterator is used in order to access the key of every record stored in a database. *)
-bool tcadbiterinit(adb: pTCADB);
+function tcadbiterinit(adb: pTCADB): cbool; cdecl;external;
 
 
 (* Get the next key of the iterator of an abstract database object.
@@ -207,9 +207,9 @@ bool tcadbiterinit(adb: pTCADB);
    However, it is not assured if updating the database is occurred while the iteration.  Besides,
    the order of this traversal access method is arbitrary, so it is not assured that the order of
    storing matches the one of the traversal access. *)
-void *tcadbiternext(adb: pTCADB, int *sp);
+function tcadbiternext(adb: pTCADB; sp:pcint): pointer; cdecl;external;
 
-
+{
 (* Get the next key string of the iterator of an abstract database object.
    `adb' specifies the abstract database object.
    If successful, the return value is the string of the next key, else, it is `NULL'.  `NULL' is
@@ -503,5 +503,4 @@ function tcerrmsg(ecode: cint): pchar; cdecl;external;
 (* END OF FILE *)
 IMPLEMENTATION
 {$linklib tokyocabinet}
-{$linklib gcc}
 END.
