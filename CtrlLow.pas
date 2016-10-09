@@ -75,6 +75,7 @@ procedure tServer.ListenEvent(ev:word);
  {writeln('CtrlLow.ListenEvent: accept');}
  New(cl);
  cl^.Init(s);
+ SHA512Buffer(addr,addrl,cl^.hash,20);
 end;
 
 procedure tClient.Init(i_s:tSocket);
@@ -109,8 +110,8 @@ end;
 
 procedure tClient.Event(ev:word);
  var hdr:record
-         method:Word;
          length:Word;
+         method:Word;
          end;
  var arg:pointer;
  var rc,sc:LongInt;
@@ -135,43 +136,55 @@ procedure tClient.Event(ev:word);
       FreeMem(arg,cBuf);
     end;
  end;
- if (ev and (POLLIN or POLLHUP or POLLERR))>0 then begin
- {read header, read arguments, exec}
- ReadBuf(s,@hdr,sizeof(hdr),rc);
- if rc=1 then begin
-  hdr.method:=ntohs(hdr.method);
-  hdr.length:=ntohs(hdr.length);
-  if (hdr.method>high(methods))(*or(hdr.method<low(methods))*)or(not assigned(methods[hdr.method].ptr)) then rc:=-4 else
-  if (methods[hdr.method].len=0)and(hdr.length>0) then rc:=-4;
-  if hdr.length<methods[hdr.method].len then rc:=-4;
-  if hdr.length>cBuf then rc:=-4;
- end;
- if (hdr.length>0)and(rc=1) then begin
-  arg:=GetMem(hdr.length);
-  ReadBuf(s,arg,hdr.length,rc);
- end;
- if rc<>1 then begin
-  case rc of
-   -1:writeln('CtrlLow.Event: recv failed ',rc);
-   0 :{writeln('CtrlLow.Event: end')};
-   -4:writeln('CtrlLow.Event: method ',hdr.method,'+',hdr.length,' not supported');
-   else writeln('CtrlLow.Event: error');
-  end;
-  error:=true;
- end else begin
-  msg_stream.Init(arg,hdr.length,cBuf);
-  resp_stream.Init(cBuf);
-  resp_stream.Write(arg,2);
-  //Writeln('CtrlLow.Event: method=',hdr.method,' arglen=',hdr.length);
-  Int;
-  methods[hdr.method].ptr(self,msg_stream,resp_stream);
-  if not error then begin
-    resp_stream.Seek(0);
-    resp_stream.WriteWord(resp_stream.Length-2,2);
-    self.SendTo(resp_stream); resp_stream.Free;
-  end;
- end;
- if hdr.length>0 then FreeMem(arg,hdr.length);
+  if (ev and (POLLIN or POLLHUP or POLLERR))>0 then begin
+    if RcvObjLeft>0 then begin
+      arg:=GetMem(cBuf);
+      rc:=cBuf; if rc>RcvObjLeft then rc:=RcvObjLeft;
+      rc:=fpRecv(s,arg,rc,0);
+      if rc>0 then begin
+        RcvObj^.Write(arg^,rc);
+        RcvObjLeft:=RcvObjLeft-rc;
+        if RcvObjLeft=0 then RcvObjComplete;
+      end;
+    end else begin
+      {read header, read arguments, exec}
+      ReadBuf(s,@hdr,sizeof(hdr),rc);
+      if rc=1 then begin
+        hdr.method:=ntohs(hdr.method);
+        hdr.length:=ntohs(hdr.length);
+        if (hdr.method>high(methods))(*or(hdr.method<low(methods))*)or(not assigned(methods[hdr.method].ptr)) then rc:=-4 else
+        if (methods[hdr.method].len=0)and(hdr.length>0) then rc:=-4;
+        if hdr.length<methods[hdr.method].len then rc:=-4;
+        if hdr.length>cBuf then rc:=-4;
+      end;
+      if (hdr.length>0)and(rc=1) then begin
+        arg:=GetMem(hdr.length);
+        ReadBuf(s,arg,hdr.length,rc);
+      end;
+      if rc=1 then begin
+        msg_stream.Init(arg,hdr.length,cBuf);
+        resp_stream.Init(cBuf);
+        resp_stream.Write(arg,2);
+        //Writeln('CtrlLow.Event: method=',hdr.method,' arglen=',hdr.length);
+        Int;
+        methods[hdr.method].ptr(self,msg_stream,resp_stream);
+        if not error then begin
+          resp_stream.Seek(0);
+          resp_stream.WriteWord2(resp_stream.Length-2);
+          self.SendTo(resp_stream); resp_stream.Free;
+        end;
+      end;
+      if hdr.length>0 then FreeMem(arg,hdr.length);
+    end;
+    if rc<>1 then begin
+      case rc of
+        -1:writeln('CtrlLow.Event: recv failed ',rc);
+        0 :{writeln('CtrlLow.Event: end')};
+        -4:writeln('CtrlLow.Event: method ',hdr.method,'+',hdr.length,' not supported');
+        else writeln('CtrlLow.Event: error');
+      end;
+      error:=true;
+    end;
  end;
  if error then Done;
 end;
@@ -200,6 +213,7 @@ end;
 
 procedure tMethod.Init(proc:tMethodProc; argl:word);
  begin
+ assert(ptr=nil);
  ptr:=proc;
  len:=argl;
 end;

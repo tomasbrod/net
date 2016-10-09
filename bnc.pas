@@ -1,5 +1,9 @@
 program bnc;
-USES MemStream,SockStream,NetAddr,SysUtils,Sockets,BaseUnix;
+USES ObjectModel,SockStream,SysUtils,Sockets,BaseUnix;
+
+{BrodNet CLI programs}
+{bncmd communicate with daemon}
+{bnedit wiev/edit all types of brodnet files}
 
 var sck:tSocketStream;
 procedure InitUnix;
@@ -13,16 +17,16 @@ procedure InitUnix;
   sck.Init(sck.h);
 end;
 
-
 procedure CopySP(var s1:tCommonStream; var s2:tMemoryStream);
   var l:word;
   begin
-  s1.Read(l,2);l:=ntohs(l);
-  s2.Seek(0);s2.Trunc;
-  if l>s2.WrBufLen then raise eInvalidMemStreamAccess.Create('Write out of bounds');
-  s1.Read(s2.WrBuf^, l);
-  s2.WrEnd(l);
+  l:=s1.ReadWord2;
+  if l>s2.size then raise eInvalidMemStreamAccess.Create('Message Too Long');
+  s1.Read(s2.base^, l);
+  s2.vLength:=l;
+  s2.position:=0;
 end;
+
 function CheckStatus(var s:tMemoryStream; op:Word; min:Word):boolean;
   var e:byte;
   begin
@@ -60,13 +64,12 @@ function StringProfileInfo(var s:tMemoryStream):string;
     WriteStr(result,'FID: ',string(fid),LineEnding, 'Update: ',LongWord(Update));
   end else WriteStr(result,'not found, error ',e);
 end;
+
 {bnc xxX[commands]Xxx}
-var cmd: packed record
-  op,len:Word2 end;
-var op:word;
-var pl:tMemoryStream;
-var rpl:tMemoryStream;
-var path:string;
+
+var req:tMemoryStream;
+var res:tMemoryStream;
+(*
 procedure ShowPUPD;
   var st:byte;
   var ve:LongWord;
@@ -90,13 +93,131 @@ procedure ShowPUPD;
       else t:='?'+IntToStr(st); end;
     writeln(round((Now-tb)*MsecsPerDay):4,' ',t:6,ve:5,string(id):41,string(ad));
   until st=12;
+end;*)
+
+procedure ErrParams;
+  begin
+  writeln('Invalid parameters');
+  halt(1);
 end;
+
+procedure aSend;
+  begin
+  req.Seek(0);
+  req.writeword2(req.length-4);
+  sck.Write(req.base^,req.vlength);
+end;
+procedure aRecv;
+  begin
+  res.vlength:=sck.ReadWord2;
+  if res.vlength>res.size then raise eInvalidMemStreamAccess.Create('Message Too Long');
+  sck.Read(res.base^, res.vlength);
+  res.Seek(0);
+end;
+
+procedure cmdINFO;
+  begin
+  if paramcount>1 then errParams;
+  {no input}
+  req.WriteWord2(00);
+  aSend;aRecv;
+  Writeln(res.ReadStringAll);
+end;
+
+procedure cmdSTOP;
+  begin
+  if paramcount>1 then errParams;
+  {no input}
+  req.WriteWord2(00);
+  aSend;aRecv;
+  {checkstatus}
+end;
+
+procedure cmdPUT;
+  var ins:tFileStream;
+  var left,bc:longword;
+  begin
+  if paramcount<>2 then errParams;
+  ins.OpenRO(ParamStr(2));
+  req.WriteWord2(00);
+  left:=ins.left;
+  req.WriteWord2( Left );
+  aSend;
+  while left>0 do begin
+    req.Seek(0);
+    if left>req.size then bc:=req.size else bc:=left;
+    ins.Read(req.base^,bc);
+    sck.Write(req.base^,bc);
+  end;
+  aRecv;
+  if (res.Left>=21) and (res.ReadByte=0) then begin
+    writeln(string(tKey20(res.ReadPtr(20)^)));
+  end else writeln('failed');
+end;
+
+procedure cmdPUTMV;
+  var path:string;
+  begin
+  if paramcount<>2 then errParams;
+  path:=paramstr(2);
+  if not (path[1] in ['/','\','~']) then path:=GetCurrentDir+'/'+path;
+  req.WriteWord2(00);
+  req.Write(path[1],Length(path));
+  aSend;aRecv;
+  if (res.Left>=21) and (res.ReadByte=0) then begin
+    writeln(string(tKey20(res.ReadPtr(20)^)));
+  end else writeln('failed');
+end;
+
+procedure cmdGET;
+  begin
+  if paramcount<>2 then errParams;
+  req.WriteWord2(00);
+  req.Write(tKey20(paramstr(2)),20);
+  req.WriteWord4(0);
+  req.WriteWord4($FFFFFFFF);
+  aSend;aRecv;
+  if (res.Left>=5) and (res.ReadByte=0) then begin
+    writeln('Length: ',res.ReadWord4);
+  end else writeln('failed');
+end;
+procedure cmdOBJST;
+  begin
+  if paramcount<>2 then errParams;
+  req.WriteWord2(00);
+  req.Write(tKey20(paramstr(2)),20);
+  aSend;aRecv;
+  if (res.Left>=9) and (res.ReadByte=0) then begin
+    writeln('Length: ',res.ReadWord4);
+    writeln('RefCout: ',res.ReadWord2);
+    writeln('Storage: ',res.ReadByte);
+    writeln('File: ',res.ReadShortString);
+  end else writeln('failed');
+end;
+
 BEGIN
-  if paramcount=0 then begin writeln('Invalid parameters'); halt(1) end;
-  rpl.Init(4096);
-  pl.Init(rpl.base,0,rpl.size);
+  if paramcount<1 then ErrParams;
+  req.Init(4096);
+  res.Init(req.base,0,req.size);
+  req.skip(2);
+  InitUnix;
   case upcase(paramstr(1)) of
-    'INFO': op:=0;
+    'INFO'  : cmdINFO;
+    'STOP'  : cmdSTOP;
+    'PUT'   : cmdPUT;
+    'PUTMV' : cmdPUTMV;
+    'GET'   : cmdGET;
+    //'GETFN' : cmdGETFN;
+    'OBJST' : cmdOBJST;
+    else ErrParams;
+  end;
+END.
+
+  req.Init(4096);
+  res.Init(req.base,0,req.size);
+  req.skip(2);
+  case upcase(paramstr(1)) of
+    'INFO': cmdINFO;
     'QUIT': op:=1;
     'EXEC': op:=2;
     'PEER': begin op:=3; pl.Write(tNetAddr(paramstr(2)),sizeof(tNetAddr)) end;
