@@ -72,6 +72,7 @@ procedure PoWGenerate;
   for i:=0 to 31 do wp.data[i]:=Random(256);
   Start:=Now; counter:=0;
   repeat
+    if counter=high(counter) then raise eXception.Create('some shit happend');
     inc(counter);
     Sha512Init(shactx);
     Sha512Update(shactx,wp,sizeof(wp));
