@@ -7,7 +7,7 @@ program bnedit;
   bnedit host host-key.dat : generate host key or renew PoW
 *)
 
-USES Profile,MemStream,NetAddr,SysUtils,ed25519,Sha512;
+USES Profile,ObjectModel,SysUtils,ed25519,Sha512,gitver;
 
 const
   cCertKeyIdent:array [1..8] of char='BNCertS'#26;
@@ -16,17 +16,6 @@ const
 
 const helphint='Run bnedit without parameters to get help.';
 
-type tFileStream=object(tCommonStream)
-  f:tHandle;
-  procedure Seek(absolute:LongWord); virtual;
-  procedure Read(out buf; cnt:Word); virtual;
-  procedure Write(const buf; cnt:word); virtual;
-  function  Length:LongWord; virtual;
-  function  Tell:LongWord; virtual;
-  constructor OpenRO(const fn:string);
-  constructor OpenRW(const fn:string);
-  destructor Done;
-end;
 
 function GetPubFromNodeKey(const fn:string; save_secret:pointer=nil ):tKey32;
   var s:tFileStream;
@@ -73,41 +62,6 @@ procedure LoadUserKey(var sf:tFileStream; out LoginSec:tKey64; var pf:tProfileRe
   pf.sigexpire:=tDateTime(DWORD(pf.key.expire))+40179;
 end;
 
-procedure tFileStream.Seek(absolute:LongWord);
-  begin if FileSeek(f,absolute,fsFromBeginning)<>absolute
-  then raise eInOutError.Create('File Seek Error'); end;
-procedure tFileStream.Read(out buf; cnt:Word);
-  begin  if FileRead(f,buf,cnt)<>cnt
-  then raise eInOutError.Create('File Read Error'); end;
-procedure tFileStream.Write(const buf; cnt:word);
-  begin if FileWrite(f,buf,cnt)<>cnt
-  then raise eInOutError.Create('File Write Error'); end;
-constructor tFileStream.OpenRO(const fn:string);
-  begin
-  Inherited Init;
-  f:=FileOpen(fn, fmOpenRead);
-  if f=-1 then raise eInOutError.Create('File Open for reading Error');
-end;
-function tFileStream.Length:LongWord;
-  var pos:LongInt;
-  begin
-  pos:=FileSeek(f,0,fsFromCurrent);
-  result:=FileSeek(f,0,fsFromEnd);
-  Seek(pos);
-end;
-function tFileStream.Tell:LongWord;
-  begin
-  result:=FileSeek(f,0,fsFromCurrent);
-end;
-constructor tFileStream.OpenRW(const fn:string);
-  begin
-  Inherited Init;
-  f:=FileOpen(fn, fmOpenReadWrite);
-  if f=-1 then f:=FileCreate(fn, %0110000000); {mode: -rw-------}
-  if f=-1 then raise eInOutError.Create('File Open read/write or Create Error');
-end;
-destructor tFileStream.Done;
-  begin FileClose(f); end;
 
 procedure DumpProfile(var txt:text; var pfs:tFileStream);
   var pf:tProfileRead;
@@ -236,7 +190,7 @@ procedure GenerateLoginFile;
   readln(pas);
   write('Generate random LoginKey: ');
   GetOSRandom(@loginsec,64);
-  FileTruncate(lf.f,0);
+  FileTruncate(lf.handle,0);
   lf.Write(cLoginIdent,8);
   lf.Write(keys.cert,32);
   lf.Write(loginsec,64);
@@ -341,14 +295,13 @@ procedure EditProfile;
     else writeln('Error: Unknown command: ',cmd,' (use HELP command)');
   until EOF(input);
   pfs.Seek(0);
-  FileTruncate(pfs.f,0);
+  FileTruncate(pfs.handle,0);
   pf.Modified:=Now;
   pf.WriteTo(pfs,LoginSec);
   FillChar(loginsec,sizeof(loginsec),0);
   writeln('Changes Saved.');
 end;
 
-{$I gitver.inc}
 const eoln=LineEnding;
 const helptext:ansistring
 =eoln
@@ -364,7 +317,7 @@ const helptext:ansistring
 BEGIN
   if paramcount=0 then begin
     writeln('No parameters! Here read help text.');
-    writeln('bnedit is BrodNet file Viewer and Editor version '+GIT_VERSION+' build ',BUILD_VERSION,'@'+BUILD_HOST);
+    writeln('bnedit is BrodNet file Viewer and Editor version '+GIT_VERSION);
     write(helptext);
     halt(9);
   end;

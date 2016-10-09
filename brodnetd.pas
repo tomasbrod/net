@@ -1,7 +1,6 @@
 PROGRAM brodnetd;
 
-{ Poll loop. Read message, get handler, exec handler. }
-uses cthreads,ServerLoop, ObjectModel
+uses cmem,cthreads,ServerLoop, ObjectModel
   ,Database
   ,Store2
 	,ECC
