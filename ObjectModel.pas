@@ -27,6 +27,7 @@ type Word8=array [1..8] of byte; {todo}
 procedure BinToHex(hexValue:pChar; const orig; len:word);
 function PrefixLength(const a,b:tKey20):byte;
 function SizeToString( v:LongWord):string;
+function IntHash(init:LongWord;const data;len:longword):LongWord;
 
 (*** Base Object types ***)
 
@@ -56,7 +57,7 @@ type
 
 type
   tTask_ptr=^tTask;
-  tTaskEvent=(tevComplete, tevError, tevClose, tevSubTask);
+  tTaskEvent=(tevComplete, tevError, tevClose, tevSubTask, tevUser, tevOther);
   tTaskCallback=procedure( task:tTask_ptr; event:tTaskEvent; data:pointer ) of object;
   tTask_SubItem=record
     cb: tTaskCallback;
@@ -169,6 +170,7 @@ type
     procedure Write(const buf; cnt:word); virtual;
     function  Length:LongWord; virtual;
     function  Tell:LongWord; virtual;
+    procedure Trunc(len:LongWord);
     constructor OpenRO(const fn:string);
     constructor OpenRW(const fn:string);
     constructor OpenHandle(const ihandle:tHandle);
@@ -236,6 +238,13 @@ procedure WriteBE(var s:tCommonStream; v:tKey64); overload;
 procedure WriteBE(var s:tCommonStream; v:tNetAddr); overload;
 procedure WriteBE(var s:tCommonStream; v:tNetAddr); overload;
 }
+(*** Search ***)
+type tComparePtrKeyFunc = function (a: pointer; key: pointer): ShortInt;
+function FindIndex(a: ppointer; count: LongWord; key: pointer; compare: tComparePtrKeyFunc): LongWord;
+procedure PtrListShiftLeft(a: ppointer; max, i:longword);
+function PtrListShiftRight(a: ppointer; max, i:longword): boolean;
+
+
 (*** Other ***)
 
 type eInvalidMemStreamAccess=class(Exception)
@@ -243,11 +252,11 @@ type eInvalidMemStreamAccess=class(Exception)
 type eReadPastEoF=class(Exception)
   ActuallyReadBytes:LongWord;
   end;
+type eInOutError=SysUtils.eInOutError;
 type eFileNotFound=class(eInOutError)
   end;
 
 function ConvertFamily( a:tFamily ): sa_family_t;
-function IntHash(init:LongWord;const data;len:longword):LongWord;
 
 IMPLEMENTATION
 uses StrUtils; {TODO}
@@ -378,7 +387,10 @@ procedure tMemoryStream.WREnd(used:LongWord);
 function tMemoryStream.RDBuf:pointer;
  begin result:=base+position end;
 function tMemoryStream.RDBufLen:LongWord;
- begin result:=length-position end;
+  begin
+  if position>=length then result:=0
+  else result:=length-position
+end;
 procedure tMemoryStream.RDEnd(used:LongWord);
  begin skip(used) end;
 
@@ -731,7 +743,7 @@ end;
 procedure tTask.Attach( subscriber:tTask_ptr; callback:tTaskCallback);
   begin
   TaskIntAttach(callback,false);
-  subscriber^.SendEvent(tevSubTask,@self);
+  if assigned(subscriber) then subscriber^.SendEvent(tevSubTask,@self);
 end;
 procedure tTask.Attach( callback:tTaskCallback );
   begin
@@ -752,6 +764,9 @@ function tTask.GetSubTask(i:integer): tTask_ptr;
 procedure tFileStream.Seek(absolute:LongWord);
   begin if FileSeek(handle,absolute,fsFromBeginning)<>absolute
   then raise eInOutError.Create('File Seek Error'); end;
+procedure tFileStream.Trunc(len:LongWord);
+ begin if not FIleTruncate(handle,len)
+ then raise eInOutError.Create('File Trunc Error'); end;
 procedure tFileStream.Read(out buf; cnt:Word);
   begin  if FileRead(handle,buf,cnt)<>cnt
   then raise eInOutError.Create('File Read Error'); end;
@@ -788,7 +803,7 @@ constructor tFileStream.OpenHandle(const ihandle:tHandle);
   handle:=ihandle;
 end;
 destructor tFileStream.Done;
-  begin FileClose(handle); end;
+  begin FileClose(handle); handle:=-1; end;
 
 function SizeToString( v:LongWord):string;
   var f:LongWord;
@@ -802,12 +817,50 @@ function SizeToString( v:LongWord):string;
     v:=v div 1024;
   end;
   if e<1
-  then result:=IntToStr(v)+'B'
+  then result:=IntToStr(v)
   else if f>100
-  then result:=IntToStr(v)+chars[e]+IntToStr(round(f/100))+'B'
-  else result:=IntToStr(v)+chars[e]+'B';
+  then result:=IntToStr(v)+chars[e]+IntToStr(round(f/100))
+  else result:=IntToStr(v)+chars[e];
 end;
 
 {$I ObjectModel-cfg.pas}
+
+(*** Find ***)
+
+function FindIndex(a: ppointer; count: LongWord; key: pointer; compare: tComparePtrKeyFunc): LongWord;
+  var l,r:LongWord;
+  var cmp:shortint;
+  begin {binary search}
+  l:=0;
+  r:=count;
+  while l<r do begin
+    result:=(l+r) div 2;
+    assert(result<count); //just a safety check
+    if result=count then exit;
+    cmp:=compare(a[result],key);
+    if cmp>0
+      then r:=result-1
+      else l:=result+1;
+  end;
+  result:=l;
+end;
+
+function PtrListShiftRight(a: ppointer; max, i:longword): boolean;
+  var j:longint;
+  begin
+  if assigned(a[max]) then result:=false
+  else begin
+    for j:=max-1 downto i do a[j+1]:=a[j];
+    result:=true;
+  end;
+end;
+
+procedure PtrListShiftLeft(a: ppointer; max, i:longword);
+  var j:longint;
+  begin
+  for j:=i to max-1 do a[j]:=a[j+1];
+  a[max]:=nil;
+end;
+
 
 END.

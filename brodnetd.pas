@@ -6,7 +6,6 @@ uses cmem,cthreads,ServerLoop, ObjectModel
 	,ECC
 	,OTServer
  	,ObjTrans
-  ,Fetch
 	,DHT
 	,Ctrl
   //,ott

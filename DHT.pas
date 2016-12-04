@@ -44,7 +44,7 @@ tSearchNode=object
     ID   :tPID;
     Addr :tNetAddr;
     LastReq:tMTime;
-    reqc:byte;
+    reqc:byte;{number of requests}
     rplc:byte;{1=replied with cap, 2=replied with peers}
     end;
 
@@ -57,9 +57,9 @@ tSearch=object(tTask)
     constructor Init(const iTarget:tPID);
     protected
     procedure Cleanup; virtual;
-    function  AddNode(const iID:tPID; const iAddr:tNetAddr) :integer;
+    function  AddNode(const iID:tPID; const iAddr:tNetAddr) :integer; virtual;
     procedure AddNodes(var s:tMemoryStream);
-    procedure LoadNodes; {from dht and node cache}
+    procedure LoadNodes; {from dht and node cache} virtual;
     procedure Step;
     procedure HandleReply(var sAddr: tNetAddr; var sPID: tPID; op:byte; var st:tMemoryStream); virtual;
     private
@@ -222,6 +222,7 @@ function CheckNode(const id: tPID; const addr: tNetAddr; recv:boolean): boolean;
     b^.next:=nil;
     b^.desperate:=3;
     for i:=1 to high(b^.peer) do b^.peer[i].addr.Clear;
+    for i:=1 to high(b^.peer) do FillChar(b^.peer[i].ID,20,0);
     for i:=1 to high(b^.peer) do b^.peer[i].banned:=false;
     Shedule(2000,@b^.Refresh);
   end;
@@ -342,7 +343,7 @@ procedure RecvBeatQ(msg:tSMsg);
     list.Next;
     if not assigned(list.bkt) then break; {simply no more peers}
     if list.p^.addr=msg.source then continue;
-    r.Write(list.p^.Addr,16);
+    r.Write(list.p^.Addr,18);
     r.Write(list.p^.ID,20);
   end;
   SendMessage(r.base^,r.length,msg.source);
@@ -372,7 +373,7 @@ procedure RecvBeatR(msg:tSMsg);
   //writeln('DHT.BeatR: ',string(msg.source),' is ',string(ID^));
   if not CheckNode(ID^,msg.source,true) then exit;
   while msg.st.RdBufLen>36 do begin
-    Addr:=msg.st.ReadPtr(16);
+    Addr:=msg.st.ReadPtr(18);
     ID:=msg.st.ReadPtr(20);
     CheckNode(ID^,Addr^,false);
   end;
@@ -459,11 +460,12 @@ procedure RecvCheckR(msg:tSMsg);
   {Verify PoW}
   if not ECC.VerifyPoW(pow^,pub^) then begin
     b^.peer[i].Banned:=true;
-  writeln('DHT.CheckR: Invalid PoW in response from ',string(msg.source));
+    writeln('DHT.CheckR: Invalid PoW in response from ',string(msg.source));
   exit end;
   {Verify C/R}
   ECC.CreateResponse(b^.peer[i].Challenge, right_resp, pub^);
   if CompareByte(resp^,right_resp,sizeof(right_resp))<>0 then begin
+    writeln('DHT.CheckR: Invalid C/R in response from ',string(msg.source));
     b^.peer[i].Banned:=true;
   exit end;
   {set node verified, rqd, last}
@@ -497,7 +499,7 @@ procedure RecvGetNodes(Msg:tSMsg);
     for i:=1 to high(bucket^.peer) do begin
       if r.WRBufLen<36 then break;
       if bucket^.peer[i].Addr.isNil then break;
-      r.Write(bucket^.peer[i].Addr,16);
+      r.Write(bucket^.peer[i].Addr,18);
       r.Write(bucket^.peer[i].ID,20);
     end;
     bucket:=bucket^.next;
@@ -691,7 +693,7 @@ procedure tSearch.AddNodes(var s:tMemoryStream);
   begin
   writeln('dhtLookup.AddNodes stream offset ',s.tell);
   while s.left>=36 do begin
-    ad:=s.readptr(16);
+    ad:=s.readptr(18);
     id:=s.readptr(20);
     if DHT.CheckNode(id^, ad^, false) then continue; {is this needed?}
     node:=self.AddNode(id^, ad^);

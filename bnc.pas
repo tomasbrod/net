@@ -128,7 +128,7 @@ procedure cmdSTOP;
   begin
   if paramcount>1 then errParams;
   {no input}
-  req.WriteWord2(00);
+  req.WriteWord2(01);
   aSend;aRecv;
   {checkstatus}
 end;
@@ -139,15 +139,18 @@ procedure cmdPUT;
   begin
   if paramcount<>2 then errParams;
   ins.OpenRO(ParamStr(2));
-  req.WriteWord2(00);
+  req.WriteWord2(08);
   left:=ins.left;
-  req.WriteWord2( Left );
+  req.WriteWord4( Left );
+  writeln('sending object ',left);
   aSend;
+  aRecv;
   while left>0 do begin
     req.Seek(0);
     if left>req.size then bc:=req.size else bc:=left;
     ins.Read(req.base^,bc);
     sck.Write(req.base^,bc);
+    left:=left-bc;
   end;
   aRecv;
   if (res.Left>=21) and (res.ReadByte=0) then begin
@@ -155,24 +158,35 @@ procedure cmdPUT;
   end else writeln('failed');
 end;
 
-procedure cmdPUTMV;
+procedure cmdPUT_local(m:integer);
   var path:string;
+  var e:byte;
   begin
   if paramcount<>2 then errParams;
   path:=paramstr(2);
-  if not (path[1] in ['/','\','~']) then path:=GetCurrentDir+'/'+path;
-  req.WriteWord2(00);
+  if not (path[1] in ['/','\']) then path:=GetCurrentDir+'/'+path;
+  if m=1 then begin
+    {chmod}
+  end;
+  if      m=0 then req.WriteWord2(00)
+  else if m=1 then req.WriteWord2(03)
+  else if m=2 then req.WriteWord2(09);
   req.Write(path[1],Length(path));
   aSend;aRecv;
-  if (res.Left>=21) and (res.ReadByte=0) then begin
-    writeln(string(tKey20(res.ReadPtr(20)^)));
+  if (res.Left>=1) then begin
+    e:=res.ReadByte;
+    if (e=0) and (res.Left>=20) then begin
+      writeln(string(tKey20(res.ReadPtr(20)^)));
+    end else begin
+      writeln('error ',e,': ',res.ReadStringAll);
+    end;
   end else writeln('failed');
 end;
 
 procedure cmdGET;
   begin
   if paramcount<>2 then errParams;
-  req.WriteWord2(00);
+  req.WriteWord2(04);
   req.Write(tKey20(paramstr(2)),20);
   req.WriteWord4(0);
   req.WriteWord4($FFFFFFFF);
@@ -181,18 +195,57 @@ procedure cmdGET;
     writeln('Length: ',res.ReadWord4);
   end else writeln('failed');
 end;
-procedure cmdOBJST;
+
+procedure cmdSTAT;
+  var st:byte;
+  var id2:^tKey20;
+  var path:ansistring;
+  var olength:LongWord;
   begin
   if paramcount<>2 then errParams;
-  req.WriteWord2(00);
+  req.WriteWord2(10);
   req.Write(tKey20(paramstr(2)),20);
-  aSend;aRecv;
-  if (res.Left>=9) and (res.ReadByte=0) then begin
-    writeln('Length: ',res.ReadWord4);
+  aSend;aRecv; st:=res.ReadByte;
+  if st=0 then begin
+    id2:=res.ReadPtr(20);
+    writeln('FID: ',string(id2^));
+    olength:=res.ReadWord4;
+    writeln('Length: ',SizeToString(olength),'B (',olength,')');
     writeln('RefCout: ',res.ReadWord2);
+    writeln('Temp: ',res.ReadByte);
     writeln('Storage: ',res.ReadByte);
-    writeln('File: ',res.ReadShortString);
-  end else writeln('failed');
+    SetLength(path,res.left);
+    res.Read(path[1],res.left);
+    writeln('File: ',path);
+  end else writeln('error ',st);
+end;
+
+procedure cmdREFADJ;
+  var st:byte;
+  begin
+  if paramcount<>3 then errParams;
+  req.WriteWord2(11);
+  req.Write(tKey20(paramstr(2)),20);
+  req.WriteByte(StrToInt(paramstr(3))+128);
+  aSend;aRecv; st:=res.ReadByte;
+  if st=0 then begin
+    writeln('ok');
+  end else writeln('error ',st);
+end;
+
+procedure cmdFETCH;
+  var st:byte;
+  begin
+  if paramcount<>3 then errParams;
+  req.WriteWord2(12);
+  req.Write(tKey20(paramstr(2)),20);
+  req.Write(tNetAddr(paramstr(3)),18);
+  req.WriteByte(64);
+  aSend; aRecv; st:=res.ReadByte;
+  if st=0 then begin
+    writeln('ok');
+  end else writeln('error ',st);
+  readln;
 end;
 
 BEGIN
@@ -204,15 +257,21 @@ BEGIN
   case upcase(paramstr(1)) of
     'INFO'  : cmdINFO;
     'STOP'  : cmdSTOP;
+    {'PUTCP' : cmdPUT_local(0);}
+    'PUTLN' : cmdPUT_local(1);
+    'PUTMV' : cmdPUT_local(2);
+    {'GETCP' : cmdGET_local(0);}
+    {'GETLN' : cmdGET_local(1);}
     'PUT'   : cmdPUT;
-    'PUTMV' : cmdPUTMV;
     'GET'   : cmdGET;
-    //'GETFN' : cmdGETFN;
-    'OBJST' : cmdOBJST;
+    'STAT'  : cmdSTAT;
+    'REFADJ'  : cmdREFADJ;
+    'FETCH'  : cmdFETCH;
     else ErrParams;
   end;
 END.
 
+{
   req.Init(4096);
   res.Init(req.base,0,req.size);
   req.skip(2);
@@ -252,5 +311,5 @@ END.
         'Length: ',LongWord(rpl.ReadWord(4)));
     15: if CheckStatus(rpl,op,0) then ShowPUPD;
   end;
-END.
+END.}
 

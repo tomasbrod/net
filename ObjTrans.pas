@@ -17,43 +17,47 @@ tJob=object
   error:word;{0progress,1done,2ioerror,3timeout,4full,OT-DLEs}
   dataf:tFileStream; {do not touch while active}
   FID:tFID;
-  procedure Init(const srce:tNetAddr; const iFID:tFID);
+  aggr:tAggr_ptr;
+  procedure Init;
   procedure Start;
   procedure Done;
   procedure MakeRequest(diag:byte);
   private
-  aggr:tAggr_ptr;
   ch:byte;
   FirstSeg:pointer;
   MaxReqCnt:word;
   RetryCounter:word;
   DgrCntSinceReq:LongWord;
-  procedure OnData(msg:tMemoryStream);
+  procedure OnData(msg:tMemoryStream; rcvttl:word);
   procedure OnTimeout; {nothing is flowing thru aggr or afterrequest check}
   end;
 
 tAggr=object
   Remote:tNetAddr;
+  refc, maxchan: byte;
+  distance: word;
+  procedure ResetIdle;
   private
   channel: array [1..16] of ^tJob;
-  refc,ncpt,idletick: byte;
-  next:tAggr_ptr;
+  ncpt, idletick: byte;
   ByteCnt:LongWord;
   DgrCnt:LongWord;
   DgrCntCheck:LongWord;
   StartT:tMTime;
   ReadyForData:boolean;
-  procedure Init(const src:tNetAddr);
+  procedure Init;
   procedure Add(var job: tJob);
   procedure Del(var job: tJob);
   procedure OnData(msg:tSMsg);
   procedure Periodic;
   end;
 
-IMPLEMENTATION
-uses opcode;
+function GetAggr(const iRemote: tNetAddr; create: boolean): tAggr_ptr;
 
-var AggrChain:^tAggr;
+IMPLEMENTATION
+uses opcode,SysUtils;
+
+var Aggrs: array [0..511] of ^tAggr;
 
 type
 tSeg=object
@@ -63,25 +67,32 @@ tSegItem=object(tSeg)
   next:^tSegItem;
   end;
 
-function GetAggr(const remote:tNetAddr):tAggr_ptr;
- var a:^tAggr;
- var p:^pointer;
- begin
- p:=@AggrChain;
- a:=AggrChain;
- while assigned(a) do begin
-  if a^.remote=remote then begin
-   GetAggr:=a;
-   p^:=a^.next;
-   a^.next:=AggrChain;
-   AggrChain:=a^.next;
-   exit;
-  end;
- end;
- GetAggr:=nil;
+
+function compareAggr(a: pointer; key: pointer): ShortInt;
+  begin
+  if assigned(a)
+  then result:=CompareByte(tAggr(a^).Remote, tNetAddr(key^), sizeof(tNetAddr))
+  else result:=1; {outside of array, go left}
 end;
 
-procedure tJob.Init(const srce:tNetAddr; const iFID:tFID);
+function GetAggr(const iRemote: tNetAddr; create: boolean): tAggr_ptr;
+  var i:longword;
+  begin
+  i:=FindIndex(@Aggrs[0], high(Aggrs)+1, @iremote, @compareAggr);
+  if i<=high(Aggrs) then begin
+    if assigned(Aggrs[i]) and (Aggrs[i]^.Remote=iRemote)
+    then result:=Aggrs[i]
+    else if create
+    and( (Aggrs[i]=nil) or PtrListShiftRight(@Aggrs[0], High(Aggrs), i) )then begin
+        New(Aggrs[i]);
+        Aggrs[i]^.Remote:=iRemote;
+        Aggrs[i]^.Init;
+        result:=Aggrs[i];
+    end else result:=nil;
+  end else result:=nil;
+end;
+
+procedure tJob.Init;
   begin
   Weight:=32;
   Callback:=nil;
@@ -89,37 +100,41 @@ procedure tJob.Init(const srce:tNetAddr; const iFID:tFID);
   Total:=$FFFFFFFF;
   MaxReqCnt:=99;
   RetryCounter:=0;
-  FID:=iFID;
-  {$note Open SEG file and read it  ToDo}
-  aggr:=GetAggr(srce);
-  if not assigned(aggr) then begin
-    new(aggr);
-    aggr^.ReadyForData:=false;
-    aggr^.next:=AggrChain;
-    AggrChain:=aggr;
-    aggr^.Init(srce);
-  end;
+  FirstSeg:=nil;
+  Aggr:=nil;
   ch:=0;
-  aggr^.Add(self);
-  if ch=0 then begin
-    error:=4;
-    Done; exit;
-  end;
-  error:=0;
+  error:=1;
 end;
 
 procedure tJob.Start;
   begin
   Assert( (Weight+opcode.otReq)<=high(byte));
   Assert(assigned(callback));
-  MakeRequest(1);
+  Assert(assigned(aggr));
+  assert(ch=0);
+  {set fid and open temporary data file}
+  {attach to connection}
+  aggr^.Add(self);
+  if ch=0 then begin
+    error:=4;
+  end else begin
+    {make the request}
+    error:=0;
+    MakeRequest(1);
+  end;
 end;
 
 procedure tJob.Done;
+  var cp,dp:^tSegItem;
   begin
-  if error<>1 then dataf.Done;
   UnShedule(@OnTimeout);
-  aggr^.Del(self);
+  if assigned(aggr) then aggr^.Del(self);
+  cp:=FirstSeg;
+  while assigned(cp) do begin
+    dp:=cp;
+    cp:=cp^.next;
+    Dispose(dp);
+  end;
 end;
 
 {Strategy for fixing holes without waiting for DONE message:
@@ -133,13 +148,14 @@ procedure tJob.MakeRequest(diag:byte);
  var b,l,ReqLen:LongWord;
  var ReqCnt:byte;
  var seg:^tSegItem;
- const ReqLenLim=20000000;
+ const ReqLenLim=5000000;
  begin
  write('ObjTrans.',string(aggr^.remote),'#',ch,'.MakeRequest',diag);
   seg:=nil;
   ReqLen:=0;
   ReqCnt:=0;
-  s.Init(185); {23+(18*99)}
+  {TODO: derive request size from connection datagram size}
+  s.Init(383); {23+(40*9)=383}
   s.WriteByte(opcode.otCtrl);
   s.WriteByte(opcode.otReq+Weight);
   s.WriteByte(ch);
@@ -165,12 +181,12 @@ procedure tJob.MakeRequest(diag:byte);
     s.WriteWord4(l);
     inc(ReqLen,l);
     inc(ReqCnt);
-  until (s.WrBufLen<9)or(ReqLen>=ReqLenLim)or(ReqCnt>=MaxReqCnt);
+  until (s.WrBufLen<9)or(ReqLen>=ReqLenLim)or(ReqCnt>MaxReqCnt);
   if ReqLen=0 then begin
     writeln(' done');
     FreeMem(s.base,s.size);
-    error:=1; Done;
-    if assigned(callback) then Callback;
+    error:=1;
+    Callback;
   end else begin
     writeln(' send ',s.Length);
     SendMessage(s.Base^,s.Length,aggr^.Remote);
@@ -182,10 +198,11 @@ procedure tJob.MakeRequest(diag:byte);
   end;
 end;
 
-procedure tJob.OnData(msg:tMemoryStream);
+procedure tJob.OnData(msg:tMemoryStream; rcvttl:word);
   var hiOfs:byte;
   var Offset:LongWord;
   var dtlen:word;
+  var dist:integer;
   procedure SetSegment(first,after:LongWord);
     var p:^pointer;
     var c,k:^tSegItem;
@@ -202,7 +219,9 @@ procedure tJob.OnData(msg:tMemoryStream);
         c:=p^; continue;
       end;
       p:=@c^.next; c:=p^;
-      if first>=after then exit;
+      if first>=after then begin
+        if assigned(k) then dispose(k);
+      exit end;
     end;
     {merge completed, insert new segment}
     if not assigned(k) then new(k);
@@ -218,7 +237,7 @@ procedure tJob.OnData(msg:tMemoryStream);
   if hiOfs<otInfo then begin
     Offset:=msg.ReadWord4;
     dtlen:=msg.RdBufLen;
-    dataf.Seek(Offset+cObjHeaderSize);
+    dataf.Seek(Offset);
     dataf.Write(msg.RdBuf^,dtlen);{$note iocheck todo}
     SetSegment(Offset,Offset+dtlen);
     RetryCounter:=0;
@@ -228,15 +247,16 @@ procedure tJob.OnData(msg:tMemoryStream);
   end else if hiOfs=otInfo then begin
     hiOfs:=msg.ReadByte;
     Offset:=msg.ReadWord4;
-    {ttl:=msg.ReadByte;}
     MaxReqCnt:=msg.ReadByte;
+    try dist:=msg.ReadByte-rcvttl;
+    except dist:=0 end;
+    if dist>=0 then Aggr^.Distance:=dist;
     Total:=Offset; {$hint dangerous}
   end else if (hiOfs=otFail) or (hiOfs=otNotFound) then begin
     error:=hiOfs;
-    Done;
-    if assigned(callback) then Callback;
+    Callback;
   end
-  else if hiOfs=otEoT then MakeRequest(3);
+  else if hiOfs=otEoT then MakeRequest(3);  //ERROR! too often
 end;
 
 procedure tJob.OnTimeout;
@@ -245,8 +265,7 @@ procedure tJob.OnTimeout;
   if DgrCntSinceReq=0 then begin
     if RetryCounter>=13 then begin
       error:=3;
-      Done;
-      if assigned(callback) then Callback;
+      Callback;
     end else begin
       MakeRequest(4);
       Inc(RetryCounter);
@@ -272,7 +291,7 @@ procedure tAggr.OnData(msg:tSMsg);
   if oh=otRateInfo then begin
     SetLength(debugmsg,s.RdBufLen);
     s.Read(debugmsg[1],s.RdBufLen);
-    writeln('ObjTrans.',string(remote),'#',chn,'.ServerDebug: '+debugmsg);
+    writeln('ObjTrans.',string(remote),'#',chn,'.ServerDebug: '#10+debugmsg);
   exit end;
   if chn=0 then exit;
   if (chn>high(channel)) or (not assigned(channel[chn])) then begin
@@ -283,7 +302,7 @@ procedure tAggr.OnData(msg:tSMsg);
     SendMessage(s.base^,s.length,Remote);
   exit end;
   if oh=otSINC then s.Read(sm,2) else s.seek(s.position-1);
-  channel[chn]^.OnData(s);
+  channel[chn]^.OnData(s,msg.TTL);
   if oh=otSINC then begin
     slen:=s.Length;
     s.Seek(0); s.Trunc;
@@ -291,7 +310,7 @@ procedure tAggr.OnData(msg:tSMsg);
     s.Write(sm,2);
     s.WriteWord2(slen);
     SendMessage(s.base^,s.length,Remote);
-  end else if (DgrCnt>=8) and ((mNow-StartT)>=400) then begin
+  end else if (DgrCnt>=2) and ((mNow-StartT)>=100) then begin
     s.Seek(0); s.Trunc;
     s.WriteByte(otCtrl); s.WriteByte(otSPEED);
     rate:=(ByteCnt/(mNow-StartT))*16;
@@ -303,10 +322,9 @@ procedure tAggr.OnData(msg:tSMsg);
 end;
 
 
-procedure tAggr.Init(const src:tNetAddr);
+procedure tAggr.Init;
   var i:integer;
   begin
-  Remote:=src;
   refc:=0; ncpt:=0;
   ReadyForData:=true;
   Shedule(915,@Periodic);
@@ -315,6 +333,8 @@ procedure tAggr.Init(const src:tNetAddr);
   DgrCnt:=0;
   DgrCntCheck:=0;
   StartT:=0;
+  MaxChan:=high(channel)-1;
+  Distance:=65535;
 end;
 
 procedure tAggr.Add(var job: tJob);
@@ -342,10 +362,13 @@ procedure tAggr.Del(var job: tJob);
   job.ch:=0;
 end;
 
+procedure tAggr.ResetIdle;
+  begin
+  if (RefC=0) and (idletick>0) then idletick:=1;
+end;
+
 procedure tAggr.Periodic;
-  var a:^tAggr;
-  var p:^pointer;
-  var i:integer (*absolute p*);
+  var i:integer;
   begin
   if refc>0 then begin
     {check DgrCntCheck and issue Timeout}
@@ -356,10 +379,8 @@ procedure tAggr.Periodic;
   end else begin
     {check idle time and delete self}
     if idletick>17 then begin
-      p:=@AggrChain;a:=p^; while assigned(a) do begin
-        if a=@self then begin p^:=next; break end;
-        p:=@a^.next;a:=p^;
-      end;
+      i:=FindIndex(@Aggrs[0], high(Aggrs)+1, @Remote, @compareAggr);
+      Aggrs[i]:=nil;
       ReadyForData:=false;
       FreeMem(@self,sizeof(self)); EXIT;
     end else inc(idletick);
@@ -370,62 +391,12 @@ end;
 procedure DataHandler(msg:tSMsg);
   var aggr:^tAggr;
   begin
-  aggr:=AggrChain;
-  while assigned(aggr) do begin
-    if (aggr^.ReadyForData)
-    and (aggr^.Remote=Msg.Source) then begin
-      aggr^.OnData(Msg);
-      break;
-    end;
+  aggr:=GetAggr(Msg.Source, False);
+  if assigned(aggr) and (aggr^.ReadyForData) then begin
+    aggr^.OnData(Msg);
   end;
 end;
 
 BEGIN
   SetupOpcode(opcode.otData,@DataHandler);
 END.
-
-{
-
-type tPeerTableBucket=record
- handler:tObjMessageHandler;
- remote:tNetAddr;
- len:word;
- opcode:byte;
-end;
-var PT:array [0..255] of ^tPeerTableBucket;
-const PT_mod=high(pt)+1;
-
-function FindPT(prefix:pointer; prefixlen:word; const from:tNetAddr ):word;
-  var h:longword;
-  var i,o:word;
-  begin
-  h:=IntHash(0,from,from.length); h:=IntHash(h,prefix^,prefixlen);
-  i:=(h and $FFFF) xor (h shr 16) mod pt_mod;
-  for o:=0 to high(PT) do begin
-    result:=(i+o) mod pt_mod;
-    if  PT[result]=nil then exit;
-    if  (PT[result]^.opcode=byte(prefix^))
-    and (PT[result]^.remote=from)
-    and ((prefixlen=1)or(CompareByte(PT[result]^.opcode,prefix^,prefixlen)=0))
-    then exit;
-  end;
-  result:=$FFFF;
-end;
-  
-procedure SetMsgHandler(Prefix:pointer; PrefixLen:word; const From:tNetAddr; handler:tObjMessageHandler);
-  var i:word;
-  begin
-  Assert(PrefixLen>0);
-  Assert(OpDesc[byte(Prefix^)].match>0);
-  i:=FindPT(prefix,prefixlen,from);
-  if i=$FFFF then exit;
-  if PT[i]<>nil then begin FreeMem(PT[i]); PT[i]:=nil end;
-  if handler<>nil then begin
-    PT[i]:=GetMem(sizeof(PT[i]^)+PrefixLen-1);
-    PT[i]^.handler:=Handler;
-    PT[i]^.remote:=From;
-    PT[i]^.Len:=PrefixLen;
-    Move(Prefix^,PT[i]^.opcode,PrefixLen);
-  end;
-end;
-}

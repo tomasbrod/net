@@ -83,12 +83,18 @@ procedure tClient.Init(i_s:tSocket);
  s:=i_s;
  error:=false;
  ServerLoop.WatchFD(s,@Event);
+ {$ifdef ctlStore}
+ SndObj:=nil;
+ SndObjLeft:=0;
+ RcvObjLeft:=0;
+ {$endif}
  Init2;
 end;
 
 procedure tClient.Done;
  begin
  Int;
+ if assigned(SndObj) then Dispose(SndObj,Done);
  ServerLoop.WatchFD(s,nil);
  fpClose(s);
  FreeMem(@self,sizeof(self));
@@ -114,47 +120,59 @@ procedure tClient.Event(ev:word);
          method:Word;
          end;
  var arg:pointer;
- var rc,sc:LongInt;
+ var rc,sndc:LongInt;
  var msg_stream,resp_stream:tMemoryStream;
  const cBuf=2048;
  begin
  rc:=1;
  arg:=nil;
  if (ev and POLLOUT)>0 then begin
+    {$ifdef ctlStore}
     if SndObjLeft=0 then begin
+      {$endif}
       ServerLoop.WatchFD(s,nil);
       ServerLoop.WatchFD(s,@Event);
+      Dispose(SndObj,Done);
+      SndObj:=nil;
+      {$ifdef ctlStore}
     end else begin
       arg:=GetMem(cBuf);
       rc:=SndObjLeft;
       if rc>cBuf then rc:=cBuf;
       SndObj^.Read(arg^,rc);
-      sc:=fpSend(s,arg,rc,0);
-      if sc<=0 then error:=true
-      else if sc<rc
-      then SndObj^.Skip(sc-rc);
+      sndc:=fpSend(s,arg,rc,0);
+      if sndc<=0 then error:=true
+      else if sndc<rc
+      then SndObj^.Skip(sndc-rc);
+      SndObjLeft:=SndObjLeft-sndc;
       FreeMem(arg,cBuf);
     end;
+    {$endif}
  end;
   if (ev and (POLLIN or POLLHUP or POLLERR))>0 then begin
+    {$ifdef ctlStore}
     if RcvObjLeft>0 then begin
       arg:=GetMem(cBuf);
       rc:=cBuf; if rc>RcvObjLeft then rc:=RcvObjLeft;
       rc:=fpRecv(s,arg,rc,0);
       if rc>0 then begin
         RcvObj^.Write(arg^,rc);
+        Sha512Update(RcvObjHctx,arg^,rc);
         RcvObjLeft:=RcvObjLeft-rc;
         if RcvObjLeft=0 then RcvObjComplete;
+        rc:=1;
       end;
     end else begin
+    {$endif}
       {read header, read arguments, exec}
+      hdr.length:=0;
       ReadBuf(s,@hdr,sizeof(hdr),rc);
       if rc=1 then begin
         hdr.method:=ntohs(hdr.method);
         hdr.length:=ntohs(hdr.length);
         if (hdr.method>high(methods))(*or(hdr.method<low(methods))*)or(not assigned(methods[hdr.method].ptr)) then rc:=-4 else
         if (methods[hdr.method].len=0)and(hdr.length>0) then rc:=-4;
-        if hdr.length<methods[hdr.method].len then rc:=-4;
+        if hdr.length<methods[hdr.method].len then rc:=-4; {range check error? here?}
         if hdr.length>cBuf then rc:=-4;
       end;
       if (hdr.length>0)and(rc=1) then begin
@@ -175,13 +193,15 @@ procedure tClient.Event(ev:word);
         end;
       end;
       if hdr.length>0 then FreeMem(arg,hdr.length);
+    {$ifdef ctlStore}
     end;
+    {$endif}
     if rc<>1 then begin
       case rc of
         -1:writeln('CtrlLow.Event: recv failed ',rc);
         0 :{writeln('CtrlLow.Event: end')};
         -4:writeln('CtrlLow.Event: method ',hdr.method,'+',hdr.length,' not supported');
-        else writeln('CtrlLow.Event: error');
+        else writeln('CtrlLow.Event: error ',rc);
       end;
       error:=true;
     end;
@@ -203,6 +223,7 @@ procedure tClient.SendTo(msg:tMemoryStream);
  end;
 end;
 
+{$ifdef ctlStore}
 procedure tClient.SendObject(var o:tStoreObject; ilen:LongWord);
   begin
   SndObjLeft:=ilen;
@@ -210,6 +231,7 @@ procedure tClient.SendObject(var o:tStoreObject; ilen:LongWord);
   ServerLoop.WatchFD(s,nil);
   ServerLoop.WatchFDRW(s,@Event);
 end;
+{$endif}
 
 procedure tMethod.Init(proc:tMethodProc; argl:word);
  begin

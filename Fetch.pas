@@ -1,140 +1,256 @@
-unit Fetch;
-{
-  Easy to use interface to ObjTrans.
-  Keep record of runnong OT jobs.
-  Attach multiple callbacks to single job.
-}
+UNIT Fetch;
 
 INTERFACE
-uses NetAddr,Store2,ObjTrans;
+USES ObjectModel,ObjTrans,Store2;
 
-type tCb1=procedure of object;
-type tCb2=procedure(total,done:LongWord; rate:single) of object;
-type tErr=(
-  stRunning=0,errFilesys, {local filesystem error}
-  errCorrupt,  {file downloaded was corrupt}
-  errNoReply,  {remote server did not reply}
-  errProtocol, {invalid response from server}
-  errTimeout,  {timeout during transfer}
-  errNotFound, {file not found on remote server}
-  errServer    {remote server admitted failure});
+type tFetchError=(fjsComplete=0, fjsIOError, fjsLarge, fjsNotFound, fjsFull, fjsCorrupt, fjsNoResp, fjsFail, fjsNoSource, fjsNew);
+type tSourceItem=object
+  Address: tNetAddr;
+  state: tFetchError;
+  score: integer;
+  Distance: word;
+  Speed: single unimplemented;
+  next: ^tSourceItem;
+end;
+
+{error priority: Success, Used, Large, NotFound, Full, Corrupt, NoResp, Fail}
+
 type
-pFetch=^tFetch;
-tFetch=object
-  public
-  Done: boolean;
-  Error: tErr;
-  procedure Abort(callback:tCb1); experimental;
-  procedure AddSource(const srce:tNetAddr); unimplemented;
-  procedure SetMaxSize(i:LongWord); unimplemented;
-  function FID:tFID;
-  {$hint get fraction done, total size, rate, size}
-  private
-  observers: array of tCb1;
-  transfer:ObjTrans.tJob;
-  next,prev:^tFetch;
-  procedure OTJobHandler;
-  end;
+  pFetch=^tFetchJob;
 
-function FetchObject(fid:tFID; srce:tNetAddr; prio:Byte; callback:tCb1): pFetch;
-{returns nil if file is present}
+tFetchJob=object(tTask)
+  public
+  constructor Init(const ifid:tFID);
+  function ProgressPct: single; virtual; {scaled by 10000}
+  protected
+  procedure Abort; virtual;
+  procedure Cleanup; virtual;
+  public
+  Error: tFetchError;
+  procedure AddSource(const srce:tNetAddr);
+  procedure Props(iweight:byte; imaxsize:LongWord);
+  protected
+  procedure DelayedStart;
+  procedure Handler;
+  function CheckObjectHash: boolean;
+  protected
+  Weight:byte;
+  MaxSize:LongWord;
+  AltSrc, CurSrc: ^tSourceItem;
+  Next, Prev: ^tFetchJob;
+  SheduledStart: boolean;
+  Trx: ObjTrans.tJob;
+end;
+
+function NewFetch(fid:tFID): pFetch;
 
 IMPLEMENTATION
-uses SysUtils,opcode,MemStream;
+uses SysUtils,ServerLoop,OpCode;
 
-var Running:^tFetch;
+var Jobs: ^tFetchJob;
 
-function FetchObject(fid:tFID; srce:tNetAddr; prio:Byte; callback:tCb1): pFetch;
+procedure tFetchJob.DelayedStart;
+  var s:^tSourceItem;
+  var a:^ObjTrans.tAggr;
+  begin
+  {super-inteligent function}
+  if not (error in [fjsComplete,fjsIOError]) then begin
+    {select best source}
+    s:=CurSrc;
+    while assigned(s) do begin
+      {criteria: fjsNew, Distance, RefC}
+      if s^.state in [fjsNew {,fjsFull}] then begin
+        writeln(Format('Fetch@%P.DelayedStart: address=%S',[@self,string(s^.address)]));
+        s^.state:=fjsNoSource;
+        a:=ObjTrans.GetAggr(s^.Address, True);
+        if (a=nil) or (a^.maxchan=a^.refc) then begin
+          s^.state:=fjsFull;
+          if fjsFull<error then error:=fjsFull;
+          writeln('Full');
+          continue;
+        end;
+        CurSrc:=s;
+        Trx.Init;
+        Trx.Weight:=Weight;
+        Trx.Callback:=@Handler;
+        Trx.Aggr:=a;
+        Trx.DataF.Trunc(0);
+        Trx.Start;
+        if Trx.Error=0 then (**)EXIT(**); //success :)
+        s^.state:=fjsFail;
+        if fjsFail<error then error:=fjsFail;
+      end;
+      s:=s^.next;
+    end;
+    if error>fjsNoSource then error:=fjsNoSource;
+  end;
+  {no source could be used}
+  {maybe if full, todo: shedule to try again later}
+  {send event}
+  writeln(Format('Fetch@%P.DelayedStart SendEvent %D',[@self,ord(error)]));
+  if error=fjsComplete
+    then SendEvent(tevComplete,@Trx.FID)
+    else SendEvent(tevError,@Trx.FID);
+end;
+
+procedure tFetchJob.Handler;
+  var LocError: tFetchError;
+  begin
+  {evaluate Trx event}
+  writeln(Format('Fetch@%P.Handler %D',[@self,Trx.Error]));
+  case Trx.Error of
+    {0progress,1done,2ioerror,3timeout,4full,OT-DLEs}
+    0: begin
+      {check size, not used, not implemented in Trx}
+      end;
+    1: begin
+      LocError:=fjsComplete;
+      if not CheckObjectHash then LocError:=fjsCorrupt;
+      end;
+    2: LocError:=fjsIOError; {io-failure}
+    3: LocError:=fjsNoResp;
+    4: LocError:=fjsFull; {server fail msg}
+    opcode.otFail: LocError:=fjsFail;
+    opcode.otNotFound: LocError:=fjsNotFound;
+    else LocError:=fjsFail;
+  end;
+  {save Trx event to source item}
+  if assigned(CurSrc) then cursrc^.state:=LocError;
+  if locerror<error then error:=locerror;
+  //writeln('Fetch@',string(@self),'.Handler locerror=',LocError,' globError=',Error);
+  {more...}
+  Trx.Done;
+  DelayedStart;
+end;
+
+function tFetchJob.CheckObjectHash: boolean;
   var so:tStoreObject;
-  var p:^tFetch;
-  var oi:word;
+  var hash:tFID;
+  begin
+  {file from Trx, file-name, not temporary, not prehashed}
+  writeln(Format('Fetch@%P Hashing %DB',[@self,Trx.Total]));
+  Trx.DataF.Seek(0);
+  {todo: Hash in second thread}
+  HashAndCopy(Trx.DataF, nil, hash, Trx.DataF.Length);
+  so.InsertRename(Trx.DataF,Store2.GetTempName(Trx.fid,'prt'),hash);
+  {if id matches requested add enough refs else unref}
+  result:=so.FID=Trx.FID;
+  if result then begin
+    so.Reference(ObserversCount-1);
+    so.Done;
+  end
+    else so.Reference(-1+1);
+end;
+
+function NewFetch(fid:tFID): pFetch;
+  var p:^tFetchJob;
   begin
   result:=nil;
-  try
-    so.Init(fid);
-    so.Close;
-    exit;
-  except
-    on eObjectNF do;
-    else raise;
-  end;
-  {check for running transfer}
-  p:=Running;
-  while assigned(p) do if p^.transfer.fid=fid then break else p:=p^.next;
-  {start transfer or attach to the running}
-  if assigned(p) then begin
-    oi:=length(p^.observers);
-    SetLength(p^.observers,oi+1);
-    p^.observers[oi]:=callback;
-    if p^.transfer.Weight<prio then p^.transfer.Weight:=prio;
-  end else begin
-    new(p);
-    p^.done:=false;
-    p^.error:=stRunning;
-    setLength(p^.observers,1);
-    if assigned(Running) then Running^.prev:=p;
-    p^.next:=Running; p^.prev:=nil; Running:=p;
-    p^.observers[0]:=callback;
-    p^.transfer.Init(srce,fid);
-    {$note todo handle init errors better}
-    if p^.transfer.error>0 then raise eXception.Create('Failed to initialize transfer error='+IntToStr(p^.transfer.error));
-    p^.transfer.Weight:=prio;
-    p^.transfer.Callback:=@p^.OTJobHandler;
-    p^.transfer.Start;
+  {check for running Trx}
+  p:=Jobs;
+  while assigned(p) do if p^.Trx.fid=fid then break else p:=p^.next;
+  {start Trx or attach to the running}
+  if not assigned(p) then begin
+    new(p,Init(fid));
+    if assigned(Jobs) then Jobs^.prev:=p;
+    p^.next:=Jobs; p^.prev:=nil; Jobs:=p;
   end;
   result:=p;
 end;
 
-function tFetch.FID:tFID;
+procedure tFetchJob.Props(iweight:byte; imaxsize:LongWord);
   begin
-  FID:=Transfer.FID;
-end;
-procedure tFetch.SetMaxSize(i:LongWord);
-  begin
-end;
-procedure tFetch.AddSource(const srce:tNetAddr);
-  begin
+  assert((iweight>0)and(iweight<128));
+  if imaxsize>MaxSize then MaxSize:=imaxsize;
+  if iweight>weight then weight:=iweight;
+  Trx.Weight:=Weight;
 end;
 
-procedure tFetch.OTJobHandler;
-  var i:integer;
+constructor tFetchjob.Init(const ifid:tFID);
   begin
-  case transfer.error of
-    1:begin
-       {$hint todo use StoreObject interface and expose it to callback}
-      if HashObjectRenameCheckID(transfer.dataf,transfer.fid)
-      then begin
-        done:=true;
-        Reference(transfer.fid,length(observers));
-      end else error:=errCorrupt;
-    end;
-    2:error:=errFileSys;
-    3:error:=errNoReply;
-    {4:cannot start more jobs;}
-    opcode.otFail:error:=errServer;
-    opcode.otNotFound:error:=errNotFound;
-    else AbstractError;
+  AltSrc:=nil; Next:=nil; Prev:=nil; CurSrc:=nil;
+  Inherited Init;
+  Trx.Init;
+  Trx.FID:=iFID;
+  Weight:=1;
+  MaxSize:=1;
+  SheduledStart:=false;
+  Trx.DataF.OpenRW(GetTempName(Trx.FID,'prt'));
+end;
+
+procedure tFetchJob.Cleanup;
+  var itm:^tSourceItem;
+  var cp:^tFetchJob;
+  var pp:^pointer;
+  begin
+  writeln(Format('Fetch@%P.Cleanup',[@self]));
+  while assigned(AltSrc) do begin
+    itm:=AltSrc;
+    AltSrc:=itm^.next;
+    Dispose(itm);
   end;
-  writeln('Fetch.OTJobHandler: ',done,' ',error);
-  if assigned(prev) then prev^.next:=next else Running:=next;
+  if error<>fjsComplete {hashing closes the file}
+    then Trx.DataF.Done;
+  if assigned(prev) then prev^.next:=next;
   if assigned(next) then next^.prev:=prev;
-  for i:=0 to high(observers) do observers[i];
+  if Jobs=@self then Jobs:=next;
+  Inherited;
   FreeMem(@self,sizeof(self));
 end;
 
-procedure tFetch.Abort(callback:tCb1);
-  var i,l:word;
+procedure tFetchJob.Abort;
   begin
-  l:=Length(observers);
-  if l>1 then begin
-    for i:=0 to high(observers) do if observers[i]=callback then  observers[i]:=observers[l];
-    SetLength(observers,l-1);
-  end else begin
-    transfer.Done;
-    SetLength(observers,0);
-    FreeMem(@self,sizeof(self));
-  end;
+  writeln(Format('Fetch@%P.Abort %S',[@self,string(Trx.FID)]));
+  if SheduledStart then UnShedule(@DelayedStart);
+  Trx.Done;
+  Inherited;
 end;
 
+function tFetchjob.ProgressPct: single;
+  begin
+  ProgressPct:=9;
+end;
+
+procedure tFetchjob.AddSource(const srce:tNetAddr);
+  var asr: ^tSourceItem;
+  var pp: ^pointer;
+  var a:^ObjTrans.tAggr;
+  var score,tmp:integer;
+  begin
+  {calculate score}
+  a:=ObjTrans.GetAggr(srce, false);
+  score:=17;
+  if assigned(a) then begin
+    tmp:=a^.refc;
+    if tmp=a^.maxchan then score:=9999;
+    if tmp>14
+      then inc(score,70)
+      else inc(score,tmp);
+    tmp:=a^.Distance;
+    if tmp<65535
+      then inc(score,3*tmp)
+      else inc(score,16);
+    a^.ResetIdle;
+  end;
+  {check duplicates}
+  pp:=@AltSrc; asr:=pp^;
+  while assigned(asr) do begin
+    if asr^.Address=srce then exit;
+    if asr^.score<=score then pp:=@asr^.next;
+    asr:=asr^.next;
+  end;
+  {add to source list}
+  writeln(Format('Fetch@%P.AddSource %S score %D fid=%S',[@self,string(srce),score,string(Trx.FID)]));
+  New(asr); asr^.next:=pp^; pp^:=asr;
+  if CurSrc=nil then CurSrc:=asr;
+  asr^.Address:=srce;
+  asr^.Score:=score;
+  if assigned(a) then asr^.Distance:=a^.distance else asr^.Distance:=65535;
+  asr^.state:=fjsNew;
+  {shedule start}
+  error:=fjsNew;
+  if not SheduledStart then Shedule(1,@DelayedStart);
+  SheduledStart:=true;
+end;
 
 END.

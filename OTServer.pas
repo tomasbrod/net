@@ -38,14 +38,19 @@ var sharedbuf:array [1..2048] of byte; {->1k}
 type tFID=Store2.tFID;
 type
 tClient_ptr=^tClient; tChannel_ptr=^tChannel;
+tSegDescr=record
+  b:LongWord;
+  l:LongWord;
+end;
 tChannel=object
  cli: tClient_ptr;
  chn: byte;
  weight,eotrtr:byte;
  opened:boolean;
  fo:tSObj;
- segofs:LongWord;{cache}
- seglen:LongWord;{no seglist in sync yet}
+ FID:tFID;
+ seg:array [0..47] of tSegDescr;
+ si:shortint;
  procedure Reset(prio:byte; const cmd:tMemoryStream);
  procedure Finish;
  procedure Tick;
@@ -110,10 +115,11 @@ procedure tClient.CalcRates(rxRate:Single);
 	if MarkData=0 then begin
 		txRate:=rxRate; Rate:=4;
 		Size:=128; Size2:=0;
-		RateIF:=1; SizeIF:=1;
+		RateIF:=2; SizeIF:=1;
 	end else begin
     if (mNow-MarkStart)=0 then exit;
     txRate:=(MarkData)/(mNow-MarkStart);
+    if txRate>Rate then txRate:=Rate;
   end;
 	if rxRate=0 then rxRate:=1;
 	if txRate=0 then txRate:=1;
@@ -128,20 +134,24 @@ procedure tClient.CalcRates(rxRate:Single);
 		dbg:=dbg+'pas';
 		Rate:=txRate*(RateIF+1);
 		//if thr.Rate>limRate then thr.Rate:=limRate else
-		RateIF:=RateIF+0.1;
+		RateIF:=RateIF*2+0.001;
 		if RateIF>1 then RateIF:=1;
 	end else dbg:=dbg+'3ha';
 	MarkData:=0;	MarkStart:=mNow;
-	if Size<96 then Size:=104;
+	if Size<31 then Size:=31;
 	{now do packet size}
 	sizeIF:=sizeIF/2;
 	if (size*SizeIF)<1 then SizeIF:=1/Size;
-	if (Size/Rate)>70 then begin Size:=32; Rate:=0.5;
-	 dbg:=dbg+'fr' end else dbg:=dbg+'  ';
-	Size2:=round(Size*(1+SizeIF));
+	if (Size/Rate)>100 then begin
+    Size:=49; Size2:=0; SizeIF:=0; Rate:=0.5; RateIF:=0.8; {TODO!}
+    dbg:=dbg+'fr'
+  end else begin
+    dbg:=dbg+'  ';
+    Size2:=round(Size*(1+SizeIF));
+  end;
   if Size2>sizeof(sharedbuf) then size2:=sizeof(sharedbuf);
   if Size2=Size then Size2:=0;
-	dbg:=dbg+format(' | rt %8.2F %6.4F sz %5D %6.4F %5D',[Rate,RateIF,Size,SizeIF,Size2]);
+	dbg:=dbg+format(' | tx %8.2F %6.4F sz %5D %5D',[Rate,RateIF,Size,Size2]);
 	SendDebug(0,dbg);
 end;
 procedure tClient.Tick;
@@ -151,6 +161,7 @@ procedure tClient.Tick;
  if mNow>=TxDelay then begin
   if (wcur=0)or(channel[cur]^.weight=0) then SwitchChannel;
   if wcur>0 then begin
+   assert(channel[cur]^.weight>0);
    s.Init(@sharedbuf,0,sizeof(sharedbuf));
    s.WriteByte(otData);
    s.WriteByte(cur);
@@ -175,40 +186,46 @@ procedure tChannel.Reset(prio:byte; const cmd:tMemoryStream);
  var id:^tFID;
  var fn:array [0..44] of char;
  var info:tMemoryStream;
+ var s2:integer;
+ var tmp:tSegDescr;
+ var reqlen:LongWord;
  begin
  id:=cmd.ReadPtr(20);
- fn:='obj/';
- BinToHex(@fn[4],id^,20); fn[44]:=#0;
- if opened then fo.Close;
  info.Init(@fn,0,sizeof(fn));
  info.WriteByte(otData);
  info.WriteByte(chn);
- try
-  fo.Init(id^);
-  opened:=true;
- except on eObjectNF do begin
-  info.WriteByte(otNotFound);
-  cli^.Send(info.base^,info.length);
-  Finish;  exit end end;
+ if (not opened)or(FID<>ID^) then begin
+   if opened then fo.Done;
+   try
+    FID:=id^;
+    fo.Init(FID);
+    opened:=true;
+   except on eObjectNF do begin
+    info.WriteByte(otNotFound);
+    cli^.Send(info.base^,info.length);
+    Finish;  exit end end;
+ end;
  info.WriteByte(otInfo);
  info.WriteByte(0);
  info.WriteWord4(fo.length);
- info.WriteByte(1);
+ info.WriteByte(High(seg));
  info.WriteByte(0);
- seglen:=0;
- segofs:=0;
- while cmd.RdBufLen>=9 do begin
-  cmd.Skip(1);
-  segofs:=cmd.ReadWord4;
-  seglen:=cmd.ReadWord4;
-  seglen:=Clamp(seglen,segofs,fo.length);
-  break{singleseg};
+ s2:=1+high(seg)-(cmd.Left div 9);
+ if s2<0 then s2:=0;
+ si:=s2; reqlen:=0;
+ seg[high(seg)].l:=0;
+ seg[high(seg)].b:=0;
+ while s2<=high(seg) do begin
+  cmd.ReadByte;
+  tmp.b:=cmd.ReadWord4;
+  tmp.l:=Clamp(cmd.ReadWord4,tmp.b,fo.length);
+  seg[s2]:=tmp;
+  inc(s2); reqlen:=reqlen+tmp.l;
  end;
- info.WriteWord4(seglen);
+ info.WriteWord4(reqlen);
  cli^.Send(info.base^,info.length);
- if seglen=0 then Finish else begin
-  fo.Seek(segofs);
-  cli^.IdleTicks:=0;
+ if reqlen=0 then Finish else begin
+  fo.Seek(seg[si].b);
   weight:=prio+1;//*6
   cli^.SwitchChannel(chn); //activate this channel
  end;
@@ -216,7 +233,7 @@ end;
 procedure tChannel.Finish;
  begin
  cli^.SendDebug(chn,'Finish channel');
- if opened then fo.Close;
+ if opened then fo.Done;
  opened:=false;
  cli^.channel[chn]:=nil;
  dec(cli^.ccnt);
@@ -226,27 +243,33 @@ procedure tChannel.FillBuff(var s:tMemoryStream; sz:LongWord);
  var msgeot:string[3];
  begin
  s.WriteByte(0);{high part of offset, must be <128}
- s.WriteWord4(segofs);
+ s.WriteWord4(seg[si].b);
  sz:=sz-5;
- if sz>seglen then sz:=seglen;
+ if sz>seg[si].l then sz:=seg[si].l;
  fo.Read(s.WrBuf^,sz); {todo errorcheck}
  if true then begin
-   segofs:=segofs+sz;
-   seglen:=seglen-sz;
+   seg[si].b:=seg[si].b+sz;
+   seg[si].l:=seg[si].l-sz;
    s.WrEnd(sz);
    cli^.Send(s.base^,s.length);
  end;
- if (seglen=0){or(red<sz)} then begin
-  weight:=0; eotrtr:=1;
-  msgeot:=char(otData)+char(chn)+char(otEoT);
-  cli^.Send(msgeot[1],3);
- end;
+  if seg[si].l=0 then begin
+    si:=si+1;
+    if si>high(seg) then begin {or(red<sz)}
+      weight:=0; eotrtr:=1;
+      msgeot:=char(otData)+char(chn)+char(otEoT);
+      //cli^.SendDebug(chn,'EoT in FillBuff');
+      cli^.Send(msgeot[1],3);
+    end
+    else fo.Seek(seg[si].b);
+  end;
 end;
 procedure tChannel.Tick;
  var msgeot:string[3];
  begin
+ //writeln(format('channel %d tick w %d si %d r %d',[chn,weight,si,eotrtr]));
  if weight>0 then exit;
- if seglen>0 then exit;
+ if si<=high(seg) then exit;
  if eotrtr<6 then begin
   msgeot:=char(otData)+char(chn)+char(otEoT);
   cli^.Send(msgeot[1],3);
@@ -260,22 +283,22 @@ function tClient.SlowTick:boolean;
 	SlowTick:=false;
   //writeln('OTServer.tClient.SlowTick: ccnt=',ccnt,' IdleTicks=',idleticks,' cur=',cur,' AckCount=',AckCount);
 	if ccnt=0 then begin
-		if IdleTicks>=16 then begin
+		if IdleTicks>=80 then begin
       SendDebug(0,'Closing, no channels and inactivity');
 			SlowTick:=true;
 		end else Inc(IdleTicks);
 		exit;{cached for TC, do not even tick}
-	end;
-	if (cur>0)and(AckCount=0) then begin
+	end else
+	if AckCount=0 then begin
 		Inc(IdleTicks);
-		if IdleTicks>=10 then begin
+		if IdleTicks>=20 then begin
       SendDebug(0,'Closing while acitve, no response from client');
 			{close all channels then self}
 			for ch:=1 to high(channel) do if assigned(channel[ch]) then channel[ch]^.Finish;
 			SlowTick:=true;
 			exit;
 		end;
-		if IdleTicks=2 then CalcRates(0.5);
+		if (IdleTicks=2) and (MarkData>1000) then CalcRates(0.5);
 	end;
 	AckCount:=0;
 	for ch:=1 to high(channel) do if assigned(channel[ch]) then channel[ch]^.Tick;
@@ -317,13 +340,13 @@ procedure tClient.RecvSIACK(const s:tMemoryStream);
   exit end;
   if ((rSize/Rate)>40)or(rSize>sizeof(sharedbuf)) then begin
     Size2:=0;
-    SendDebug(0,'SIACK frequency too low ');
+    //SendDebug(0,'SIACK frequency too low ');
   end else begin
     Size:=rSize;
     SizeIF:=SizeIF*2; if SizeIF>1 then SizeIF:=1;
     Size2:=round(Size*(1+SizeIF));
     if (Size2<=Size)or(Size2>sizeof(sharedbuf)) then Size2:=0;
-    SendDebug(0,format('SIACK sz %4D %5.3F sz2 %4D',[Size,SizeIF,Size2]));
+    SendDebug(0,format('sz %4D %5.3F sz2 %4D',[Size,SizeIF,Size2]));
   end;
 end;
 procedure tClient.RecvSPEED(const s:tMemoryStream);
@@ -341,7 +364,7 @@ end;
  use GetTickCount!!!!!
 }
 var LastSlowTick:tMTime;
-const cSlowTick=600;
+const cSlowTick=100;
 function SFSThread(param:pointer):PtrInt;
  var cmd:tMemoryStream;
  var rc:LongInt;
@@ -441,7 +464,7 @@ end;
 procedure tClient.SwitchChannel;
  var i,j:byte;
  begin
- if (wcur>0)and(cur>0) then exit;
+ wcur:=0;
  for i:=0 to high(channel)-1 do begin
   j:=((i+cur) mod high(channel))+1;
   if channel[j]=nil then continue;

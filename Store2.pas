@@ -9,6 +9,7 @@ const cSzlPack:longword=0;
       cSzlData:longword=3584;
 
 type tFID=ObjectModel.tKey20;
+type tFID_ptr=^ObjectModel.tKey20;
 
 type tsoLoc=(solObjdir=1,solPack=2,solData=3,solReference=4,solHardlink=5);
 {solHardlink and solReference objects are never deleted,
@@ -21,23 +22,19 @@ type tStoreObject=object(tCommonStream)
     temp:boolean; {the file was inserted as temporary}
     opentime_refcount:word;
     constructor Init(id: tFID); {open existing file}
-    constructor HashObjectRename(const name:string);
-      {store name file, name will not exist (deleted or renamed) on return}
-    constructor HashObjectRename(var ins:tFileStream; const name:string; itemp:boolean); overload;
-      {same as above, except reuse open file ins, which is then closed}
-    constructor HashObjectLinkOrRef(const name:string); experimental;
-      {store only the reference to file name; name will be set read-only}
-    constructor HashObjectStream(var ins:tMemoryStream); overload;
-      {...}
-    {*refcount is set to 1 on HashObject* a file not in store}
-    {*refcount is increased by 1 on HashObject* a file already in store}
-    destructor  Close;
+    constructor Insert(var ins: tMemoryStream);
+    constructor InsertRename(var ins:tFileStream; const name:string; const hash:tFID);
+    {*refcount is set to 1 on Insert* a file not in store}
+    {*refcount is increased by 1 on Insert* a file already in store}
+    destructor  Done;
     procedure Reference( adj: integer);
+    procedure MakeTemp;
       {change reference count on file; file is closed if adj is negative}
     procedure Seek(abs:longword); virtual;
     function  Tell:LongWord; virtual;
     procedure Read(out blk; len:word); virtual;
     function  Length:LongWord; virtual;
+    function GetPath:AnsiString;
     private
     base:longword;
     limit:longword;
@@ -46,6 +43,7 @@ type tStoreObject=object(tCommonStream)
       1:( ms:tDbMemStream; );
       2:( fs:tFileStream; );
     end;
+    procedure InsertCopyInline(var ins: tCommonStream);
     function CheckSetPerm :boolean;
   end;
 
@@ -58,8 +56,8 @@ const cObjHeaderSize=0;
 const cDebugPrintOpen=true;
 
 function GetTempName(const id: tFID; const ext:string): string;
-
-procedure Reference(const id: tFID; adj: integer); deprecated;
+function ObjectExists(const id: tFID): boolean; overload;
+procedure HashAndCopy(var inf:tCommonStream; outf:pCommonStream; out id:tFID; left:LongWord);
 
 IMPLEMENTATION
 {$IFDEF UNIX}{for the stat() and permissions}
@@ -134,8 +132,31 @@ constructor tStoreObject.Init(id: tFID);
   opentime_refcount:=mh^.refc;
   temp:=mh^.temp>0;
   finally
-    vl.Free;
+    if location<>solData then vl.Free;
   end;
+end;
+
+function tStoreObject.GetPath:AnsiString;
+  var vl:tDbMemStream;
+  begin
+  if location=solReference then begin
+    vl:=dbGet( dbObject, fid, 20 ); try
+    vl.Skip(sizeof(tMeH));
+    SetLength(result,vl.Left);
+    vl.Read(result[1],vl.Left);
+    finally vl.Free end;
+  end else
+  if (location=solHardlink) or (location=solObjDir) then
+    result:=cStoreDir+string(fid)
+  else result:='';
+end;
+
+function ObjectExists(const id: tFID): boolean;
+  var vl:tDbMemStream;
+  begin
+  vl:=dbGet( dbObject, id, 20 );
+  result:= vl.length>0;
+  vl.Free;
 end;
 
 procedure tStoreObject.Reference( adj: integer);
@@ -150,24 +171,40 @@ procedure tStoreObject.Reference( adj: integer);
   a:=Word(mh^.refc)+adj;
   if a<0 then a:=0;
   mh^.refc:=Word(a);
-  if temp then mh^.temp:=1 else mh^.temp:=0;
+  if (mh^.temp=1) and (not temp) then mh^.temp:=0;
   dbSet(dbObject, fid, 20, vl );
   if adj<0 then begin
     loc2:=location;
-    self.Close;{<--this is important}
-    if opendebug then writeln('Store2.Delete: ',string(fid));
-    if (a<=0) and (loc2=solObjdir) then begin
-      dbDelete( dbObject, fid, 20 );
-      DeleteFile( cStoreDir+string(fid) );
+    self.Done;{<--this is important}
+    if a<=0 then begin
+      if opendebug then writeln('Store2.Delete: ',string(fid));
+      if loc2=solObjdir then begin
+        dbDelete( dbObject, fid, 20 );
+        DeleteFile( cStoreDir+string(fid) );
+      end;
+      if loc2=solData then begin
+        dbDelete( dbObject, fid, 20 );
+      end;
+      {TODO: hardlink, check stat and unlink if our is only link}
     end;
-    if (a<=0) and (loc2=solData) then begin
-      dbDelete( dbObject, fid, 20 );
-    end;
-    {TODO: hardlink, check stat and unlink if our is only link}
   end;
 end;
 
-destructor tStoreObject.Close;
+procedure tStoreObject.MakeTemp;
+  var vl:tDbMemStream;
+  var mh:^tMeH;
+  begin
+  vl:=dbGet( dbObject, fid, 20 );
+  mh:=vl.ReadPtr(sizeof(tMeH));
+  if mh^.temp=0 then begin
+    mh^.temp:=1;
+    mh^.refc:=Word(mh^.refc)+1;
+  end;
+  temp:=true;
+  dbSet(dbObject, fid, 20, vl );
+end;
+
+destructor tStoreObject.Done;
   begin
   case location of
     solData: d.ms.Free;
@@ -212,17 +249,98 @@ end;
 function tStoreObject.Length:LongWord;
   begin Length:=limit end;
 
-procedure Reference(const id: tFID; adj: integer);
-  var so:tStoreObject;
-  begin
-  if adj=0 then exit;
-  writeln('Store2.DirectReference: ',string(id),' ',adj);
-  so.Init(id);
-  so.Reference(adj);
-  {if adj>=0 then }so.Close;
+
+
+
+constructor tStoreObject.Insert(var ins: tMemoryStream);
+  procedure WriteObject;
+    var vl:tMemoryStream;
+    var mh:^tMeH;
+    var df:tFileStream;
+    var hash:tFID absolute fid;
+    var ctx:tSha512Context;
+    var dname:string[24];
+
+    begin
+    ins.Seek(0);
+    Sha512Init(ctx);
+    Sha512Update(ctx,ins.Base,ins.vLength);
+    Sha512Final(ctx,hash,20);
+    vl:=dbGet( dbObject, hash, 20 );
+    if vl.length=0 then begin
+      dname:=cStoreDir+string(hash);
+      df.OpenRW(dname);
+      df.Write(ins.Base,ins.vLength);
+      df.Done;
+      vl.Init(sizeof(tMeH)); mh:=vl.Base; vl.vLength:=sizeof(tMeH);
+      location:=solObjdir; mh^.loc:=byte(location);
+      limit:=ins.vLength; mh^.size:=ins.vLength;
+      mh^.z1:=0; mh^.temp:=0; mh^.refc:=0;
+      writeln('Store2.Insert.WriteObject: ',string(hash));
+    end;
+    dbSet( dbObject, hash, 20, vl );
+    vl.Free;
+    Self.Init(hash);
+    Self.Reference(+1);
+  end;
+
+  begin {Insert}
+  location:=tsoLoc(99);
+  if ins.Length<cSzlData
+    then InsertCopyInline(ins)
+    else WriteObject;
 end;
 
-procedure HashAndCopy(inf,outf:pCommonStream; out id:tFID; left:LongWord);
+constructor tStoreObject.InsertRename(var ins:tFileStream; const name:string; const hash:tFID);
+  var len:LongWord;
+  procedure RenameObject;
+    var vl:tMemoryStream;
+    var mh:^tMeH;
+    var dname:string;
+
+    begin
+    {prepare meta}
+    vl.Init(sizeof(tMeH)); mh:=vl.Base; vl.vLength:=sizeof(tMeH);
+    location:=solObjdir; mh^.loc:=byte(location);
+    mh^.size:=len; limit:=len;
+    mh^.z1:=0;  mh^.refc:=1;
+    mh^.temp:=0;
+    dname:=cStoreDir+string(hash);
+    fid:=hash;
+    {rename file}
+    ins.Done;
+    if FileExists(dname)
+    then DeleteFile(name)
+    else begin
+      if not RenameFile(name,dname) then raise eInOutError.Create('Failed to rename '+name+' to '+dname);
+      CheckSetPerm;
+    end;
+    {open or create and open}
+    try
+      Self.Init(hash);
+      Self.Reference(+1);
+      vl.Free;
+      Exit;
+    except
+      dbSet( dbObject, hash, 20, vl );
+      writeln('Store2.Insert.RenameObject: ',string(hash));
+      vl.Free;
+      Self.Init(hash);
+    end;
+  end;
+
+begin {InsertRename}
+  location:=tsoLoc(99);
+  len:=ins.Length;
+  if len<cSzlData then begin
+    InsertCopyInline(ins);
+    ins.Done;
+    DeleteFile(name);
+  end else RenameObject;
+end;
+
+
+procedure HashAndCopy(var inf:tCommonStream; outf:pCommonStream; out id:tFID; left:LongWord);
   {read input file, copy to output file, hash to id, dont seek/rename/close}
   var ctx:tSha512Context;
   var buf:packed array [0..1023] of byte;
@@ -231,124 +349,31 @@ procedure HashAndCopy(inf,outf:pCommonStream; out id:tFID; left:LongWord);
   Sha512Init(ctx);
   while left>0 do begin
     if left<=sizeof(buf) then bs:=left else bs:=sizeof(buf);
-    inf^.Read(buf,bs);
+    inf.Read(buf,bs);
     if assigned(outf) then outf^.Write(buf,bs);
     Sha512Update(ctx,buf,bs);
     left:=left-bs;
   end;
-  Sha512Final(ctx,id,length(id));
+  Sha512Final(ctx,id,sizeof(id));
 end;
 
-
-constructor tStoreObject.HashObjectRename(const name:string);
-  {store name file, name will not exist (deleted or renamed) on return}
-  {fail if rename fails}
-  var ins:tFileStream;
-  begin
-  location:=tsoLoc(99);
-  ins.OpenRO(name);
-  HashObjectRename(ins,name,false);
-end;
-
-constructor tStoreObject.HashObjectRename(var ins:tFileStream; const name:string; itemp:boolean);
-  {same as above, except reuse open file f, which is then closed}
+procedure tStoreObject.InsertCopyInline(var ins:tCommonStream);
   var vl:tMemoryStream;
   var hash:tFID;
   var len:LongWord;
   var mh:^tMeH;
-  var dname:string;
+  var ctx:tSha512Context;
   begin
   location:=tsoLoc(99);
+  ins.Seek(0);
   len:=ins.Length;
-  {optimize storage}
-  if len<cSzlData then begin
-    vl.Init(len+sizeof(tMeH));
-    mh:=vl.WrBuf;
-    vl.WrEnd(sizeof(tMeH));
-    HashAndCopy(@ins,@vl,hash,len);
-    mh^.z1:=0; mh^.size:=len; mh^.refc:=1; mh^.temp:=0; mh^.loc:=byte(solData);
-    if itemp then mh^.temp:=1;
-  end
-  {normal storage}
-  else begin
-    vl.Init(sizeof(tMeH));
-    mh:=vl.WrBuf;
-    vl.WrEnd(sizeof(tMeH));
-    HashAndCopy(@ins,nil,hash,len);
-    mh^.z1:=0; mh^.size:=len; mh^.refc:=1; mh^.temp:=0; mh^.loc:=byte(solObjdir);
-    if itemp then mh^.temp:=1;
-    dname:=cStoreDir+string(hash);
-    if FileExists(dname)
-    then DeleteFile(name)
-    else begin
-      if not RenameFile(name,dname) then raise eInOutError.Create('Failed to rename '+name+' to '+dname);
-      CheckSetPerm;
-    end;
-  end;
-  {common branch (try open else set and open)}
-  ins.Done;
-  try
-    Self.Init(hash);
-    vl.Free;
-    {if opening temp file as temp then dont inc ref}
-    if not (itemp and temp) then Self.Reference(+1);
-    Exit;
-  except
-    dbSet( dbObject, hash, 20, vl );
-    writeln('Store2.HashObjectRename: ',string(hash));
-    vl.Free;
-    Self.Init(hash);
-  end;
-end;
-
-constructor tStoreObject.HashObjectLinkOrRef(const name:string);
-  {store only the reference to file name; name will be set read-only}
-  {impl: only ref :) }
-  var vl:tMemoryStream;
-  var hash:tFID;
-  var len:LongWord;
-  var mh:^tMeH;
-  var ins:tFileStream;
-  begin
-  location:=tsoLoc(99);
-  ins.OpenRO(name);
-  len:=ins.Length;
-  {reference storage}
-  vl.Init(sizeof(tMeH)+system.length(name));
-  mh:=vl.WrBuf;
-  vl.WrEnd(sizeof(tMeH));
-  HashAndCopy(@ins,nil,hash,len);
-  mh^.z1:=0; mh^.size:=len; mh^.refc:=1; mh^.temp:=0; mh^.loc:=byte(solReference);
-  vl.Write(name[1],system.length(name));
-
-  ins.Done;
-  try
-    Self.Init(hash);
-    vl.Free;
-    Self.Reference(+1);
-    Exit;
-  except
-    dbSet( dbObject, hash, 20, vl );
-    writeln('Store2.HashObjectLinkOrRef: ',string(hash));
-    vl.Free;
-    Self.Init(hash);
-  end;
-end;
-
-constructor tStoreObject.HashObjectStream(var ins:tMemoryStream);
-  var vl:tMemoryStream;
-  var hash:tFID;
-  var len:LongWord;
-  var mh:^tMeH;
-  begin
-  location:=tsoLoc(99);
-  len:=ins.Length;
-  {optimize storage}
-    vl.Init(len+sizeof(tMeH));
-    mh:=vl.WrBuf;
-    vl.WrEnd(sizeof(tMeH));
-    HashAndCopy(@ins,@vl,hash,len);
-    mh^.z1:=0; mh^.size:=len; mh^.refc:=1; mh^.temp:=0; mh^.loc:=byte(solData);
+  vl.Init(len+sizeof(tMeH)); mh:=vl.Base; vl.vLength:=sizeof(tMeH);
+  ins.Read(vl.WRBuf^,len);
+  Sha512Init(ctx);
+  Sha512Update(ctx,vl.WRBuf^,len);
+  Sha512Final(ctx,hash,20);
+  vl.WrEnd(len);
+  mh^.z1:=0; mh^.size:=len; mh^.refc:=1; mh^.temp:=0; mh^.loc:=byte(solData);
   {common branch (try open else set and open)}
   try
     Self.Init(hash);
@@ -357,11 +382,12 @@ constructor tStoreObject.HashObjectStream(var ins:tMemoryStream);
     Exit;
   except
     dbSet( dbObject, hash, 20, vl );
-    writeln('Store2.HashObjectStream: ',string(hash));
+    writeln('Store2.InsertCopyInline: ',string(hash));
     vl.Free;
     Self.Init(hash);
   end;
 end;
+
 
 function tStoreObject.CheckSetPerm : boolean;
   var fn:string;           {rwxrwxrwx}
@@ -416,7 +442,8 @@ procedure CheckObjects;
   var usageTemp: QWORD=0;
   var rekt:byte;
   begin
-  InitBlob;
+  PackSize:=0;
+  {Disabled InitBlob;}
   opendebug:=false;
   for li:=0 to length(dbKeyList)-1 do begin
     if tDbSect(byte(dbKeyList[li].v^))<>dbObject then continue;
@@ -428,15 +455,15 @@ procedure CheckObjects;
         so.temp:=false;
         so.Reference(-1); {reference will save temp state}
         if so.opentime_refcount=1 then begin
-          continue;
           Inc(usageTemp,so.Length);
+          continue;
         end;
         so.Init(id);
       end;
       rekt:=2;
       {check if files are still read only}
-      if so.location in [solObjdir{,solReference,solHardlink}] then begin
-        if so.CheckSetPerm then begin so.Close; continue end;
+      if so.location in [solObjdir,solReference,solHardlink] then begin
+        if so.CheckSetPerm then rekt:=0;
       end;
       {pack cannot get corrupted, check just last byte}
       if so.location = solPack then begin
@@ -445,11 +472,17 @@ procedure CheckObjects;
           so.Seek(dv-1);
           so.ReadByte; {raises}
         end;
-        so.Close; continue;
+        rekt:=0;
       end;
+      {inline cannot get corrupted}
+      if so.location = solData then rekt:=0;
       {check hash}
-      HashAndCopy(@so,nil, calcid, so.Left);
-      if calcid=id then rekt:=0;
+      if rekt>0 then begin
+        if so.Left>25165824{24MiB} then
+          writeln('Store2: Checking ',SizeToString(so.Left),'B ',so.GetPath);
+        HashAndCopy(so,nil, calcid, so.Left);
+        if calcid=id then rekt:=0;
+      end;
     except
       on eInOutError do rekt:=1;
     end;
@@ -457,16 +490,16 @@ procedure CheckObjects;
       if so.location=solData then Inc(usageData,so.Length);
       if so.location=solPack then Inc(usagePack,so.Length);
       Inc(usageMeta,dbKeyList[li].vl+dbKeyList[li].l);
-      so.Close;
+      so.Done;
     end;
-    if rekt>0 then writeln('Store2: corrupted object ',string(id));
+    if rekt>0 then writeln('Store2: CORRUPTED object ',string(id));
     if rekt>=2 then so.Reference(-9999);
-    if rekt>=1 then dbDelete( dbObject, id, 20 );
+    if rekt>=1 then dbDelete( dbObject, id, 20 ); {FIXME: so.done?}
   end;
   opendebug:=cDebugPrintOpen;
-  writeln('Store2.Usage: inline=',SizeToString(usageData),', meta=',
-    SizeToString(usageMeta),', pack=',SizeToString(usagePack),', pack_wasted=',SizeToString(packSize-usagePack),
-    ', temp_del=',SizeToString(usageTemp));
+  writeln('Store2.Usage: inline=',SizeToString(usageData),'B, meta=',
+    SizeToString(usageMeta),'B, pack=',SizeToString(usagePack),'B, pack_wasted=',SizeToString(packSize-usagePack),
+    'B, temp_del=',SizeToString(usageTemp),'B');
 end;
 
 BEGIN

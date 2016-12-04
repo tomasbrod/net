@@ -13,11 +13,6 @@ profile:
  re-insert regulary (remote check date)
  UI app creates the profile and pass to D
 
-object:
- data of any kind stored under obj/hash
- hashed header? no: use magic number
- storage header? yes: refcount, etc... 64B
-
 directory:
 - group files of common category
 - allow nodes select what they host
@@ -30,12 +25,14 @@ directory:
 ? voting
 
 To-Do list
-- ServerLoop use time point for events
-- ServerLoop order queue of events, dont need to scan full queue
-- Upload: use chat's reply-timeout feature
-- Replce Sha1 with truncated sha512
-- Chat: OnTimeout, ExceptReply
-- handle timeouts in Download
-- correct rate skew due to request lag in download
-- skip unavailable segments
-  - handle in download
+- Loop: order queue of events, dont need to scan full queue
+- Loop: threading
+- OT: constants
+- OT: global upload/downoad speed limit
+- OT: config tunables (inidividual, global, upload, download, ReqestMax)
+- DB: dat files integration
+- DB: gdbm, leveldb
+- Libs: avoid dynamic linking system libs like z c m ...
+- Model: wrappable generic task messages
+- Ctrl: Fetch progress
+

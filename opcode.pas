@@ -17,6 +17,11 @@ const {dgram opcode}
   dhtTestQuery=$11;
   dhtTestResult=$91;
   dhtNodes=$90;
+  (*Tracker*)
+  tkQuery=$14;
+  tkAnnounce=$15;
+  tkResult=$94;
+  tkAnnOK=$95;
   (*Mutable/Profile*)
   mutableQuery=$12;
   mutableNotify=$13;

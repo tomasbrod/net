@@ -25,11 +25,6 @@ var dbKeyList: array of record
 procedure FreeKeyList;
 
 IMPLEMENTATION
-{$IF not (defined(TOKYO) xor defined(GDBM))}
-{$DEFINE TOKYO}
-{$WARNING Using TokyoCabinet backend}
-{$NOTE Define TOKYO for TokyoCabinet backend _or_ GDBM for GNU 'dbm' backend}
-{$ENDIF}
 {$IFDEF GDBM}
 uses gdbm;
 var dbHandle:PGDBM_FILE;
@@ -44,6 +39,7 @@ procedure LibCFreeMem( P: pointer ); cdecl; external name 'free';
 
 procedure tDbMemStream.Free;
   begin
+  if vlength>0 then
   LibCFreeMem(base);
 end;
 
@@ -69,7 +65,7 @@ function dbGet(sect:tDbSect; const key; ks:longword ): tDbMemStream;
   byte(k^):=ord(sect);
   Move(key,(k+1)^,ks);
   v:=tcadbget(dbHandle, k,ks+1, @vs);
-  //FreeMem(k);
+  FreeMem(k);
   if v=nil then vs:=0;
   result.Init(v,vs,vs);
   {$ENDIF}
@@ -146,12 +142,12 @@ procedure dbDelete(sect:tDbSect; const key; ks:longword );
 end;
 procedure LoadListOfKeys;
   {$IFDEF GDBM}
-  {$ERROR unimplemented}
+  unimplemented;
   var k,kn,v:tDatum;
   var count:LongWord;
   var i:LongInt;
   begin
-  count:=gdbm_count;
+  {count:=gdbm_count;
   k:=gdbm_firstkey(dbhandle);
   while assigned(k.dptr) do begin
     v:=gdbm_fetch(dbhandle, k);
@@ -160,7 +156,8 @@ procedure LoadListOfKeys;
     FreeMem(v.dptr,v.dsize);
     FreeMem(k.dptr,k.size);
     k:=kn;
-  end;
+  end;}
+  SetLength(dbKeyList,0);
   {$ENDIF}
   {$IFDEF TOKYO}
   var count:LongWord;

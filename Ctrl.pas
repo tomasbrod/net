@@ -20,20 +20,24 @@ type tClient=object
   s:tSocket;
   hash:tKey20;
   error:boolean;
-  SndObj:^Store2.tStoreObject;
-  SndObjLeft:LongWord;
-  RcvObj:^tFileStream;
-  RcvObjLeft:LongWord;
   procedure Init(i_s:tSocket);
   procedure Init2;
   procedure Done;
   procedure Int;
   procedure Event(ev:word);
   procedure SendTo(msg:tMemoryStream);
+  {$ifdef ctlStore}public
+  SndObj:^Store2.tStoreObject;
+  SndObjLeft:LongWord;
+  RcvObj:^tFileStream;
+  RcvObjLeft:LongWord;
+  RcvObjHctx:tSha512Context;
   procedure SendObject(var o:tStoreObject; ilen:LongWord);
   procedure RcvObjComplete;
+  {$endif}
   {$ifdef ctlFetch}public
-  transf:^Fetch.tFetch;
+  transf:Fetch.pFetch;
+  procedure FetchEvent( task_:tTask_ptr; ev:tTaskEvent; data:pointer );
   {$endif}
   {$ifdef ctlMutable}public
   mutator:^tMutator;
@@ -68,78 +72,193 @@ end;
 {$endif}
 
 {$ifdef ctlStore}
-procedure StoreLocalCopy(var client:tClient; var a,r:tMemoryStream);
+  {$ifdef ctlStoreAdv}
+procedure StorePutLN(var client:tClient; var a,r:tMemoryStream);
   var path:ansistring;
   var l:longword;
   var so:tStoreObject;
   begin
   l:=a.Left;
-  if l<2048 then begin
-    SetLength(path,l);
-    a.Read(path[1],l);
-    writeln('Ctrl.StoreLocalCopy: ',path);
-    {$note StoreLocalCopy does Reference instead of Copy}
-    try
-      so.HashObjectLinkOrRef(path);
-      r.WriteByte(0);
-      r.Write(so.fid,sizeof(so.fid));
-      so.Close;
-    except
-      on eInOutError do r.WriteByte(opcode.otFail);
-    end;
-  end else client.Error:=true;
+  if l>=2048 then begin client.Error:=true; exit end;
+  SetLength(path,l);
+  a.Read(path[1],l);
+  if pos('/dev/',path)=1 then begin
+    r.WriteByte(opcode.otFail); exit end;
+  writeln('Ctrl.StorePutLN: ',path);
+  try
+    so.HashObjectLinkOrRef(path);
+    r.WriteByte(0);
+    r.Write(so.fid,sizeof(so.fid));
+    so.Done;
+  except
+    on eInOutError do r.WriteByte(opcode.otFail);
+  end;
 end;
-{$endif}
+
+procedure StorePutMV(var client:tClient; var a,r:tMemoryStream);
+  var path:ansistring;
+  var l:longword;
+  var so:tStoreObject;
+  begin
+  l:=a.Left;
+  if l>=2048 then begin client.Error:=true; exit end;
+  SetLength(path,l);
+  a.Read(path[1],l);
+  if pos('/dev/',path)=1 then begin
+    r.WriteByte(opcode.otFail); exit end;
+  writeln('Ctrl.StorePutMV: ',path);
+  try
+    so.HashObjectRename(path);
+    r.WriteByte(0);
+    r.Write(so.fid,sizeof(so.fid));
+    so.Close;
+  except
+    on eInOutError do r.WriteByte(opcode.otFail);
+  end;
+end;
+  {$endif}
+
+procedure StoreStat(var client:tClient; var a,r:tMemoryStream);
+  var so:tStoreObject;
+  var id:^tFID;
+  var path:AnsiString;
+  begin
+  try
+    id:=a.ReadPtr(20);
+    so.Init(id^);
+    r.WriteByte(0);
+    r.Write(so.fid,20);
+    r.WriteWord4(so.Length);
+    r.WriteWord2(so.opentime_refcount);
+    r.WriteByte(Ord(so.temp));
+    r.WriteByte(Ord(so.Location));
+    if so.location=solReference
+      then path:=so.GetPath
+    else if so.location in [solObjdir,solHardlink]
+      then path:=GetCurrentDir+'/'+so.GetPath
+      else path:='%';
+    r.Write(path[1],length(path));
+    r.WriteByte(0);
+    so.Done;
+  except
+    on eObjectNF do r.WriteByte(opcode.otNotFound);
+  end;
+end;
+
+procedure StoreRefAdj(var client:tClient; var a,r:tMemoryStream);
+  var so:tStoreObject;
+  var id:^tFID;
+  var adj:integer;
+  begin
+  try
+    id:=a.ReadPtr(20);
+    adj:=a.ReadByte;
+    adj:=adj-128;
+    so.Init(id^);
+    so.Reference(adj);
+    if(adj>0) then so.Done;
+    r.WriteByte(0);
+  except
+    on eObjectNF do r.WriteByte(opcode.otNotFound);
+  end;
+end;
 
 procedure StoreGet(var client:tClient; var a,r:tMemoryStream);
-  var o:tStoreObject;
+  var o:^tStoreObject;
   var id:^tFID;
   var ofs,len:LongWord;
   begin
-  try
   id:=a.ReadPtr(20);
   ofs:=a.ReadWord4;
   len:=a.ReadWord4;
-  except client.error:=true; exit end;
   try
     writeln('Ctrl.StoreGet: ',string(id^),' @',ofs,'+',len);
-    o.Init(id^);
+    New(o,Init(id^));
   except
     on eObjectNF do begin r.WriteByte(opcode.otNotFound); exit end;
     //on eInOutError do begin r.WriteByte(opcode.otFail); exit end;
   end;
-  if ofs>o.Length then r.WriteByte(opcode.otEoT)
+  if ofs>o^.Length then r.WriteByte(opcode.otEoT)
   else begin
-    o.Seek(ofs);
-    if len>o.Left then len:=o.Left;
+    o^.Seek(ofs);
+    if len>o^.Left then len:=o^.Left;
     r.WriteByte(0);
     r.WriteWord4(len);
-    client.SendObject(o,len);
+    client.SendObject(o^,len);
     exit; {closed by low}
   end;
-  o.Close;
+  Dispose(o,Done);
 end;
 
 procedure StorePut(var client:tClient; var a,r:tMemoryStream);
   var len:LongWord;
   begin
-  len:=a.ReadWord4; {$note unhandled exceptions}
+  len:=a.ReadWord4;
   New(client.RcvObj,OpenRW(Store2.GetTempName(client.hash,'ctl')));
   client.RcvObjLeft:=len;
+  Sha512Init(client.RcvObjHctx);
+  writeln('Ctrl.StorePUT: ',len);
 end;
 procedure tClient.RcvObjComplete;
   var so:tStoreObject;
   var r:tMemoryStream;
+  var hash_id:tFID;
   begin
-  r.Init(26); {$note unhandled exceptions}
-  so.HashObjectRename(RcvObj^,Store2.GetTempName(hash,'ctl'),true);
+  r.Init(26);
+  Sha512Final(RcvObjHctx,hash_id,sizeof(hash_id));
+  writeln('Ctrl.RcvObjComplete: '+string(hash_id));
+  so.InsertRename(RcvObj^,Store2.GetTempName(hash,'ctl'),hash_id);
   r.WriteWord2(21);
   r.WriteByte(0);
   r.Write(so.fid,20);
   self.SendTo(r);
   r.Free;
-  so.Close;
+  so.MakeTemp;
+  so.Reference(-1);
 end;
+{$endif}
+
+{$ifdef ctlFetch}
+procedure FetchStart(var client:tClient; var a,r:tMemoryStream);
+  var fid:^tFID;
+  var src:^tNetAddr;
+  var prio:byte;
+  begin
+  fid:=a.ReadPtr(20);
+  src:=a.ReadPtr(18);
+  prio:=a.ReadByte;
+  writeln('Ctrl.FetchStart: ');
+  if ObjectExists(fid^) then client.FetchEvent(nil, tevUser, fid)
+  else begin
+    client.transf:=NewFetch(fid^);
+    client.transf^.Attach(nil, @client.FetchEvent);
+    client.transf^.AddSource(src^);
+    client.transf^.Props(prio,0);
+  end;
+  r.WriteByte(0);
+end;
+
+procedure FetchQuery(var client:tClient; var a,r:tMemoryStream);
+  begin
+  Client.Error:=true;
+end;
+
+procedure tClient.FetchEvent( task_:tTask_ptr; ev:tTaskEvent; data:pointer );
+  var task:pFetch absolute task_;
+  var o:tStoreObject;
+  var r:tMemoryStream;
+  begin
+  r.Init(99);
+  r.WriteByte(16);
+  if assigned(task) then begin
+    r.WriteByte(ord(task^.error));
+    if ord(task^.error)>0 then exit;
+  end;
+  o.Init(tfid(data^));
+  o.MakeTemp;
+  o.Reference(-1);
+end;
+{$endif}
 
 {$ifdef ctlMutable}
 procedure MutableSet(var client:tClient; var a,r:tMemoryStream);
@@ -214,16 +333,23 @@ procedure tClient.MutatorEvent( ev:tMutEvt; ver:longword; const fid:tFID; const 
 end;
 {$endif}
 
-procedure tClient.Init2; begin
-  SndObjLeft:=0;
-  RcvObjLeft:=0;
-  {$ifdef ctlMutable}mutator:=nil;{$endif}
-  //trans:=nil;
+procedure tClient.Init2;
+  begin
+  {$ifdef ctlMutable}
+  mutator:=nil;
+  {$endif}
+  {$ifdef ctlFetch}
+  transf:=nil;
+  {$endif}
 end;
 procedure tCLient.Int; begin
   {$ifdef ctlMutable}
   if assigned(mutator) then mutator^.done; mutator:=nil;
   {$endif}
+  {$ifdef ctlFetch} if assigned(transf) then begin
+    transf^.Detach(@FetchEvent);
+    transf:=nil;
+  end; {$endif}
 end;
 BEGIN
   Server1.Init;
@@ -234,9 +360,18 @@ BEGIN
   methods[02].Init(@DhtPeer,sizeof(tNetAddr));
   {$endif}
   {$ifdef ctlStore}
-  methods[03].Init(@StoreLocalCopy,2);
-  methods[04].Init(@StoreGet,28);
-  methods[08].Init(@StorePut,4);
+    {$ifdef ctlStoreAdv}
+  methods[03].Init(@StorePutLN,2); {path:string[all]}
+  methods[09].Init(@StorePutMV,2); {path:string[allg]}
+    {$endif}
+  methods[04].Init(@StoreGet,28); {fid:20;ofs,len:Word4}
+  methods[08].Init(@StorePut,4); {len:Word4}
+  methods[10].Init(@StoreStat,20); {fid:20}
+  methods[11].Init(@StoreRefAdj,21); {fid:20, adj:byte+128}
+  {$endif}
+  {$ifdef ctlFetch}
+  methods[12].Init(@FetchStart,39); {fid:20; addr:18; prio:byte}
+  methods[13].Init(@FetchQuery,20); {fid:20}
   {$endif}
   {$ifdef ctlMutable}
   methods[05].Init(@MutableGet,sizeof(tPID));
