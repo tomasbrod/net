@@ -46,9 +46,11 @@ type
     function  ReadByte:byte;
     function  ReadWord2:word;
     function  ReadWord4:dword;
+    function  ReadWord6:Int64;
     procedure WriteByte(v:byte);
     procedure WriteWord2(v:word);
     procedure WriteWord4(v:dword);
+    procedure WriteWord6(v:Int64);
     function ReadShortString:shortstring;
     function ReadStringAll:shortstring;
     procedure WriteShortString(s:shortstring);
@@ -441,6 +443,12 @@ end;
   Read(result,4);
   result:=beton(result);
 end;
+  function tCommonStream.ReadWord6:Int64;
+  begin
+  result:=0;
+  Read((pointer(@result)+2)^,6);
+  result:=beton(result);
+end;
 
 procedure tCommonStream.WriteWord2(v:word);
   begin
@@ -451,6 +459,11 @@ procedure tCommonStream.WriteWord4(v:dword);
   begin
   v:=ntobe(v);
   Write(v,4);
+end;
+procedure tCommonStream.WriteWord6(v:Int64);
+  begin
+  v:=ntobe(v);
+  Write((pointer(@v)+2)^,6);
 end;
   
 const
