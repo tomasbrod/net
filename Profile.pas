@@ -1,10 +1,10 @@
 UNIT Profile;
 
 INTERFACE
-USES NetAddr,MemStream,SysUtils;
+USES ObjectModel,SysUtils;
 
 const cMagic:packed array [1..7] of char='BNProf'#26;
-const cFormatVer=5;
+const cFormatVer=6;
 type tProfID=tKey20;
 
 type tProfKeys=packed record
@@ -15,76 +15,82 @@ type tProfKeys=packed record
 end;
 
 type tProfileRead=object
-  format:byte;
-  version:LongWord;
-  Modified:tDateTime;
-  nick:string[8];
-  ProfID:tProfID;
-  sigexpire:tDateTime;
-  key:tProfKeys;
-  enckey:tKey32;
-  valid,CertExpired,CertInval,SigInval:boolean;
-  FullName:string[79];
-  TextNote:ansistring;
-  hosts:^tKey20;
-  hostsCount,backupCount,filesCount:byte;
-  files:^tKey20;
-  files_id:^Word;
+  Valid: Boolean;
+  format: byte;
+  nick: string[12];
+  expires: Int64;
+  master_key, sign_key, encr_key, chat_key: tKey32;
+  OldKeys: array of tKey32;
+  Fullname: AnsiString;
+  master_sig: tKey64;
+  updated: Int64;
+  Hosts: array of tKey20;
+  Backups: array of tKey20;
+  Textnote: AnsiString;
+  cert_sig: tKey64;
+  signature: tKey64;
   constructor ReadFrom(var src:tCommonStream; parseLevel:byte);
   constructor InitEmpty;
+  procedure DoMasterSign(const priv:tKey64);
   procedure WriteTo(var dst:tCommonStream; const priv:tKey64);
   destructor Done;
-  {0=readAll+sigvfy 1=readAll 9=fixed+name 99=vfy-only}
+  {0=readAll+Verify}
 end;
-
-{File Struct
-identifier:string[7]
-format:b1
-version:w4
-daymodif:w4
-nick:string[8]
-certkey:32
-sigkey:32
-sigexpire:w4
-sigkeycert:64
-enckey:32
---end of fixed length--
-fullname:string[b1]
-hosts_count:b1;
-backups_count:b1;
-hosts:array[hosts_count+backups_count] of 20
-textnote:string[b1]
-filerefs:array[b1] of 2,20
-signature:64
-}
 
 IMPLEMENTATION
 uses Sha512,ed25519;
 
+type tHashingStream = object (tCommonStream)
+  driver: ^tCommonStream;
+  ctx: tSha512Context;
+  procedure Read(out buf; cnt:Word); virtual;
+  procedure Write(const buf; cnt:word); virtual;
+  constructor Init(var idriver:tCommonStream);
+end;
+
+procedure tHashingStream.Read(out buf; cnt:Word);
+  begin
+  driver^.Read(buf,cnt);
+  sha512update(ctx,buf,cnt);
+end;
+procedure tHashingStream.Write(const buf; cnt:Word);
+  begin
+  driver^.Write(buf,cnt);
+  sha512update(ctx,buf,cnt);
+end;
+
+constructor tHashingStream.Init(var idriver:tCommonStream);
+  begin
+  inherited Init;
+  driver:=@idriver;
+  sha512init(ctx);
+end;
+
 constructor tProfileRead.InitEmpty;
   begin
-  SetLength(TextNote,0);
-  hosts:=nil;files:=nil;files_id:=nil;
-  hostsCount:=0;backupCount:=0;filesCount:=0;
+  TextNote:=''; FullName:='';
+  hosts:=nil;
+  backups:=nil;
   valid:=false;
   FillChar(nick,sizeof(nick),0);
-  modified:=40179;
-  sigexpire:=40179;
 end;
 
 constructor tProfileRead.ReadFrom(var src:tCommonStream; parseLevel:byte);
   var Magic:packed array [1..8] of char;
   var i:longword;
+  var m,m2:tHashingStream;
   begin
   InitEmpty;
+  m.Init(src);
   src.Read(Magic,8);
   if CompareByte(Magic,cMagic,7)<>0
     then raise eFormatError.create('Invalid magic sequence');
   format:=byte(Magic[8]);
+  {$IFDEF profLoadOldFormat}
   if Format=5 then begin
     {load into tMemoryStream for better parformace}
     version:=src.ReadWord4;
-    Modified:=src.ReadWord4+40179;
+    Updated:=src.ReadWord4+40179;
     src.Read(nick[1],8);SetLength(nick,8);
     for i:=1 to 8 do if nick[i]=#0 then break;SetLength(nick,i-1);
     src.Read(key,sizeof(key));
@@ -104,42 +110,92 @@ constructor tProfileRead.ReadFrom(var src:tCommonStream; parseLevel:byte);
       //TODO: check signature
       {$warning SECURITY VIOLATION, signature check not implemented}
     end;
+  end else{$ENDIF}
+  if Format=6 then begin
+    valid:=true;
+    m.Read(nick[1],12);
+    i:=1; while (i<=12)and(nick[i]<>#0) do inc(i); SetLength(nick,i-1);
+    updated:=m.ReadWord6;
+    m2.Init(m);
+    expires:=m2.ReadWord6;
+    m2.Read(master_key,32);
+    m2.Read(sign_key,32);
+    m.Read(master_sig,64);
+    valid:=valid and (updated>Now) and (expires<Now);
+    valid:=valid
+      and ed25519.Verify2(m2.ctx, master_sig, master_key);
+    m.Read(encr_key,32);
+    m.Read(chat_key,32);
+    i:=m.ReadByte;
+    SetLength(OldKeys,i);
+    m.Read(OldKeys[1],i*32);
+    Fullname:=m.ReadShortString;
+    i:=m.ReadByte;
+    SetLength(Hosts,i);
+    m.Read(Hosts[1],i*20);
+    i:=m.ReadByte;
+    SetLength(Backups,i);
+    m.Read(Backups[1],i*20);
+    Textnote:=m.ReadShortString;
+    m.Read(signature,64);
+    valid:=valid
+      and ed25519.Verify2(m.ctx, signature, sign_key);
   end else raise eFormatError.create('Unknown format  version');
 end;
 
 destructor tProfileRead.Done;
   begin
+  SetLength(OldKeys,0);
+  SetLength(Hosts,0);
+  SetLength(Backups,0);
   SetLength(TextNote,0);
-  if assigned(hosts) then FreeMem(hosts);
-  if assigned(files) then FreeMem(files);
-  if assigned(files_id) then FreeMem(files_id);
 end;
 
 procedure tProfileRead.WriteTo(var dst:tCommonStream; const priv:tPrivKey);
   var s:tMemoryStream;
-  var signature:tSig;
   begin
   s.Init(9999);//FIXME
+  try
   with s do begin
-  Write(cMagic,7);
-  WriteByte(5);
-  WriteWord4(Version);
-  WriteWord4(system.trunc(Modified)-40179);
-  Write(nick[1],8);
-  //system.trunc(sigexpire)-40179;
-  Write(key,sizeof(key));
-  Write(enckey,32);
-  WriteShortString(fullname);
-  WriteByte(hostsCount);
-  WriteByte(backupCount);
-  Write(hosts^,(backupCount+hostsCount)*20);
-  WriteShortString(textnote);
-  FilesCount:=0; WriteByte(filesCount);
-  //filerefs:array[b1] of 2,20 TODO
+    Write(cMagic,7);
+    WriteByte(6);
+    Write(nick[1],12);
+    WriteWord6(updated);
+    WriteWord6(expires);
+    Write(master_key,32);
+    Write(sign_key,32);
+    Write(master_sig,64);
+    Write(encr_key,32);
+    Write(chat_key,32);
+    WriteByte(system.Length(OldKeys));
+    Write(OldKeys[1],system.Length(OldKeys)*32);
+    WriteShortString(Fullname);
+    WriteByte(system.Length(Hosts));
+    Write(Hosts[1],system.Length(Hosts)*20);
+    WriteByte(system.Length(Backups));
+    Write(Backups[1],system.Length(Backups)*20);
+    WriteShortString(Textnote);
   end;
-  Sign(signature, s.base^, s.vlength, key.sign, priv);
-  dst.Write(s.base^, s.vlength);
+  s.Seek(0);
+  dst.Write(s.RdBuf^, s.RdBufLen);
+  Sign(signature, s.RdBuf^, s.RdBufLen, sign_key, priv);
   dst.Write(signature,64);
+  finally s.Free; end;
+end;
+
+procedure tProfileRead.DoMasterSign(const priv:tPrivKey);
+  var s:tMemoryStream;
+  begin
+  s.Init(70);
+  try
+  with s do begin
+    WriteWord6(expires);
+    Write(master_key,32);
+    Write(sign_key,32);
+  end;
+  s.Seek(0);
+  Sign(master_sig, s.RdBuf^, s.RdBufLen, master_key, priv);
+  finally s.Free; end;
 end;
 
 END.
