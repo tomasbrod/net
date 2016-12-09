@@ -7,15 +7,9 @@ const cMagic:packed array [1..7] of char='BNProf'#26;
 const cFormatVer=6;
 type tProfID=tKey20;
 
-type tProfKeys=packed record
-  cert:tKey32;
-  sign:tKey32;
-  expire:Word4;
-  sigkeycert:tKey64;
-end;
-
 type tProfileRead=object
   Valid: Boolean;
+  ProfID: tKey20;
   format: byte;
   nick: string[12];
   expires: Int64;
@@ -82,7 +76,7 @@ constructor tProfileRead.ReadFrom(var src:tCommonStream; parseLevel:byte);
   begin
   InitEmpty;
   m.Init(src);
-  src.Read(Magic,8);
+  m.Read(Magic,8);
   if CompareByte(Magic,cMagic,7)<>0
     then raise eFormatError.create('Invalid magic sequence');
   format:=byte(Magic[8]);
@@ -121,23 +115,24 @@ constructor tProfileRead.ReadFrom(var src:tCommonStream; parseLevel:byte);
     m2.Read(master_key,32);
     m2.Read(sign_key,32);
     m.Read(master_sig,64);
-    valid:=valid and (updated>Now) and (expires<Now);
+    valid:=valid and (updated<UnixNow) and (expires>UnixNow);
     valid:=valid
       and ed25519.Verify2(m2.ctx, master_sig, master_key);
+    SHA512Buffer(master_key, 32, ProfID, 20 );
     m.Read(encr_key,32);
     m.Read(chat_key,32);
     i:=m.ReadByte;
     SetLength(OldKeys,i);
-    m.Read(OldKeys[1],i*32);
+    if i>0 then m.Read(OldKeys[1],i*32);
     Fullname:=m.ReadShortString;
     i:=m.ReadByte;
     SetLength(Hosts,i);
-    m.Read(Hosts[1],i*20);
+    if i>0 then m.Read(Hosts[1],i*20);
     i:=m.ReadByte;
     SetLength(Backups,i);
-    m.Read(Backups[1],i*20);
+    if i>0 then m.Read(Backups[1],i*20);
     Textnote:=m.ReadShortString;
-    m.Read(signature,64);
+    src.Read(signature,64);
     valid:=valid
       and ed25519.Verify2(m.ctx, signature, sign_key);
   end else raise eFormatError.create('Unknown format  version');
@@ -153,6 +148,7 @@ end;
 
 procedure tProfileRead.WriteTo(var dst:tCommonStream; const priv:tPrivKey);
   var s:tMemoryStream;
+  var l:integer;
   begin
   s.Init(9999);//FIXME
   try
@@ -167,13 +163,13 @@ procedure tProfileRead.WriteTo(var dst:tCommonStream; const priv:tPrivKey);
     Write(master_sig,64);
     Write(encr_key,32);
     Write(chat_key,32);
-    WriteByte(system.Length(OldKeys));
-    Write(OldKeys[1],system.Length(OldKeys)*32);
+    l:=system.Length(OldKeys); WriteByte(l);
+    if l>0 then Write(OldKeys[1],l*32);
     WriteShortString(Fullname);
-    WriteByte(system.Length(Hosts));
-    Write(Hosts[1],system.Length(Hosts)*20);
-    WriteByte(system.Length(Backups));
-    Write(Backups[1],system.Length(Backups)*20);
+    l:=system.Length(Hosts); WriteByte(l);
+    if l>0 then Write(Hosts[1],l*20);
+    l:=system.length(Backups); WriteByte(l);
+    if l>0 then Write(Backups[1],l*20);
     WriteShortString(Textnote);
   end;
   s.Seek(0);
