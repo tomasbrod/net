@@ -19,6 +19,7 @@ type tKey=tBlowfishKey;
 procedure ExpandKey(out keystruct: tBlowfishKey; const user_key; len: word);
 procedure Encrypt(out chipertext; const plaintext; const key:TBLOWFISHKEY);
 procedure Decrypt(out plaintext; const chipertext; const key:TBLOWFISHKEY);
+procedure BlockXOR(out oup; const key; const len:word);
 procedure EncryptCBC(out chipertext; const plaintext; const key:TBLOWFISHKEY; var fv);
 procedure DecryptCBC(out plaintext; const chipertext; const key:TBLOWFISHKEY; var fv);
 
