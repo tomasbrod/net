@@ -30,8 +30,11 @@ implementation
 function sha512final(var md:tsha512context; out digest; len:word):longint;
   var full:tSha512Digest;
   begin
-  result:=sha512final(md, full);
-  if result=0 then Move({source}full,{dest}digest,len);
+  if len=64 then result:=sha512final(md, tSha512Digest(digest))
+  else begin
+    result:=sha512final(md, full);
+    if result=0 then Move({source}full,{dest}digest,len);
+  end;
 end;
 
 procedure SHA512Buffer(const Buf; BufLen: LongWord; out digest; digestlen:word );
