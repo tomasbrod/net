@@ -21,7 +21,7 @@ procedure CreateResponse(const Challenge: tEccKey; out Response: tKey32; const s
 function VerifyPoW(const proof:tPoWRec; const RemotePub:tEccKey):boolean;
 
 IMPLEMENTATION
-uses SysUtils,DateUtils,ServerLoop;
+uses SysUtils{,DateUtils},ServerLoop;
 
 procedure CreateChallenge(out Challenge: tEccKey);
  var i:byte;

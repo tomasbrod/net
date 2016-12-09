@@ -28,6 +28,7 @@ procedure BinToHex(hexValue:pChar; const orig; len:word);
 function PrefixLength(const a,b:tKey20):byte;
 function SizeToString( v:LongWord):string;
 function IntHash(init:LongWord;const data;len:longword):LongWord;
+function UnixNow:Int64;
 
 (*** Base Object types ***)
 
@@ -216,6 +217,8 @@ operator := (host : word) net:Word2;
 operator := (net : Word4) host:Dword;
 operator := (host : Dword) net:Word4;
 
+operator := (host: Int64) net:Word6;
+
 operator = (a,b:tKey20) r:boolean;
 Operator = (aa, ab :tNetAddr) b : boolean;
 
@@ -261,7 +264,11 @@ type eFileNotFound=class(eInOutError)
 function ConvertFamily( a:tFamily ): sa_family_t;
 
 IMPLEMENTATION
-uses StrUtils; {TODO}
+uses
+  {$IFDEF UNIX}BaseUnix
+  {$ELSE}DateUtils{$ENDIF}
+  ,StrUtils
+  ;
 
 {*** MemStram ***}
 operator :=(a:tKey20) r:string;
@@ -465,7 +472,7 @@ procedure tCommonStream.WriteWord6(v:Int64);
   v:=ntobe(v);
   Write((pointer(@v)+2)^,6);
 end;
-  
+
 const
   HexTbl: array[0..15] of char='0123456789ABCDEF';
 procedure BinToHex(hexValue:pChar; const orig; len:word);
@@ -619,6 +626,15 @@ function IntHash(init:LongWord;const data;len:longword):LongWord;
   result:=h;
 end;
 
+function UnixNow:Int64;
+  begin
+  {$IFDEF UNIX}
+  fpTime(result);
+  {$ELSE}
+  result:=DateTimeToUnix(SysUtils.Now);
+  {$ENDIF}
+end;
+
 const cLocalHostIP4:Sockets.tInAddr=( s_bytes:(127,0,0,1) );
 const cLocalIP4Port:word=1030;
 
@@ -676,6 +692,16 @@ end;
 operator := (host : Dword) net:Word4;
  begin
  DWORD(pointer(@net)^):=NtoBE( host );
+end;
+
+operator := (host: Int64) net:Word6;
+ begin
+ net[1]:=(host shr 40)and $FF;
+ net[2]:=(host shr 32)and $FF;
+ net[3]:=(host shr 24)and $FF;
+ net[4]:=(host shr 16)and $FF;
+ net[5]:=(host shr 8)and $FF;
+ net[6]:=host and $FF;
 end;
 
 {*** Task ***}
