@@ -39,26 +39,62 @@ end;
 
 procedure DumpProfile(var txt:text; var pfs:tFileStream);
   var pf:tProfileRead;
+  var i:integer;
   begin
   pfs.Seek(0);
   pf.ReadFrom(pfs,0);
   Writeln('ID: ',string(pf.ProfID));
-  Writeln('Updated: ',UnixTimeToStr(pf.updated));
-  Writeln('Expires: ',UnixTimeToStr(pf.expires));
+  Writeln('Updated: ',UnixTimeToStr(pf.updated),' UTC');
+  Writeln('Expires: ',UnixTimeToStr(pf.expires),' UTC');
   writeln('Nick: ',pf.nick);
   Writeln('FullName: ',pf.FullName);
   Writeln('TextNote: ',pf.TextNote);
+  Writeln('Encryption key: ',string(pf.encr_key));
+  Writeln('Old keys: ',pf.cOldKeys);
+  for i:=0 to pf.cHosts-1
+    do writeln('Host:       ',string(pf.Hosts[i]));
+  for i:=0 to pf.cHosts-1
+    do writeln('BackupHost: ',string(pf.Hosts[i]));
   writeln('Valid: ',pf.Valid);
   //CertExpired,CertInval,SigInval:boolean;
+  pf.Done;
 end;
+
+const first_sec_ofs=8+6+32+64+64;
+
 procedure ShowSecretID(var pfs:tFileStream);
   var pk:tKey32;
   var id:tKey20;
+  var left:LongWord;
+  var msg:string;
   begin
-  pfs.Skip(8+6);
+  pfs.Seek(8+6);
   pfs.Read(pk,32);
   SHA512BUFFER(pk,32,id,20);
   writeln('ID: ',string(id));
+  pfs.Seek(first_sec_ofs);
+  left:=pfs.Length-first_sec_ofs;
+  msg:='SEC XXXXXXXXXXXXXXXX...';
+  while left>=72 do begin
+    pfs.Read(id,8);
+    pfs.Skip(64);
+    dec(left,72);
+    BinToHex(@msg[5],id,8);
+    writeln(msg);
+  end;
+  if left>0 then writeln('Warning: garbage at end of file.');
+end;
+
+procedure ShowHostKeyID(var pfs:tFileStream);
+  var sk:tKey64;
+  var pk:tKey32;
+  var id:tKey20;
+  begin
+  pfs.Read(sk,64);
+  ed25519.CreateKeyPair(pk,sk);
+  Sha512Buffer(pk,32,id,20);
+  writeln('PUB: ',string(pk));
+  writeln('ID:  ',string(id));
 end;
 
 procedure DisplayInfoAboutFile(whatfile:string);
@@ -104,6 +140,7 @@ procedure DisplayInfoAboutFile(whatfile:string);
   end else
   if CompareByte(ident,cHostIdent,8)=0 then begin
     writeln(whatfile,': BrodNet Host key');
+    ShowHostKeyID(s);
   end else
   begin
     write(whatfile,': Unknown File, ');
@@ -125,6 +162,7 @@ procedure GetOSRandom(buf:pointer; cnt:word);
   var f:tHANDLE;
   var q:longint;
   begin
+  flush(output);
   f:=FileOpen('/dev/random',fmOpenRead or fmShareDenyNone);
   while (cnt>0)and(f>=0) do begin
     q:=FileRead(f,buf^,cnt);
@@ -204,11 +242,37 @@ procedure LoadDecryptMasterKey(var mf: tCommonStream; out mastersec:tKey64; out 
   end else raise eFormatError.Create('Invalid Master key file');
 end;
 
+procedure KeyringAdd(var lf:tCommonStream; var pub:tKey32; var sec:tKey64; front:boolean);
+  var fkd: array [1..72] of byte;
+  var fs: LongWord;
+  begin
+  fs:=lf.Length;
+  assert(fs>=first_sec_ofs);
+  if fs<(first_sec_ofs+72) then begin
+    front:=false;
+    fs:=first_sec_ofs;
+  end;
+  if not front then begin
+    lf.Seek(fs);
+    lf.Write(pub,8);
+    lf.Write(sec,64);
+  end else begin
+    lf.Seek(first_sec_ofs);
+    lf.Read(fkd,72);
+    lf.Seek(first_sec_ofs);
+    lf.Write(pub,8);
+    lf.Write(sec,64);
+    lf.Seek(fs);
+    lf.Write(fkd,72);
+  end;
+end;
+
 procedure EditKeyGen; {bnedit keygen secret.dat master.dat}
   var lf,mf:tFileStream;
   var genmaster:boolean;
   var mastersec:tKey64;
-  var loginsec: tkey64;
+  var loginsec, encrsec: tkey64;
+  var encrpub: tKey32;
   var signature: tKey64;
   var dbg: tKey20;
   var ld:packed record
@@ -230,25 +294,34 @@ procedure EditKeyGen; {bnedit keygen secret.dat master.dat}
   end;
   mf.Seek(0);
   LoadDecryptMasterKey(mf, mastersec, ld.master);
-  writeln('Master Key loaded, pub=',string(ld.master));
+  writeln('Master Key loaded,      pub=',string(ld.master));
+  Sha512Buffer(ld.master,32,dbg,20);
+  writeln('ID=',string(dbg));
   mf.Done;
-  write  ('Generate login key ');
+  write  ('Generate signature key  ');
   GetOSRandom(@loginsec,64);
   CreateKeyPair(ld.login,loginsec);
   writeln('pub=',string(ld.login));
   ld.expires:=Word6(UnixNow + 15778463); {6 months}
   writeln('Expiration set to 6 months.');
-  sha512buffer(ld,sizeof(ld),dbg,20);
-  writeln('dbg: ',string(dbg));
+  Sha512Buffer(ld,sizeof(ld),dbg,20);
+  writeln('Signing. ',string(dbg));
   Sign(signature, ld, sizeof(ld), ld.master, masterSec);
+  write  ('Generate encryption key ');
+  GetOSRandom(@encrsec,64);
+  CreateKeyPair(encrpub,encrsec);
+  writeln('pub=',string(encrpub));
   lf.OpenRW(paramstr(2)); //todo check ident bytes
   lf.Write(cSecretIdent,8);
   lf.Write(ld.expires,6);
   lf.Write(ld.master,32);
   lf.Write(signature,64);
   lf.Write(loginsec,64);
+  KeyringAdd(lf,encrpub,encrsec,true);
   lf.Done;
-  FillChar(masterSec,sizeof(masterSec),0);
+  FillChar(masterSec,64,0);
+  FillChar(encrsec,64,0);
+  FillChar(loginsec,64,0);
   writeln('* For the Love of Gaben, store ',paramstr(3));
   writeln('* on safe removable media and don''t forget your password,');
   writeln('* becouse it can be used to take over your identity!');
@@ -267,9 +340,37 @@ procedure EditMasterPassword; {bnedit keygen master.dat}
   EncryptSaveMasterKey(mf, mastersec);
   mf.Done;
   FillChar(masterSec,sizeof(masterSec),0);
-  writeln('* For the Love of Gaben, store ',paramstr(3));
+  writeln('* For the Love of Gaben, store ',paramstr(2));
   writeln('* on safe removable media and don''t forget your password,');
   writeln('* becouse it can be used to take over your identity!');
+end;
+
+procedure KeyringToProfile(var ls:tCommonStream; var pf:tProfileRead; out LoginSec:tKey64);
+  var Ident:array [1..8] of char;
+  var fk: packed record
+    p: array [1..8] of byte;
+    s: tKey64;
+    end;
+  var count,i:Integer;
+  begin
+  ls.Read(ident,8);
+  if CompareByte(ident,cSecretIdent,8)<>0
+    then raise eFormatError.Create('Keyring file invalid');
+  pf.expires:=ls.ReadWord6;
+  ls.Read(pf.master_key,32);
+  ls.Read(pf.master_sig,64);
+  ls.Read(LoginSec,64);
+  CreateKeyPair(pf.sign_key,{<-}LoginSec);
+  ls.seek(first_sec_ofs); {begin reading secret keys}
+  count:=((ls.Length-first_sec_ofs) div 72);
+  ls.Read(fk,72); {first key has special place}
+  CreateKeyPair(pf.encr_key,{<-}fk.s);
+  pf.cOldKeys:=count-1;
+  pf.OldKeys:=GetMem(pf.cOldKeys+1); {+1 is for regenerate}
+  for i:=0 to count-2 do begin
+    ls.Read(fk,72);
+    CreateKeyPair(pf.OldKeys[i],fk.s);
+  end;
 end;
 
 function CheckNick(var nick:string):boolean;
@@ -285,7 +386,6 @@ end;
 procedure EditProfile;
   var pfs,ls:tFileStream;
   var pf:tProfileRead;
-  var Ident:array [1..8] of char;
   var LoginSec:tKey64;
   var cmd,param:string;
   var tmpp:LongWord;
@@ -308,16 +408,9 @@ procedure EditProfile;
   end;
   try
     ls.OpenRO(paramstr(3));
-    ls.Read(ident,8);
-    {todo: vfy ident}
-    pf.expires:=ls.ReadWord6;
-    ls.Read(pf.master_key,32);
-    ls.Read(pf.master_sig,64);
-    ls.Read(LoginSec,64);
-    CreateKeyPair(pf.sign_key,{<-}LoginSec);
-    {todo: verify}
+    KeyringToProfile(ls, pf, LoginSec);
   except
-    on e:exception do begin
+    on e:eInvalidOP{exception} do begin
       writeln(paramstr(3)+': '+e.Message);
       writeln('You can (re-)generate your login. ', helphint);
       halt(3);
@@ -342,6 +435,8 @@ procedure EditProfile;
       else writeln('Error: Invalid Nickname. Max 12 characters and ASCII only [#33..#126].');
     end else if cmd='NOTE' then begin
       pf.TextNote:=param;
+    end else if cmd='NEWKEY' then begin
+      writeln('Error: not implemented.');
     end else if (cmd='HELP')or(cmd='?') then begin
       writeln('--commands available for profile editing--');
       writeln('  syntax: COMMAND parameter...');
@@ -349,6 +444,7 @@ procedure EditProfile;
       writeln('NAME',' Full Name ;set your name');
       writeln('NICK',' nick ;set your nick name, max 8 ASCII chars #32..#126');
       writeln('NOTE',' text ;set additional text, max 255 bytes');
+      writeln('NEWKEY',' ;generate new encryption key');
       writeln('EXIT',' ;save changes and exit (empty line equals EXIT)');
     end else if (cmd='')or(cmd='QUIT')or(cmd='SAVE')or(cmd='EXIT')
     then break
@@ -358,6 +454,8 @@ procedure EditProfile;
   pfs.Trunc(0);
   pf.Updated:=UnixNow;
   pf.WriteTo(pfs,LoginSec);
+  ls.Done;
+  pfs.Done;
   FillChar(loginsec,sizeof(loginsec),0);
   writeln('Changes Saved.');
 end;

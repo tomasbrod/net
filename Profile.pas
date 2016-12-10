@@ -14,12 +14,13 @@ type tProfileRead=object
   nick: string[12];
   expires: Int64;
   master_key, sign_key, encr_key, chat_key: tKey32;
-  OldKeys: array of tKey32;
+  cOldKeys: byte;
+  OldKeys: ^tKey32;
   Fullname: AnsiString;
   master_sig: tKey64;
   updated: Int64;
-  Hosts: array of tKey20;
-  Backups: array of tKey20;
+  cHosts,cBackups:byte;
+  Hosts,Backups: ^tKey20;
   Textnote: AnsiString;
   cert_sig: tKey64;
   signature: tKey64;
@@ -64,9 +65,19 @@ constructor tProfileRead.InitEmpty;
   begin
   TextNote:=''; FullName:='';
   hosts:=nil;
-  backups:=nil;
   valid:=false;
+  cHosts:=0;cBackups:=0;cOldKeys:=0;
   FillChar(nick,sizeof(nick),0);
+end;
+
+function ReadLength1Value(var m:tCommonStream; out count:byte; size:longword):pointer;
+  begin
+  count:=m.ReadByte;
+  size:=count*size;
+  if count>0 then begin
+    result:=GetMem(size);
+    m.Read(result^,size);
+  end else result:=nil;
 end;
 
 constructor tProfileRead.ReadFrom(var src:tCommonStream; parseLevel:byte);
@@ -121,16 +132,10 @@ constructor tProfileRead.ReadFrom(var src:tCommonStream; parseLevel:byte);
     SHA512Buffer(master_key, 32, ProfID, 20 );
     m.Read(encr_key,32);
     m.Read(chat_key,32);
-    i:=m.ReadByte;
-    SetLength(OldKeys,i);
-    if i>0 then m.Read(OldKeys[1],i*32);
+    OldKeys:=ReadLength1Value(m,cOldKeys,32);
     Fullname:=m.ReadShortString;
-    i:=m.ReadByte;
-    SetLength(Hosts,i);
-    if i>0 then m.Read(Hosts[1],i*20);
-    i:=m.ReadByte;
-    SetLength(Backups,i);
-    if i>0 then m.Read(Backups[1],i*20);
+    Hosts:=ReadLength1Value(m,cHosts,20);
+    Backups:=ReadLength1Value(m,cBackups,32);
     Textnote:=m.ReadShortString;
     src.Read(signature,64);
     valid:=valid
@@ -140,15 +145,14 @@ end;
 
 destructor tProfileRead.Done;
   begin
-  SetLength(OldKeys,0);
-  SetLength(Hosts,0);
-  SetLength(Backups,0);
+  FreeMem(OldKeys);
+  FreeMem(Hosts);
+  FreeMem(Backups);
   SetLength(TextNote,0);
 end;
 
 procedure tProfileRead.WriteTo(var dst:tCommonStream; const priv:tPrivKey);
   var s:tMemoryStream;
-  var l:integer;
   begin
   s.Init(9999);//FIXME
   try
@@ -163,13 +167,13 @@ procedure tProfileRead.WriteTo(var dst:tCommonStream; const priv:tPrivKey);
     Write(master_sig,64);
     Write(encr_key,32);
     Write(chat_key,32);
-    l:=system.Length(OldKeys); WriteByte(l);
-    if l>0 then Write(OldKeys[1],l*32);
+    WriteByte(cOldKeys);
+    Write(OldKeys^,cOldKeys*32);
     WriteShortString(Fullname);
-    l:=system.Length(Hosts); WriteByte(l);
-    if l>0 then Write(Hosts[1],l*20);
-    l:=system.length(Backups); WriteByte(l);
-    if l>0 then Write(Backups[1],l*20);
+    WriteByte(cHosts);
+    Write(Hosts^,cHosts*20);
+    WriteByte(cBackups);
+    Write(Backups^,cBackups*20);
     WriteShortString(Textnote);
   end;
   s.Seek(0);
