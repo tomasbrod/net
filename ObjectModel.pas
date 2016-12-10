@@ -42,7 +42,7 @@ type
     procedure Read(out buf; cnt:Word); virtual; overload;
     procedure Write(const buf; cnt:word); virtual; overload;
 
-    procedure Skip(dis:LongInt);
+    procedure Skip(dis:LongInt); virtual;
     function  Left:LongWord;
     function  ReadByte:byte;
     function  ReadWord2:word;
@@ -169,6 +169,7 @@ type
   tFileStream=object(tCommonStream)
     handle:tHandle;
     procedure Seek(absolute:LongWord); virtual;
+    procedure Skip(dis:LongInt); virtual;
     procedure Read(out buf; cnt:Word); virtual;
     procedure Write(const buf; cnt:word); virtual;
     function  Length:LongWord; virtual;
@@ -803,6 +804,9 @@ function tTask.GetSubTask(i:integer): tTask_ptr;
 procedure tFileStream.Seek(absolute:LongWord);
   begin if FileSeek(handle,absolute,fsFromBeginning)<>absolute
   then raise eInOutError.Create('File Seek Error'); end;
+procedure tFileStream.Skip(dis:LongInt);
+  begin if FileSeek(handle,dis,fsFromCurrent)<0
+  then raise eInOutError.Create('File Seek (skip) Error'); end;
 procedure tFileStream.Trunc(len:LongWord);
  begin if not FIleTruncate(handle,len)
  then raise eInOutError.Create('File Trunc Error'); end;
