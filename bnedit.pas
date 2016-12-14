@@ -391,8 +391,13 @@ procedure EditProfile;
   var tmpp:LongWord;
   begin
   if paramcount<>3 then begin writeln(helphint); halt(9) end;
+  {additional params:
+    ... newenc
+    ... addhost hostkey.dat
+    ... addhost HOSTKEY
+  }
   try
-    pfs.OpenRW(paramstr(2));
+    pfs.OpenRW(paramstr(3));
     if pfs.Length=0 then begin
       pf.InitEmpty;
       writeln('Initialized empty profile');
@@ -401,17 +406,18 @@ procedure EditProfile;
     end;
   except
     on e:exception do begin
-      writeln(paramstr(2)+': '+e.Message);
-      writeln('If you specify non-existent file as parameter 2, empty profile will be created');
+      writeln(paramstr(3)+': '+e.Message);
+      writeln('If you specify non-existent file as parameter 3, empty profile will be created');
       halt(2);
     end;
   end;
   try
-    ls.OpenRO(paramstr(3));
+    ls.OpenRO(paramstr(2));
     KeyringToProfile(ls, pf, LoginSec);
+    ls.Done;
   except
     on e:eInvalidOP{exception} do begin
-      writeln(paramstr(3)+': '+e.Message);
+      writeln(paramstr(2)+': '+e.Message);
       writeln('You can (re-)generate your login. ', helphint);
       halt(3);
     end;
@@ -454,7 +460,6 @@ procedure EditProfile;
   pfs.Trunc(0);
   pf.Updated:=UnixNow;
   pf.WriteTo(pfs,LoginSec);
-  ls.Done;
   pfs.Done;
   FillChar(loginsec,sizeof(loginsec),0);
   writeln('Changes Saved.');
@@ -464,8 +469,10 @@ const eoln=LineEnding;
 const helptext:ansistring
 =eoln
 +'bnedit file.dat : decode and output contents of the file'+eoln
-+'bnedit prof profile.dat secret.dat : edit profile file'+eoln
++'bnedit prof secret.dat profile.dat : edit profile file'+eoln
 +'bnedit keygen secret.dat master_secret.dat : generate secret key from master or both'+eoln
++'bnedit de[crypt] message.dat secret.dat [sender_profile.dat]: decrypt and verify a message'+eoln
++'bnedit encrypt message.dat input.txt secret.dat rcpt_prof.dat... : encrypt message'+eoln
 {+'bnedit host host-key.dat : generate host key or renew PoW'+eoln}
 +eoln
 +'A random master_secret.dat will be created if it does not exist.'+eoln
@@ -493,8 +500,8 @@ BEGIN
     'keygen':EditKeyGen;
     'chpasswd':EditMasterPassword;
     'prof','profile':EditProfile;
-    {prof profile secret command value...}
-    {de[crypt] message sender_profile secret}
+    {prof secret profile command value...}
+    {de[crypt] message secret [sender_profile]}
     {encrypt message input secret rcpt_profile...}
     else begin
       writeln('Unknown operation! Here read help text.');
