@@ -6,8 +6,8 @@ interface
 
 type
  tsha512context = record
-   length : QWORD;
    state : array[0..7] of QWORD;
+   length : QWORD;
    curlen : LongWord;
    buf : array[0..127] of byte;
  end;
@@ -17,24 +17,26 @@ function sha512init(out md:tsha512context):longint;
  cdecl; external name 'sha512_init';
 function sha512update(var md:tsha512context; const buf; buflen:LongWord):longint;
  cdecl; external name 'sha512_update';
-function sha512final(var md:tsha512context; out digest:tsha512digest):longint;
- cdecl; external name 'sha512_final';
-function sha512final(var md:tsha512context; out digest; len:word):longint;
- overload; {truncated to len bytes}
+function sha512finalize(var md:tsha512context):longint;
+ cdecl; external name 'sha512_finalize';
+function sha512final(var md:tsha512context; out digest):longint; overload;
+function sha512final(var md:tsha512context; out digest; len:word):longint; overload;
 procedure SHA512Buffer(const Buf; BufLen: LongWord; out digest; digestlen:word );
 
 implementation
 
-{$L ed25519/sha512.o}
+{$L alg/sha512.o}
+
+function sha512final(var md:tsha512context; out digest):longint;
+  begin
+  result:=sha512finalize(md);
+  Move( {source} md.state, {dest} digest, 64);
+end;
 
 function sha512final(var md:tsha512context; out digest; len:word):longint;
-  var full:tSha512Digest;
   begin
-  if len=64 then result:=sha512final(md, tSha512Digest(digest))
-  else begin
-    result:=sha512final(md, full);
-    if result=0 then Move({source}full,{dest}digest,len);
-  end;
+  result:=sha512finalize(md);
+  Move( {source} md.state, {dest} digest, len);
 end;
 
 procedure SHA512Buffer(const Buf; BufLen: LongWord; out digest; digestlen:word );

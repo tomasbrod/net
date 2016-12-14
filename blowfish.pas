@@ -32,7 +32,7 @@ procedure blowfish_decrypt(chipertext:pointer; plaintext:pointer; key:tBlowFishK
 
 implementation
 
-{$L ed25519/blowfish.o}
+{$L alg/blowfish.o}
 
 procedure ExpandKey(out keystruct: tBlowfishKey; const user_key; len: word);
   begin

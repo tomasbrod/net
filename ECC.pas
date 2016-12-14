@@ -13,9 +13,9 @@ var PublicKey:tEccKey;
 var PublicPoW:tPoWRec;
 var ZeroDigest:tSha512Digest;
 {$IFDEF ENDIAN_LITTLE}
-const cPowMask0:DWORD=$0FFFFFFF;
+const cPowMask0:DWORD=$09FFFFFF;
 {$ELSE}
-const cPowMask0:DWORD=$FFFFFF0F;
+const cPowMask0:DWORD=$FFFFFF09;
 {$ENDIF}
 const cDig3PowMask=$0A;
 const cPoWValidFor=5*{days}86400;

@@ -18,13 +18,13 @@ procedure SharedSecret(out shared:tKey32; const pub:tPubKey; const priv:tPrivKey
 
 IMPLEMENTATION
 
-{$L ed25519/sc.o}
-{$L ed25519/fe.o}
-{$L ed25519/ge.o}
-{$L ed25519/sign.o}
-{$L ed25519/verify.o}
-{$L ed25519/key_exchange.o}
-{$L ed25519/sha512.o}
+{$L alg/sc.o}
+{$L alg/fe.o}
+{$L alg/ge.o}
+{$L alg/sign.o}
+{$L alg/verify.o}
+{$L alg/key_exchange.o}
+{$L alg/sha512.o}
 
 procedure ed25519_create_keypair(pub,priv,seed:pointer);
  cdecl;external;

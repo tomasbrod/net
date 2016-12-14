@@ -11,7 +11,7 @@ echo "unit gitver; interface
 var GIT_VERSION:string='$gitver';
 implementation end." >gitver.pas
 
-make -C ed25519
+make -C alg
 fpc @fpopt.cfg brodnetd.pas
 fpc @fpopt.cfg bnedit.pas
 #fpc @fpopt.cfg bnmut.pas
