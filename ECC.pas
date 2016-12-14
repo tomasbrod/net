@@ -5,16 +5,20 @@ uses ed25519,Sha512,ObjectModel;
 type tEccKey=tKey32;
 type tPoWRec=packed record
  data:tKey32;
- stamp:LongWord; {NetOrder}
+ stamp:Word6;
  end;
 
 var SecretKey:tKey64;
 var PublicKey:tEccKey;
 var PublicPoW:tPoWRec;
 var ZeroDigest:tSha512Digest;
-const cDig3PowMask=%0010;
-const cPoWValidDays=5;
-const cTSEpoch=40179;
+{$IFDEF ENDIAN_LITTLE}
+const cPowMask0:DWORD=$0FFFFFFF;
+{$ELSE}
+const cPowMask0:DWORD=$FFFFFF0F;
+{$ENDIF}
+const cDig3PowMask=$0A;
+const cPoWValidFor=5*{days}86400;
 const cHostIdent:array [1..8] of char='BNHosSW'#26;
 procedure CreateChallenge(out Challenge: tEccKey);
 procedure CreateResponse(const Challenge: tEccKey; out Response: tKey32; const srce:tEccKey);
@@ -40,20 +44,18 @@ procedure CreateResponse(const Challenge: tEccKey; out Response: tKey32; const s
  Sha512Final(shactx,Response,32);
 end;
 
-var TSNow:LongWord;
-
 function VerifyPoW(const proof:tPoWRec; const RemotePub:tEccKey ):boolean;
  var shactx:tSha512Context;
- var delta:Integer;
- var digest:tSha512Digest;
+ var delta:Int64;
+  var w4alias: packed array [0..15] of dword absolute shactx.state;
  begin
- delta:=TSNow-BEtoN(proof.stamp);
- if (delta<=cPoWValidDays) and (delta>=-1) then begin
+ delta:=UnixNow-Int64(proof.stamp);
+ if (delta<=cPoWValidFor) and (delta>=-600) then begin
  Sha512Init(shactx);
  Sha512Update(shactx,proof,sizeof(proof));
  Sha512Update(shactx,RemotePub,sizeof(RemotePub));
- Sha512Final(shactx,digest);
- result:=(CompareByte(digest,ZeroDigest,3)=0)and((digest[3]and cDig3PoWMask)=0);
+ Sha512Finalize(shactx);
+ result:= (w4alias[0] and cPoWMask0) =0;
  end else result:=false;
 end;
 
@@ -62,12 +64,12 @@ const cSeckeyFN='hostkey.dat';
 procedure PoWGenerate;
   var i:byte;
   var start:tDateTime;
-  var digest:tSha512Digest;
   var shactx:tSha512Context;
   var wp:tPoWRec;
   var counter:LongWord absolute wp.data;
+  var w4alias: packed array [0..15] of dword absolute shactx.state;
   begin
-  wp.stamp:=NtoBE(TSNow);
+  wp.stamp:=Word6(UnixNow);
   for i:=0 to 31 do wp.data[i]:=Random(256);
   Start:=Now; counter:=0;
   repeat
@@ -76,8 +78,8 @@ procedure PoWGenerate;
     Sha512Init(shactx);
     Sha512Update(shactx,wp,sizeof(wp));
     Sha512Update(shactx,PublicKey,sizeof(PublicKey));
-    Sha512Final(shactx,digest);
-  until (CompareByte(digest,ZeroDigest,3)=0)and((digest[3]and cDig3PoWMask)=0);
+    Sha512Finalize(shactx);
+  until (w4alias[0] and cPowMask0) =0;
   PublicPoW:=wp;
   writeln('ECC: PoW found in ',(Now-start)*SecsPerDay:3:0,'s speed=',SizeToString(trunc(counter/((Now-start)*SecsPerDay))),'h/s');
   Assert(VerifyPoW(PublicPoW,PublicKey));
@@ -126,7 +128,7 @@ procedure tPoWRefreshObj.Timer;
     write('ECC: Waiting for PoW to generate, this may take a while...'); flush(output);
     WaitForThreadTerminate(thrid,high(longint));
     thrid:=0; writeln; end
-  else if regen or((TSNow-BEtoN(PublicPow.Stamp))>=cPoWValidDays) then begin
+  else if regen or((UnixNow-Int64(PublicPow.Stamp))>=(cPoWValidFor-1200)) then begin
     writeln('ECC: Started generating PoW');
     thrid:=BeginThread(@PoWGenThr,nil);
     {ThreadSetPriority(thrid,-15);}
@@ -138,7 +140,6 @@ end;
 procedure Load;
   var f:tFileStream;
   var ident:array [1..8] of char;
-  var regen:boolean;
   begin
   write();
   f.OpenRW(cSeckeyFN);
@@ -166,7 +167,6 @@ end;
 
 BEGIN
  FillChar(ZeroDigest,sizeof(ZeroDigest),0);
- TSNow:=trunc(Now-cTSEpoch);
   //writeln('ECC: Today is D',TSNow);
   Load;
   //writeln('ECC: ProofOfWork valid for W',BEtoN(PublicPow.Stamp));
