@@ -218,6 +218,7 @@ operator := (host : word) net:Word2;
 operator := (net : Word4) host:Dword;
 operator := (host : Dword) net:Word4;
 
+operator := (net : Word6) host:Int64;
 operator := (host: Int64) net:Word6;
 
 operator = (a,b:tKey20) r:boolean;
@@ -693,6 +694,16 @@ end;
 operator := (host : Dword) net:Word4;
  begin
  DWORD(pointer(@net)^):=NtoBE( host );
+end;
+
+operator := (net : Word6) host:Int64;
+  begin
+  host:= net[6]
+     or (net[5] shl  8)
+     or (net[4] shl 16)
+     or (net[3] shl 24)
+     or (net[2] shl 32)
+     or (net[1] shl 40);
 end;
 
 operator := (host: Int64) net:Word6;
