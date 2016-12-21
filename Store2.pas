@@ -3,7 +3,7 @@ UNIT Store2;
  Object Manager. Reference Counting. Caching.
 }
 INTERFACE
-USES Sha512,ObjectModel,Database,SysUtils;
+USES Crypto,ObjectModel,Database,SysUtils;
 
 const cSzlPack:longword=0;
       cSzlData:longword=3584;
@@ -258,14 +258,14 @@ constructor tStoreObject.Insert(var ins: tMemoryStream);
     var mh:^tMeH;
     var df:tFileStream;
     var hash:tFID absolute fid;
-    var ctx:tSha512Context;
+    var ctx:tSHA256;
     var dname:string[24];
 
     begin
     ins.Seek(0);
-    Sha512Init(ctx);
-    Sha512Update(ctx,ins.Base,ins.vLength);
-    Sha512Final(ctx,hash,20);
+    ctx.Init;
+    ctx.Update(ins.Base^,ins.vLength);
+    ctx.TruncFinal(hash,20);
     vl:=dbGet( dbObject, hash, 20 );
     if vl.length=0 then begin
       dname:=cStoreDir+string(hash);
@@ -342,19 +342,19 @@ end;
 
 procedure HashAndCopy(var inf:tCommonStream; outf:pCommonStream; out id:tFID; left:LongWord);
   {read input file, copy to output file, hash to id, dont seek/rename/close}
-  var ctx:tSha512Context;
+  var ctx:tSha256;
   var buf:packed array [0..1023] of byte;
   var bs:LongWord;
   begin
-  Sha512Init(ctx);
+  ctx.Init;
   while left>0 do begin
     if left<=sizeof(buf) then bs:=left else bs:=sizeof(buf);
     inf.Read(buf,bs);
     if assigned(outf) then outf^.Write(buf,bs);
-    Sha512Update(ctx,buf,bs);
+    ctx.Update(buf,bs);
     left:=left-bs;
   end;
-  Sha512Final(ctx,id,sizeof(id));
+  ctx.TruncFinal(id,sizeof(id));
 end;
 
 procedure tStoreObject.InsertCopyInline(var ins:tCommonStream);
@@ -362,16 +362,16 @@ procedure tStoreObject.InsertCopyInline(var ins:tCommonStream);
   var hash:tFID;
   var len:LongWord;
   var mh:^tMeH;
-  var ctx:tSha512Context;
+  var ctx:tSha256;
   begin
   location:=tsoLoc(99);
   ins.Seek(0);
   len:=ins.Length;
   vl.Init(len+sizeof(tMeH)); mh:=vl.Base; vl.vLength:=sizeof(tMeH);
   ins.Read(vl.WRBuf^,len);
-  Sha512Init(ctx);
-  Sha512Update(ctx,vl.WRBuf^,len);
-  Sha512Final(ctx,hash,20);
+  ctx.Init;
+  ctx.Update(vl.WRBuf^,len);
+  ctx.TruncFinal(hash,20);
   vl.WrEnd(len);
   mh^.z1:=0; mh^.size:=len; mh^.refc:=1; mh^.temp:=0; mh^.loc:=byte(solData);
   {common branch (try open else set and open)}

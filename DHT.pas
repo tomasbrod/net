@@ -10,7 +10,7 @@ unit DHT;
 {used by: messages, fileshare}
 
 INTERFACE
-uses ServerLoop,ObjectModel,ECC,sha512;
+uses ServerLoop,ObjectModel,HostKey,Crypto;
 
 TYPE
   tPID=tKey20;
@@ -390,8 +390,8 @@ procedure SendCheck(var p:tPeer);
   begin
   r.Init(cDGramSz);
   r.WriteByte(opcode.dhtCheckQ);
-  r.Write(ECC.PublicKey,sizeof(ECC.PublicKey));
-  r.Write(ECC.PublicPoW,sizeof(ECC.PublicPoW));
+  r.Write(HostKey.PublicKey,sizeof(HostKey.PublicKey));
+  r.Write(HostKey.PublicPoW,sizeof(HostKey.PublicPoW));
   r.Write(p.Challenge,sizeof(tEccKey));
   r.Write(GIT_VERSION[1],Length(GIT_VERSION));
   writeln('DHT.SendCheck: to ',string(p.addr),' ',r.length,'B');
@@ -412,20 +412,20 @@ procedure RecvCheckQ(msg:tSMsg);
   pow:=msg.st.ReadPtr(sizeof(tPoWRec));
   challenge:=msg.st.ReadPtr(sizeof(tEccKey));
   {Pub->ID}
-  Sha512Buffer(Pub^,sizeof(pub^),id,sizeof(id));
+  SHA256_Buffer(id,20{<-},Pub^,sizeof(pub^));
   {CheckNode}
   if not CheckNode(id,msg.source,true) then exit;
   {Verify PoW}
-  if not ECC.VerifyPoW(pow^,pub^) then begin
+  if not HostKey.VerifyPoW(pow^,pub^) then begin
     writeln('DHT.CheckQ: Invalid PoW in request from ',string(msg.source));
   exit end;
   {Solve C/R}
-  ECC.CreateResponse(Challenge^, right_resp, pub^);
+  HostKey.CreateResponse(Challenge^, right_resp, pub^);
   {reply}
   r.Init(cDGramSz);
   r.WriteByte(opcode.dhtCheckR);
-  r.Write(ECC.PublicKey,sizeof(ECC.PublicKey));
-  r.Write(ECC.PublicPoW,sizeof(ECC.PublicPoW));
+  r.Write(HostKey.PublicKey,sizeof(HostKey.PublicKey));
+  r.Write(HostKey.PublicPoW,sizeof(HostKey.PublicPoW));
   r.Write(right_resp,sizeof(right_resp));
   r.Write(GIT_VERSION[1],Length(GIT_VERSION));
   writeln('DHT.CheckQ: responding to ',string(msg.source),' ',r.length,'B');
@@ -447,7 +447,7 @@ procedure RecvCheckR(msg:tSMsg);
   pow:=msg.st.ReadPtr(sizeof(tPoWRec));
   resp:=msg.st.ReadPtr(sizeof(tEccKey));
   {Pub->ID}
-  Sha512Buffer(Pub^,sizeof(pub^),id,sizeof(id));
+  SHA256_Buffer(id,sizeof(id),Pub^,sizeof(pub^));
   {ID->bkt:idx}
   b:=FindBucket(id);
   if not assigned(b) then exit;
@@ -458,12 +458,12 @@ procedure RecvCheckR(msg:tSMsg);
   if b^.peer[i].Banned then exit;
   b^.peer[i].LastMsgFrom:=mNow;
   {Verify PoW}
-  if not ECC.VerifyPoW(pow^,pub^) then begin
+  if not HostKey.VerifyPoW(pow^,pub^) then begin
     b^.peer[i].Banned:=true;
     writeln('DHT.CheckR: Invalid PoW in response from ',string(msg.source));
   exit end;
   {Verify C/R}
-  ECC.CreateResponse(b^.peer[i].Challenge, right_resp, pub^);
+  HostKey.CreateResponse(b^.peer[i].Challenge, right_resp, pub^);
   if CompareByte(resp^,right_resp,sizeof(right_resp))<>0 then begin
     writeln('DHT.CheckR: Invalid C/R in response from ',string(msg.source));
     b^.peer[i].Banned:=true;
@@ -577,7 +577,7 @@ end;
 procedure VerifyInit(b:tBucket_ptr; i:byte);
   begin with b^.peer[i] do begin
     Verified:=false;
-    ECC.CreateChallenge(challenge);
+    HostKey.CreateChallenge(challenge);
     SendCheck(b^.peer[i]);
 end end;
 
@@ -844,7 +844,7 @@ BEGIN
   SetupOpcode(opcode.dhtCheckQ,@recvCheckQ);
   SetupOpcode(opcode.dhtCheckR,@recvCheckR);
   SetupOpcode(opcode.dhtGetNodes,@recvGetNodes);
-  Sha512Buffer(PublicKey,sizeof(PublicKey),MyID,sizeof(MyID));
-  writeln('DHT: set ID to ',string(MyID),' from ECC');
+  SHA256_Buffer(MyID,sizeof(MyID),PublicKey,sizeof(PublicKey));
+  writeln('DHT: set ID to ',string(MyID),' from HostKey');
   Persist.OpenState;
 END.

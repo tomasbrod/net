@@ -75,7 +75,7 @@ procedure tServer.ListenEvent(ev:word);
  {writeln('CtrlLow.ListenEvent: accept');}
  New(cl);
  cl^.Init(s);
- SHA512Buffer(addr,addrl,cl^.hash,20);
+  SHA256_Buffer(cl^.hash,20,addr,addrl);
 end;
 
 procedure tClient.Init(i_s:tSocket);
@@ -157,7 +157,7 @@ procedure tClient.Event(ev:word);
       rc:=fpRecv(s,arg,rc,0);
       if rc>0 then begin
         RcvObj^.Write(arg^,rc);
-        Sha512Update(RcvObjHctx,arg^,rc);
+        RcvObjHctx.Update(arg^,rc);
         RcvObjLeft:=RcvObjLeft-rc;
         if RcvObjLeft=0 then RcvObjComplete;
         rc:=1;

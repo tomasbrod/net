@@ -3,7 +3,7 @@ PROGRAM brodnetd;
 uses cmem,cthreads,ServerLoop, ObjectModel
   ,Database
   ,Store2
-	,ECC
+	,HostKey
 	,OTServer
  	,ObjTrans
 	,DHT

@@ -1,7 +1,7 @@
-unit ECC;
+unit HostKey;
 
 INTERFACE
-uses ed25519,Sha512,ObjectModel;
+uses ed25519,Crypto,ObjectModel;
 type tEccKey=tKey32;
 type tPoWRec=packed record
  data:tKey32;
@@ -13,49 +13,50 @@ var PublicKey:tEccKey;
 var PublicPoW:tPoWRec;
 var ZeroDigest:tSha512Digest;
 {$IFDEF ENDIAN_LITTLE}
-const cPowMask0:DWORD=$09FFFFFF;
+const cPowMask0:DWORD=$FF0FFFFF;
 {$ELSE}
-const cPowMask0:DWORD=$FFFFFF09;
+const cPowMask0:DWORD=$FFFF0FFF;
 {$ENDIF}
-const cDig3PowMask=$0A;
 const cPoWValidFor=5*{days}86400;
 const cHostIdent:array [1..8] of char='BNHosSW'#26;
-procedure CreateChallenge(out Challenge: tEccKey);
-procedure CreateResponse(const Challenge: tEccKey; out Response: tKey32; const srce:tEccKey);
+procedure CreateChallenge(out Challenge: tKey32);
+procedure CreateResponse(const Challenge: tKey32; out Response: tKey32; const srce:tEccKey);
 function VerifyPoW(const proof:tPoWRec; const RemotePub:tEccKey):boolean;
 
 IMPLEMENTATION
 uses SysUtils{,DateUtils},ServerLoop;
 
-procedure CreateChallenge(out Challenge: tEccKey);
+procedure CreateChallenge(out Challenge: tKey32);
  var i:byte;
  begin
  for i:=0 to 31 do challenge[i]:=Random(256);
 end;
 
-procedure CreateResponse(const Challenge: tEccKey; out Response: tKey32; const srce:tEccKey);
- var Shared:tEccKey;
- var shactx:tSha512Context;
+procedure CreateResponse(const Challenge: tKey32; out Response: tKey32; const srce:tEccKey);
+ var Shared:tKey32;
+ var shactx:tSha256Context;
  begin
  ed25519.SharedSecret(shared,srce,secretkey);
- Sha512Init(shactx);
- Sha512Update(shactx,challenge,sizeof(challenge));
- Sha512Update(shactx,shared,sizeof(shared));
- Sha512Final(shactx,Response,32);
+ SHA256_Init(shactx);
+ SHA256_Update(shactx,challenge,sizeof(challenge));
+ SHA256_Update(shactx,shared,sizeof(shared));
+ SHA256_Final(Response,shactx);
 end;
 
 function VerifyPoW(const proof:tPoWRec; const RemotePub:tEccKey ):boolean;
- var shactx:tSha512Context;
+ var shactx:tSha256Context;
  var delta:Int64;
-  var w4alias: packed array [0..15] of dword absolute shactx.state;
+  var digest: tKey32;
+  var dig_4dw: dword absolute digest[0];
  begin
  delta:=UnixNow-Int64(proof.stamp);
  if (delta<=cPoWValidFor) and (delta>=-600) then begin
- Sha512Init(shactx);
- Sha512Update(shactx,proof,sizeof(proof));
- Sha512Update(shactx,RemotePub,sizeof(RemotePub));
- Sha512Finalize(shactx);
- result:= (w4alias[0] and cPoWMask0) =0;
+ SHA256_Init(shactx);
+ SHA256_Update(shactx,proof,sizeof(proof));
+ SHA256_Update(shactx,RemotePub,sizeof(RemotePub));
+ SHA256_Final(digest,shactx);
+ result:= (dig_4dw and cPoWMask0) =0;
+ writeln('pow ',string(digest));
  end else result:=false;
 end;
 
@@ -64,10 +65,11 @@ const cSeckeyFN='hostkey.dat';
 procedure PoWGenerate;
   var i:byte;
   var start:tDateTime;
-  var shactx:tSha512Context;
+  var shactx:tSha256Context;
   var wp:tPoWRec;
   var counter:LongWord absolute wp.data;
-  var w4alias: packed array [0..15] of dword absolute shactx.state;
+  var digest: tKey32;
+  var dig_4dw: dword absolute digest[0];
   begin
   wp.stamp:=Word6(UnixNow);
   for i:=0 to 31 do wp.data[i]:=Random(256);
@@ -75,13 +77,13 @@ procedure PoWGenerate;
   repeat
     if counter=high(counter) then raise eXception.Create('some shit happend');
     inc(counter);
-    Sha512Init(shactx);
-    Sha512Update(shactx,wp,sizeof(wp));
-    Sha512Update(shactx,PublicKey,sizeof(PublicKey));
-    Sha512Finalize(shactx);
-  until (w4alias[0] and cPowMask0) =0;
+    SHA256_Init(shactx);
+    SHA256_Update(shactx,wp,sizeof(wp));
+    SHA256_Update(shactx,PublicKey,sizeof(PublicKey));
+    SHA256_Final(digest,shactx);
+  until (dig_4dw and cPowMask0) =0;
   PublicPoW:=wp;
-  writeln('ECC: PoW found in ',(Now-start)*SecsPerDay:3:0,'s speed=',SizeToString(trunc(counter/((Now-start)*SecsPerDay))),'h/s');
+  writeln('HostKey: PoW found in ',(Now-start)*SecsPerDay:3:0,'s speed=',SizeToString(trunc(counter/((Now-start)*SecsPerDay))),'h/s');
   Assert(VerifyPoW(PublicPoW,PublicKey));
 end;
 
@@ -125,11 +127,11 @@ procedure tPoWRefreshObj.Timer;
   begin
   time:=600000;
   if thrid>0 then begin
-    write('ECC: Waiting for PoW to generate, this may take a while...'); flush(output);
+    write('HostKey: Waiting for PoW to generate, this may take a while...'); flush(output);
     WaitForThreadTerminate(thrid,high(longint));
     thrid:=0; writeln; end
   else if regen or((UnixNow-Int64(PublicPow.Stamp))>=(cPoWValidFor-1200)) then begin
-    writeln('ECC: Started generating PoW');
+    writeln('HostKey: Started generating PoW');
     thrid:=BeginThread(@PoWGenThr,nil);
     {ThreadSetPriority(thrid,-15);}
     if regen then time:=5 else time:=160000;
@@ -148,14 +150,14 @@ procedure Load;
     if CompareByte(ident,cHostIdent,8)<>0 then raise eInOutError.Create(cSeckeyFN+' invalid');
     f.Read(SecretKey,sizeof(SecretKey));
   except on e:eInOutError do begin
-    writeln('ECC: '+cSeckeyFN+' ',e.message,', Generating');
+    writeln('HostKey: '+cSeckeyFN+' ',e.message,', Generating');
     f.Seek(0);
     GetOSRandom(@SecretKey,64);
     f.Write(cHostIdent,8);
     f.Write(SecretKey,64);
   end end;
   CreatekeyPair(PublicKey,SecretKey);
-  writeln('ECC: '+cSeckeyFN+' ',string(PublicKey));
+  writeln('HostKey: '+cSeckeyFN+' ',string(PublicKey));
   try f.Read(PublicPoW,sizeof(PublicPoW));
       if not VerifyPoW(PublicPoW,PublicKey) then raise eInOutError.Create('invalid or expired');
       PoWGenBg.regen:=false;
@@ -167,7 +169,7 @@ end;
 
 BEGIN
  FillChar(ZeroDigest,sizeof(ZeroDigest),0);
-  //writeln('ECC: Today is D',TSNow);
+  //writeln('HostKey: Today is D',TSNow);
   Load;
-  //writeln('ECC: ProofOfWork valid for W',BEtoN(PublicPow.Stamp));
+  //writeln('HostKey: ProofOfWork valid for W',BEtoN(PublicPow.Stamp));
 END.

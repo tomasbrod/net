@@ -9,7 +9,7 @@ USES ServerLoop,opcode
     ,ObjectModel
     ,Sockets,BaseUnix
     ,SysUtils
-    ,sha512
+    ,Crypto
     {$ifdef ctlDHT},dht,dhtLookup{$endif}
     ,Store2
     {$ifdef ctlMutable},Mutable{$endif}
@@ -31,7 +31,7 @@ type tClient=object
   SndObjLeft:LongWord;
   RcvObj:^tFileStream;
   RcvObjLeft:LongWord;
-  RcvObjHctx:tSha512Context;
+  RcvObjHctx:tSha256;
   procedure SendObject(var o:tStoreObject; ilen:LongWord);
   procedure RcvObjComplete;
   {$endif}
@@ -196,7 +196,7 @@ procedure StorePut(var client:tClient; var a,r:tMemoryStream);
   len:=a.ReadWord4;
   New(client.RcvObj,OpenRW(Store2.GetTempName(client.hash,'ctl')));
   client.RcvObjLeft:=len;
-  Sha512Init(client.RcvObjHctx);
+  client.RcvObjHctx.Init;
   writeln('Ctrl.StorePUT: ',len);
 end;
 procedure tClient.RcvObjComplete;
@@ -205,7 +205,7 @@ procedure tClient.RcvObjComplete;
   var hash_id:tFID;
   begin
   r.Init(26);
-  Sha512Final(RcvObjHctx,hash_id,sizeof(hash_id));
+  RcvObjHctx.TruncFinal(hash_id,sizeof(hash_id));
   writeln('Ctrl.RcvObjComplete: '+string(hash_id));
   so.InsertRename(RcvObj^,Store2.GetTempName(hash,'ctl'),hash_id);
   r.WriteWord2(21);

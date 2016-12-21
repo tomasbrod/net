@@ -33,7 +33,7 @@ type tProfileRead=object
 end;
 
 IMPLEMENTATION
-uses Sha512,ed25519;
+uses Crypto,ed25519;
 
 type tHashingStream = object (tCommonStream)
   driver: ^tCommonStream;
@@ -46,19 +46,19 @@ end;
 procedure tHashingStream.Read(out buf; cnt:Word);
   begin
   driver^.Read(buf,cnt);
-  sha512update(ctx,buf,cnt);
+  sha512_update(ctx,buf,cnt);
 end;
 procedure tHashingStream.Write(const buf; cnt:Word);
   begin
   driver^.Write(buf,cnt);
-  sha512update(ctx,buf,cnt);
+  sha512_update(ctx,buf,cnt);
 end;
 
 constructor tHashingStream.Init(var idriver:tCommonStream);
   begin
   inherited Init;
   driver:=@idriver;
-  sha512init(ctx);
+  sha512_init(ctx);
 end;
 
 constructor tProfileRead.InitEmpty;
@@ -129,7 +129,7 @@ constructor tProfileRead.ReadFrom(var src:tCommonStream; parseLevel:byte);
     valid:=valid and (updated<UnixNow) and (expires>UnixNow);
     valid:=valid
       and ed25519.Verify2(m2.ctx, master_sig, master_key);
-    SHA512Buffer(master_key, 32, ProfID, 20 );
+    SHA256_Buffer( ProfID, 20, master_key, 32);
     m.Read(encr_key,32);
     m.Read(chat_key,32);
     OldKeys:=ReadLength1Value(m,cOldKeys,32);
