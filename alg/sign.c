@@ -1,30 +1,30 @@
 #include "ed25519.h"
-#include "sha512.h"
+#include "openssl/sha.h"
 #include "ge.h"
 #include "sc.h"
 
 
 void ed25519_sign(unsigned char *signature, const unsigned char *message, size_t message_len, const unsigned char *public_key, const unsigned char *private_key) {
-    sha512_context hash;
+    SHA512_CTX hash;
     unsigned char hram[64];
     unsigned char r[64];
     ge_p3 R;
 
 
-    sha512_init(&hash);
-    sha512_update(&hash, private_key + 32, 32);
-    sha512_update(&hash, message, message_len);
-    sha512_final(&hash, r);
+    SHA512_Init(&hash);
+    SHA512_Update(&hash, private_key + 32, 32);
+    SHA512_Update(&hash, message, message_len);
+    SHA512_Final(r, &hash);
 
     sc_reduce(r);
     ge_scalarmult_base(&R, r);
     ge_p3_tobytes(signature, &R);
 
-    sha512_init(&hash);
-    sha512_update(&hash, message, message_len);
-    sha512_update(&hash, signature, 32);
-    sha512_update(&hash, public_key, 32);
-    sha512_final(&hash, hram);
+    SHA512_Init(&hash);
+    SHA512_Update(&hash, message, message_len);
+    SHA512_Update(&hash, signature, 32);
+    SHA512_Update(&hash, public_key, 32);
+    SHA512_Final(hram, &hash);
 
     sc_reduce(hram);
     sc_muladd(signature + 32, hram, private_key, r);

@@ -1,5 +1,5 @@
 #include "ed25519.h"
-#include "sha512.h"
+#include "openssl/sha.h"
 #include "ge.h"
 #include "sc.h"
 
@@ -47,7 +47,7 @@ static int consttime_equal(const unsigned char *x, const unsigned char *y) {
 int ed25519_verify(const unsigned char *signature, const unsigned char *message, size_t message_len, const unsigned char *public_key) {
     unsigned char h[64];
     unsigned char checker[32];
-    sha512_context hash;
+    SHA512_CTX hash;
     ge_p3 A;
     ge_p2 R;
 
@@ -59,11 +59,11 @@ int ed25519_verify(const unsigned char *signature, const unsigned char *message,
         return 0;
     }
 
-    sha512_init(&hash);
-    sha512_update(&hash, message, message_len);
-    sha512_update(&hash, signature, 32);
-    sha512_update(&hash, public_key, 32);
-    sha512_final(&hash, h);
+    SHA512_Init(&hash);
+    SHA512_Update(&hash, message, message_len);
+    SHA512_Update(&hash, signature, 32);
+    SHA512_Update(&hash, public_key, 32);
+    SHA512_Final(h, &hash);
     
     sc_reduce(h);
     ge_double_scalarmult_vartime(&R, h, &A, signature + 32);
@@ -76,7 +76,7 @@ int ed25519_verify(const unsigned char *signature, const unsigned char *message,
     return 1;
 }
 
-int ed25519_verify_p2(sha512_context *hash, const unsigned char *signature, const unsigned char *public_key) {
+int ed25519_verify_p2(SHA512_CTX *hash, const unsigned char *signature, const unsigned char *public_key) {
     unsigned char h[64];
     unsigned char checker[32];
     ge_p3 A;
@@ -90,9 +90,9 @@ int ed25519_verify_p2(sha512_context *hash, const unsigned char *signature, cons
         return 0;
     }
     
-    sha512_update(hash, signature, 32);
-    sha512_update(hash, public_key, 32);
-    sha512_final(hash, h);
+    SHA512_Update(hash, signature, 32);
+    SHA512_Update(hash, public_key, 32);
+    SHA512_Final(h, hash);
     
     sc_reduce(h);
     ge_double_scalarmult_vartime(&R, h, &A, signature + 32);

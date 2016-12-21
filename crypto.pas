@@ -1,0 +1,411 @@
+UNIT crypto;
+{$mode objfpc}{$H+}
+
+(* Pascal Procedural and OO API to OpenSSL *)
+(* and few utility functions *)
+
+interface
+uses ctypes, ObjectModel;
+{$PACKRECORDS C}
+{$LINKLIB crypto}
+{$LINKLIB z}
+
+
+{**** SHA256 ****}
+type tSSLDWORD=DWORD;
+type tSHA256context = record
+  h: array [0..7] of ctypes.cuint;
+  Nl, Nh: tSSLDWORD;
+  data: packed array [0..15] of tSSLDWORD;
+  num, md_len: ctypes.cUInt;
+end;
+type tsha256digest = tKey32;
+function SHA256_Init(var c:tsha256context):cint;
+ cdecl; external name 'SHA256_Init';
+function SHA256_Update(var c:tsha256context; const data; len:csize_t):cint;
+ cdecl; external name 'SHA256_Update';
+function SHA256_Final(out md: tKey32; var c:tsha256context):cint;
+ cdecl; external name 'SHA256_Final';
+procedure SHA256_Transform(var c:tsha256context; var data);
+ cdecl; external name 'SHA256_Transform';
+type tSHA256 = object
+  var ctx:tsha256context;
+  procedure Init;
+  procedure Update( const data; len: longword);
+  procedure Final( out md:tsha256digest);
+  procedure TruncFinal( out md; mdlen: longword );
+end;
+procedure SHA256_Buffer( out md; mdlen: word; const data; len:longword);
+
+
+{**** SHA512 ****}
+type tSHA512context = record
+  h: array [0..7] of QWORD;
+  Nl, Nh: QWORD;
+  data: packed array [0..15] of QWORD;
+  num, md_len: ctypes.cUInt;
+end;
+type tsha512digest = tKey64;
+function SHA512_Init(var c:tsha512context):cint;
+ cdecl; external name 'SHA512_Init';
+function SHA512_Update(var c:tsha512context; const data; len:csize_t):cint;
+ cdecl; external name 'SHA512_Update';
+function SHA512_Final(out md:tsha512digest; var c:tsha512context):cint;
+ cdecl; external name 'SHA512_Final';
+procedure SHA512_Transform(var c:tsha512context; var data);
+ cdecl; external name 'SHA512_Transform';
+procedure SHA512_Buffer( out md:tKey64; const data; len:longword);
+
+
+{**** Rijndael ****}
+type tAES_key = record
+  rd_key: array [0..59] of ctypes.cULong;
+  rounds: ctypes.cInt;
+end;
+type tAESkey = tAES_key;
+function AES_set_encrypt_key(const userKey; bits: cint; out key:tAES_key):cint;
+  cdecl; external name 'AES_set_encrypt_key';
+function AES_set_decrypt_key(const userKey; bits: cint; out key:tAES_key):cint;
+  cdecl; external name 'AES_set_decrypt_key';
+procedure AES_encrypt(const inp; out outp; var key: tAES_key);
+  cdecl; external name 'AES_encrypt';
+procedure AES_decrypt(const inp; out outp; var key: tAES_key);
+  cdecl; external name 'AES_decrypt';
+function AES_wrap_key(var key: tAES_key; iv: pointer;
+  out outp; const inp; inlen: cuint):cint;
+  cdecl; external name 'AES_wrap_key';
+function AES_unwrap_key(var key: tAES_key; iv: pointer;
+  out outp; const inp; inlen: cuint):cint;
+  cdecl; external name 'AES_unwrap_key';
+type tAES = object
+  expanded:  tAES_key;
+  procedure InitEnCrypt(const userKey; bits: integer);
+  procedure InitDeCrypt(const userKey; bits: integer);
+  procedure EnCryptECB(out outp; const inp);
+  procedure DeCryptECB(out outp; const inp);
+  {!wrapped data is 8 byte LONGER than original data}
+  procedure Wrap(out wrapped; const inp; len: longword; iv: pointer);
+  function  UnWrap(out unwrapped; const inp; len: longword; iv: pointer): boolean;
+end;
+type tAES_FB = object (tAES)
+  feedback: packed array [0..15] of byte;
+  procedure SetIV(const iv);
+  procedure EnCryptCBC(out outp; const inp);
+  procedure DeCryptCBC(out outp; const inp);
+  procedure EnCryptPCBC(out outp; const inp);
+  procedure DeCryptPCBC(out outp; const inp);
+  procedure EnCryptCFB(out outp; const inp);
+  procedure DeCryptCFB(out outp; const inp);
+end;
+
+{**** Blowfish ****}
+type tBF_key = record
+  p : array[0..17] of tSSLDWORD;
+  s : array[0..3,0..255] of tSSLDWORD;
+end;
+procedure BF_set_key(out key: tBF_key; len: cint; const data);
+  cdecl; external name 'BF_set_key';
+procedure BF_encrypt(var data; var key: tBF_key);
+  cdecl; external name 'BF_encrypt';
+procedure BF_decrypt(var data; var key: tBF_key);
+  cdecl; external name 'BF_decrypt';
+
+
+{**** UTILS ****}
+procedure BlockXOR(out r; const a; const b; len: longword);
+
+
+{**** KDF ****}
+{todo...}
+
+
+{**** Hash MAC ****}
+type tSHA256HMAC = object (tSHA256)
+  var outerctx:tsha256context;
+  procedure Init( const key; keylen: longword);
+  procedure Final( out md:tsha256digest);
+end;
+
+{**** GZip DEFLATE ****}
+const
+  Z_NO_FLUSH=0; Z_PARTIAL_FLUSH=1; Z_SYNC_FLUSH=2; Z_FULL_FLUSH=3; Z_FINISH=4;
+  Z_BLOCK=5; Z_TREES=6; Z_OK=0; Z_STREAM_END=1; Z_NEED_DICT=2; Z_ERRNO=-1;
+  Z_STREAM_ERROR=-2; Z_DATA_ERROR=-3; Z_MEM_ERROR=-4; Z_BUF_ERROR=-5;
+  Z_VERSION_ERROR=-6; Z_NO_COMPRESSION=0; Z_BEST_SPEED=1; Z_BEST_COMPRESSION=9;
+  Z_DEFAULT_COMPRESSION=-1; Z_FILTERED=1; Z_HUFFMAN_ONLY=2; Z_RLE=3; Z_FIXED=4;
+  Z_DEFAULT_STRATEGY=0; Z_BINARY=0; Z_TEXT=1; Z_ASCII=Z_TEXT; Z_UNKNOWN=2;
+  Z_DEFLATED=8; ZLIB_VERSION:pchar='1.2.8';
+type tGZipContext = object
+  next_in: pointer;
+  avail_in: cuint;
+  total_in: culong;
+  next_out: pointer;
+  avail_out: cuint;
+  total_out: culong;
+  msg: pchar;
+  state: pointer;
+  alloc_func,zfree,opaque: pointer;
+  data_type: cint;
+  adler: culong;
+  reserved: culong;
+end;
+function deflateInit2_( var ctx: tGZipContext;
+  level, method, windowBits, memLevel, strategy: cint;
+  version: pchar; stream_size: cint ): cint;
+  cdecl; external name 'deflateInit2_';
+function deflate(var ctx: tGZipContext; flush: cint ): cint;
+  cdecl; external name 'deflate';
+function deflateEnd(var ctx: tGZipContext): cint;
+  cdecl; external name 'deflateEnd';
+function inflateInit2_(var ctx: tGZipContext; windowBits: cint;
+  version: pchar; stream_size: cint ): cint;
+  cdecl; external name 'inflateInit2_';
+function inflate(var ctx: tGZipContext; flush: cint): cint;
+  cdecl; external name 'inflate';
+function inflateEnd(var ctx: tGZipContext): cint;
+  cdecl; external name 'inflateEnd';
+type tGZip = object(tGZipContext)
+  eof: boolean;
+  procedure InitDeflate;
+  procedure Deflate;
+end;
+  
+
+implementation
+
+procedure BlockXOR(out r; const a; const b; len: longword);
+  var i:integer;
+  begin
+  for i:=0 to len-1
+    do byte((@r+i)^):=byte((@a+i)^) xor byte((@b+i)^);
+end;
+
+procedure SHA512_Buffer( out md: tKey64; const data; len:longword);
+  var ctx: tSHA512context;
+  begin
+  SHA512_Init( ctx);
+  SHA512_Update( ctx, data, len);
+  SHA512_Final( md, ctx)
+end;
+
+procedure SHA256_Buffer( out md; mdlen: word; const data; len:longword);
+  var ctx: tSHA256context;
+  var full: tSha256digest;
+  begin
+  SHA256_Init( ctx);
+  SHA256_Update( ctx, data, len);
+  if mdlen>=32
+  then SHA256_Final( tKey32(md), ctx)
+  else begin
+    SHA256_Final( full, ctx);
+    Move(full,md,mdlen);
+  end;
+end;
+
+procedure tSHA256.Init;
+  begin
+  SHA256_Init(ctx);
+end;
+
+procedure tSHA256.Update( const data; len: longword);
+  begin
+  SHA256_Update( ctx, data, len);
+end;
+
+procedure tSHA256.Final( out md:tsha256digest);
+  begin
+  SHA256_Final( md, ctx);
+end;
+
+procedure tSHA256.TruncFinal( out md; mdlen:LongWord);
+  var full: tSha256digest;
+  begin
+  SHA256_Final( full, ctx);
+  Move( full, md, mdlen);
+end;
+
+procedure tSHA256HMAC.Init( const key; keylen: longword);
+  var block: array [0..63] of byte;
+  begin
+  if keylen>64 then keylen:=64; {not standard but never used}
+  inherited Init; {SHA256_Init(ctx);}
+  SHA256_Init(outerctx);
+  FillChar(block,sizeof(block),$36);
+  BlockXOR(block,block,key,keylen);
+  SHA256_Update(ctx,block,sizeof(block));
+  FillChar(block,sizeof(block),$5C);
+  BlockXOR(block,block,key,keylen);
+  SHA256_Update(outerctx,block,sizeof(block));
+end;
+
+procedure tSHA256HMAC.Final( out md:tsha256digest);
+  begin
+  SHA256_Final(md, ctx);
+  SHA256_Update(outerctx, md, sizeof(md));
+  SHA256_Final(md, outerctx);
+end;
+
+procedure tAES.InitEnCrypt(const userKey; bits: integer);
+  begin AES_set_encrypt_key(userKey, bits, expanded) end;
+procedure tAES.InitDeCrypt(const userKey; bits: integer);
+  begin AES_set_decrypt_key(userKey, bits, expanded) end;
+procedure tAES.EnCryptECB(out outp; const inp);
+  begin AES_encrypt(inp, outp, expanded) end;
+procedure tAES.DeCryptECB(out outp; const inp);
+  begin AES_decrypt(inp, outp, expanded) end;
+
+procedure tAES.Wrap(out wrapped; const inp; len: longword; iv: pointer);
+  begin AES_wrap_key(expanded, iv, wrapped, inp, len) end;
+
+function  tAES.UnWrap(out unwrapped; const inp; len: longword; iv: pointer): boolean;
+  begin
+  result:= AES_wrap_key(expanded, iv, unwrapped, inp, len) >0;
+end;
+
+
+procedure tAES_FB.SetIV(const iv);
+  begin
+  Move(iv, feedback, 16);
+end;
+
+procedure tAES_FB.EnCryptCBC(out outp; const inp);
+  begin
+  BlockXOR(feedback, feedback, inp, 16);
+  AES_encrypt(feedback, outp, expanded);
+  Move(outp,feedback,16);
+end;
+  
+procedure tAES_FB.DeCryptCBC(out outp; const inp);
+  begin
+  Move(inp,feedback,16);
+  AES_decrypt(inp, outp, expanded);
+  BlockXOR(outp, outp, feedback, 16);
+end;
+
+procedure tAES_FB.EnCryptPCBC(out outp; const inp);
+  begin
+  BlockXOR(feedback, feedback, inp, 16);
+  AES_encrypt(feedback, outp, expanded);
+  BlockXOR(feedback, outp, inp, 16);
+end;
+
+procedure tAES_FB.DeCryptPCBC(out outp; const inp);
+  begin
+  AES_decrypt(inp, outp, expanded);
+  BlockXOR(outp, outp, feedback, 16);
+  BlockXOR(feedback, outp, inp, 16);
+end;
+
+procedure tAES_FB.EnCryptCFB(out outp; const inp);
+  begin
+  AES_encrypt(feedback, outp, expanded);
+  BlockXOR(outp, outp, inp, 16);
+  Move(outp,feedback,16);
+end;
+
+procedure tAES_FB.DeCryptCFB(out outp; const inp);
+  begin
+  AES_encrypt(feedback, outp, expanded);
+  BlockXOR(outp, outp, inp, 16);
+  Move(inp,feedback,16);
+end;
+
+procedure tGZip.InitDeflate;
+  var rv: integer;
+  begin
+  self.alloc_func:=nil;
+  self.zfree:=nil;
+  self.opaque:=nil;
+  rv:= deflateInit2_( self,
+    {level=}Z_BEST_COMPRESSION,
+    {method=}Z_DEFLATED,
+    {windowbits=}-15,
+    {memLevel=}9,
+    {strategy=}Z_DEFAULT_STRATEGY,
+    {version=}ZLIB_VERSION,{size=}sizeof(tGZipContext));
+  if rv<>Z_OK then raise eXception.Create('libz: '+self.msg);
+  eof:=false;
+  avail_in:=0;
+  avail_out:=0;
+end;
+
+procedure tGZip.Deflate;
+  var rv: integer;
+  var flush: integer;
+  begin
+  flush:=Z_NO_FLUSH;
+  if avail_in=0 then flush:=Z_FINISH;
+  if eof then raise eXception.Create('Deflate calld after STREAM_END');
+  rv:= crypto.deflate(self, flush);
+  if rv=Z_OK then eof:=false
+  else if (rv=Z_STREAM_END) and (flush=Z_FINISH) then eof:=true
+  else raise eXception.Create('libz: '+self.msg);
+end;
+
+end.
+{
+procedure ExpandKey(out keystruct: tBlowfishKey; const user_key; len: word);
+  begin
+  blowfish_key_setup(@user_key,@keystruct,len);
+end;
+procedure Encrypt(out chipertext; const plaintext; const key:TBLOWFISHKEY);
+  begin
+  blowfish_encrypt(@plaintext,@chipertext,@key);
+end;
+procedure Decrypt(out plaintext; const chipertext; const key:TBLOWFISHKEY);
+  begin
+  blowfish_decrypt(@chipertext,@plaintext,@key);
+end;
+procedure BlockXOR(out oup; const key; const len:word);
+  var i:byte;
+  begin
+  for i:=0 to len-1 do
+    byte((@oup+i)^):=byte((@oup+i)^) xor byte((@key+i)^);
+end;
+procedure EncryptCBC(out chipertext; const plaintext; const key:TBLOWFISHKEY; var fv);
+  begin
+  BlockXOR(fv,plaintext,8);
+  blowfish_encrypt(@fv,@chipertext,@key);
+  Move(chipertext,fv,8);
+end;
+procedure DecryptCBC(out plaintext; const chipertext; const key:TBLOWFISHKEY; var fv);
+  begin
+  blowfish_decrypt(@chipertext,@plaintext,@key);
+  BlockXOR(plaintext,fv,8);
+  Move(chipertext,fv,8);
+end;
+**** BZip2 ****
+const
+  BZ_RUN=0; BZ_FLUSH=1; BZ_FINISH=2; BZ_OK=0; BZ_RUN_OK=1; BZ_FLUSH_OK=2;
+  BZ_FINISH_OK=3; BZ_STREAM_END=4; BZ_SEQUENCE_ERROR=-1; BZ_PARAM_ERROR=-2;
+  BZ_MEM_ERROR=-3; BZ_DATA_ERROR=-4; BZ_DATA_ERROR_MAGIC=-5; BZ_IO_ERROR=-6;
+  BZ_UNEXPECTED_EOF=-7; BZ_OUTBUFF_FULL=-8; BZ_CONFIG_ERROR=-9;
+type tBZipContext = record
+  next_in: pointer;
+  avail_in: cuint;
+  total_in_lo32: cuint;
+  total_in_hi32: cuint;
+  next_out: pointer;
+  avail_out: cuint;
+  total_out_lo32: cuint;
+  total_out_hi32: cuint;
+  state: pointer;
+  bzalloc: pointer;
+  bzfree: pointer;
+  opaque: pointer;
+end;
+function BZ2_bzCompressInit(var strm: tBZipContext;
+  blockSize100k: cint; verbosity: cint; workFactor: cint ): cint;
+  cdecl; external name 'BZ2_bzCompressInit';
+function BZ2_bzCompress(var strm: tBZipContext; action: cint): cint;
+  cdecl; external name 'BZ2_bzCompress';
+function BZ2_bzCompressEnd(var strm: tBZipContext): cint;
+  cdecl; external name 'BZ2_bzCompressEnd';
+function BZ2_bzDecompressInit(var strm: tBZipContext;
+  verbosity: cint; small: cint ): cint;
+  cdecl; external name 'BZ2_bzDecompressInit';
+function BZ2_bzDecompress(var strm: tBZipContext; action: cint): cint
+  cdecl; external name 'BZ2_bzDecompress';
+function BZ2_bzDecompressEnd(var strm: tBZipContext): cint;
+  cdecl; external name 'BZ2_bzDecompressEnd';
+}

@@ -1,7 +1,7 @@
 {$mode objfpc}
 UNIT ed25519;
 INTERFACE
-uses ObjectModel,Sha512;
+uses ObjectModel,Crypto;
 
 type
  tPubKey=tKey32;
@@ -24,7 +24,6 @@ IMPLEMENTATION
 {$L alg/sign.o}
 {$L alg/verify.o}
 {$L alg/key_exchange.o}
-{$L alg/sha512.o}
 
 procedure ed25519_create_keypair(pub,priv,seed:pointer);
  cdecl;external;
@@ -59,15 +58,15 @@ end;
 function Verify(const signature:tSig; const message; len:LongWord; const pub:tPubKey):boolean;
  var hash:tSha512Context;
  begin
- Sha512Init(hash);
- Sha512Update(hash,message,len);
+ Sha512_Init(hash);
+ Sha512_Update(hash,message,len);
  result:=Verify2(hash,signature,pub);
  //assert(result=(ed25519_verify(@signature,@message,len,@pub)=1));
 end;
 
 function Verify1(var ctx:tSha512Context):boolean;
   begin
-  Sha512Init(ctx);
+  Sha512_Init(ctx);
   result:=true;
 end;
 function Verify2(var ctx:tSha512Context; const signature:tSig; const pub:tPubKey):boolean;
