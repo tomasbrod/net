@@ -171,6 +171,7 @@ type
     procedure Seek(absolute:LongWord); virtual;
     procedure Skip(dis:LongInt); virtual;
     procedure Read(out buf; cnt:Word); virtual;
+    procedure ReadAsMuch(out buf; var cnt:LongWord);
     procedure Write(const buf; cnt:word); virtual;
     function  Length:LongWord; virtual;
     function  Tell:LongWord; virtual;
@@ -254,6 +255,7 @@ function PtrListShiftRight(a: ppointer; max, i:longword): boolean;
 
 (*** Other ***)
 
+type eXception=SysUtils.eXception;
 type eInvalidMemStreamAccess=class(Exception)
   end;
 type eReadPastEoF=class(Exception)
@@ -858,6 +860,13 @@ constructor tFileStream.OpenHandle(const ihandle:tHandle);
 end;
 destructor tFileStream.Done;
   begin FileClose(handle); handle:=-1; end;
+procedure tFileStream.ReadAsMuch(out buf; var cnt:LongWord);
+  var rv:LongInt;
+  begin
+  rv:=FileRead(handle,buf,cnt);
+  if rv<0 then raise eInOutError.Create('File Read Error');
+  cnt:=rv;
+end;
 
 function SizeToString( v:LongWord):string;
   var f:LongWord;
