@@ -479,6 +479,7 @@ procedure MessageEncrypt;
   var hmac: tKey32;
   var i,count:integer;
   var gzc: tGZip;
+  var minleft: LongWord;
   var minbuf: array [1..2048] of byte;
   var mencr, mdefl: array [1..16] of byte;
   begin
@@ -495,13 +496,14 @@ procedure MessageEncrypt;
   keyring.Seek(8+6);
   keyring.Read(myKeyPub,32);
   SHA256_Buffer(myid,20,myKeyPub,32);
-  writeln('myID: ',string(myid));
+  writeln('myID: ':10,string(myid));
   keyring.Seek(first_sec_ofs+7);
   use:=char(keyring.ReadByte);
   keyring.Read(myKey,64);
   ed25519.CreateKeyPair(myKeyPub, myKey);
-  writeln('myKeyPub ',string(myKeyPub),' use=',use);
+  writeln('myKeyPub ':10,string(myKeyPub),' use=',use);
   GetOSRandom(@session,32);
+  writeln('sesk ':10,string(session));
   outmsg.Trunc(0);
   outmsg.Write(cMessageIdent,8);
   outmsg.Write(MyID,20);
@@ -515,9 +517,12 @@ procedure MessageEncrypt;
     writeln('rcpt prof ',paramstr(4+i));
     rfprof.OpenRO(paramstr(4+i));
     rprof.ReadFrom(rfprof,0);
-    writeln('rcpt encr ',string(rprof.encr_key));
+    writeln('rcpt ID ':10,string(rprof.profID));
+    writeln('rcpt encr ':10,string(rprof.encr_key));
     SharedSecret(shared, rprof.encr_key, myKey);
+    writeln('shared ':10,string(shared));
     SHA256_Buffer( kek, 32, shared, 32);
+    writeln('kek ':10,string(kek));
     exkek.InitEnCrypt(kek, 256);
     exkek.Wrap(wrapped, session, 32, nil);
     outmsg.Write(rprof.profid,20);
@@ -531,32 +536,31 @@ procedure MessageEncrypt;
   gzc.InitDeflate;
   gzc.avail_out:=sizeof(mdefl);
   gzc.next_out:=@mdefl;
-  writeln('hmacx, seskx and gzc initialized');
+  minleft:=inmsg.Length;
+  count:=0;
+  writeln('hmacx, seskx and deflate initialized');
   repeat
-    if gzc.avail_in=0 then begin
-      write('input buffer empty; ');
+    if (gzc.avail_in=0) and (minleft>0) then begin
       gzc.avail_in:=sizeof(minbuf);
       gzc.next_in:=@minbuf;
-      inmsg.ReadAsMuch(minbuf,gzc.avail_in);
+      if minleft<sizeof(minbuf) then gzc.avail_in:=minleft;
+      inmsg.Read(minbuf,gzc.avail_in);
       hmacx.Update(minbuf,gzc.avail_in);
-      writeln('read and hmac ',gzc.avail_in,'B');
+      minleft:=minleft-gzc.avail_in;
     end;
-    writeln(format('before: input used %d avail %d output used %d avail %d',
-      [gzc.next_in-pchar(@minbuf),gzc.avail_in,gzc.next_out-pchar(@mdefl),gzc.avail_out]));
     gzc.Deflate;
-    writeln(format('afterr: input used %d avail %d output used %d avail %d',
-      [gzc.next_in-pchar(@minbuf),gzc.avail_in,gzc.next_out-pchar(@mdefl),gzc.avail_out]));
-    if (gzc.avail_out=0) or gzc.eof then begin
-      write('output buffer full; ');
+    if (gzc.avail_out<16) and ((gzc.avail_out=0) or gzc.eof) then begin
+      if gzc.avail_out>0 then writeln('output buffer ',gzc.avail_out);
       seskx.EnCryptPCBC(mencr, mdefl);
       outmsg.Write(mencr, sizeof(mencr));
       gzc.avail_out:=sizeof(mdefl);
       gzc.next_out:=@mdefl;
-      writeln('encrypted written 16 compressed bytes');
+      inc(count);
     end;
   until gzc.eof;
-  writeln('end of compressed stream');
+  writeln('end of compressed stream, count=',count);
   hmacx.Final(hmac);
+  writeln('hmac ':10,string(hmac));
   outmsg.Write(hmac,sizeof(hmac));
   outmsg.Done;
 end;
