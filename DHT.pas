@@ -611,6 +611,7 @@ function tSearch.AddNode(const iID:tPID; const iAddr:tNetAddr) :integer;
   var tpfl,idx,j:byte;
   begin
   assert(not iAddr.isNil,'AddNode with nil address');
+  if iID=MyID then exit;
   idx:=0; result:=-1;
   tpfl:=PrefixLength(iid,Target);
   {write('dhtLookup.AddPeer@',string(@self),' tpfl=',tpfl,' addr=',string(iaddr));}
