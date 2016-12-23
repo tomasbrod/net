@@ -121,6 +121,7 @@ procedure Shedule(timeout{ms}: LongWord; h:tOnTimer);
   pp:=@ShedTop;
   while assigned(c) do begin
     if c^.time>timeout then break;
+    pp:=@c^.next;
     c:=c^.next;
   end;
   if Assigned(ShedUU) then begin
@@ -158,7 +159,7 @@ procedure Timer;
   {Sheduling}
   mNow:=GetMTime;
   cur:=ShedTop;
-  if assigned(cur) then begin
+  while assigned(cur) do begin
     delta:=cur^.time-mNow;
     if delta<=0 then begin
       ShedTop:=cur^.next;
@@ -167,7 +168,9 @@ procedure Timer;
       cur^.cb;
     end else begin
       if delta<PollTimeout then PollTimeout:=delta;
+      break;
     end;
+    cur:=ShedTop;
   end;
 end;
 
@@ -465,7 +468,6 @@ BEGIN
  writeln('ServerLoop: ','BrodNetD',' ',GIT_VERSION);
  if OptIndex('-h')>0 then DoShowOpts:=true;
  InitConfig;
- mNow:=0;
  Randomize;
  fpSignal(SigInt,@SignalHandler);
  fpSignal(SigTerm,@SignalHandler);
@@ -476,6 +478,8 @@ BEGIN
  ShedTop:=nil;
  ShedUU:=nil; {todo: allocate a few to improve paging}
  InitMTime;
+ mNow:=GetMTime;
+ writeln('MTimE=',mnow);
  OnTerminate:=nil;
  //SetTextBuf(OUTPUT,nb);
  Flush(OUTPUT);
