@@ -266,11 +266,13 @@ type eFileNotFound=class(eInOutError)
   end;
 
 function ConvertFamily( a:tFamily ): sa_family_t;
+procedure SC(fn:pointer; retval:longint);
 
 IMPLEMENTATION
 uses
    Porting
   ,StrUtils
+  ,Errors
   ;
 
 {*** MemStram ***}
@@ -317,6 +319,19 @@ operator :=(a:string) r:tKey32;
   begin
   if HexToBin(@a[1],pchar(@r),32)<32 then raise
   eConvertError.Create('Invalid Hex String');
+end;
+
+procedure SC(fn:pointer; retval:longint);
+  var opn:string;
+  begin
+  if retval < 0 then begin
+    if fn=pointer(@fpsocket) then opn:='socket'
+    else if fn=pointer(@fpsetsockopt) then opn:='setsockopt'
+    else if fn=pointer(@fpsendto) then opn:='sendto'
+    else if fn=pointer(@fprecvfrom) then opn:='recvfrom'
+    else opn:=Format('operation %P',[fn]);
+    raise eXception.Create(opn+':'+StrError(SocketError));
+  end;
 end;
 
 procedure tMemoryStream.Seek(absolute:LongWord);
