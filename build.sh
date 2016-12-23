@@ -6,14 +6,12 @@ mkdir -p bin
 gitver=$(git describe --always --long --dirty --abbrev=16 --tags || true)
 echo Git version: $gitver
 
-#create gitver.pas
-echo "unit gitver; interface
-var GIT_VERSION:string='$gitver';
-implementation end." >gitver.pas
+#create gitver.inc
+echo "const GIT_VERSION='$gitver';" >gitver.inc
 
 make -C alg
 fpc @fpopt.cfg brodnetd.pas
 fpc @fpopt.cfg bnedit.pas
-#fpc @fpopt.cfg bnmut.pas
 fpc @fpopt.cfg bnc.pas
-ln -f -t ./ bin/brodnetd bin/bnedit bin/bnc
+
+echo Built version: $gitver

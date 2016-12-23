@@ -7,9 +7,10 @@ program bnedit;
   bnedit host host-key.dat : generate host key or renew PoW
 *)
 
-USES Profile,ObjectModel,SysUtils,DateUtils,ed25519,Crypto,gitver;
+USES Profile,ObjectModel,SysUtils,DateUtils,ed25519,Crypto;
 
-{$linklib c}
+{$LINKLIB c}
+{$INCLUDE gitver.inc}
 
 const
   cCertKeyIdent:array [1..8] of char='BNCertS'#26;

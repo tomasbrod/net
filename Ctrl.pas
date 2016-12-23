@@ -54,9 +54,8 @@ procedure Terminate(var client:tClient; var a,r:tMemoryStream);
 end;
 
 procedure GetInfo(var client:tClient; var a,r:tMemoryStream);
- const ident:string='xD ' unimplemented;
  begin
- r.Write(ident[1],length(ident));
+ r.Write(VersionString[1],length(VersionString));
  //r.Write(VersionString[1],length(VersionString));
  r.WriteByte(0);
 end;

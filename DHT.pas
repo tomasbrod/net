@@ -87,7 +87,7 @@ function GetDhtTable:tBucket_ptr;
 
 
 IMPLEMENTATION
-uses opcode,gitver,sysutils;
+uses opcode,sysutils;
 
 const
   crdRecvd=0;           {ReqDelta set on message reception}
@@ -393,7 +393,7 @@ procedure SendCheck(var p:tPeer);
   r.Write(HostKey.PublicKey,sizeof(HostKey.PublicKey));
   r.Write(HostKey.PublicPoW,sizeof(HostKey.PublicPoW));
   r.Write(p.Challenge,sizeof(tEccKey));
-  r.Write(GIT_VERSION[1],Length(GIT_VERSION));
+  r.Write(VersionString[1],Length(VersionString));
   writeln('DHT.SendCheck: to ',string(p.addr),' ',r.length,'B');
   SendMessage(r.base^,r.length,p.Addr);
   r.Free;
@@ -427,7 +427,7 @@ procedure RecvCheckQ(msg:tSMsg);
   r.Write(HostKey.PublicKey,sizeof(HostKey.PublicKey));
   r.Write(HostKey.PublicPoW,sizeof(HostKey.PublicPoW));
   r.Write(right_resp,sizeof(right_resp));
-  r.Write(GIT_VERSION[1],Length(GIT_VERSION));
+  r.Write(VersionString[1],Length(VersionString));
   writeln('DHT.CheckQ: responding to ',string(msg.source),' ',r.length,'B');
   SendMessage(r.base^,r.length,msg.source);
   r.Free;

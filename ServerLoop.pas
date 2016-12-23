@@ -5,6 +5,8 @@ uses ObjectModel,UnixType,Sockets;
 
 procedure Main;
 procedure RequestTerminate(c:byte);
+var OnTerminate:procedure;
+var VersionString:AnsiString;
 
 {#Message handling#}
 type tSMsg=object
@@ -40,8 +42,6 @@ procedure UnShedule(h:tOnTimer);
 function OptIndex(o:string):word;
 function OptParamCount(o:word):word;
 
-var OnTerminate:procedure;
-
 type tTimeVal=UnixType.timeval;
 type tMTime=DWORD;
 var iNow:tTimeVal;
@@ -61,7 +61,6 @@ IMPLEMENTATION
 USES SysUtils,BaseUnix
      ,Unix
      ,Porting
-     ,gitver
      ;
 
 (**** Terminate and Signals ****)
@@ -463,9 +462,12 @@ begin{$NOTE Custom thread mames not supported}
 end;
 {$ENDIF}
 
+{$INCLUDE gitver.inc}
+
 (**** Unit Initialization ****)
 BEGIN
- writeln('ServerLoop: ','BrodNetD',' ',GIT_VERSION);
+ VersionString:='BrodNetD'+' '+GIT_VERSION;
+ writeln('ServerLoop: ',VersionString);
  if OptIndex('-h')>0 then DoShowOpts:=true;
  InitConfig;
  Randomize;

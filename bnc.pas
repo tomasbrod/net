@@ -4,6 +4,7 @@ USES ObjectModel,SockStream,SysUtils,Sockets,BaseUnix;
 {BrodNet CLI programs}
 {bncmd communicate with daemon}
 {bnedit wiev/edit all types of brodnet files}
+{$INCLUDE gitver.inc}
 
 var sck:tSocketStream;
 procedure InitUnix;
@@ -122,6 +123,7 @@ procedure cmdINFO;
   req.WriteWord2(00);
   aSend;aRecv;
   Writeln(res.ReadStringAll);
+  Writeln('bnc  is  ',GIT_VERSION);
 end;
 
 procedure cmdSTOP;
