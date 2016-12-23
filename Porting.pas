@@ -5,7 +5,7 @@ function po_unixtimenow:Int64; inline;
 procedure po_monotonicnanoclocks(out seconds:Int64; out nano:LongWord);
 
 IMPLEMENTATION
-uses CTypes,BaseUnix;
+uses CTypes,BaseUnix,Syscall;
 
 function po_unixtimenow:Int64;
   begin
@@ -23,8 +23,9 @@ Const
   CLOCK_MONOTONIC_COARSE          = 6;
 
 function clock_gettime(clk_id : cint; tp: ptimespec) : cint;
-  cdecl; external name 'clock_gettime';
-{$LINKLIB c}
+begin
+  clock_gettime:=do_SysCall(syscall_nr_clock_gettime,tsysparam(clk_id),tsysparam(tp));
+end;
 
 procedure po_monotonicnanoclocks(out seconds:Int64; out nano:LongWord);
   var time:timespec;
