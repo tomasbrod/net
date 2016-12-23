@@ -1,7 +1,7 @@
 Unit CTRL;
 INTERFACE
 IMPLEMENTATION
-{$undef ctlDHT}
+{$define ctlDHT}
 {$define ctlStore}
 {$undef ctlMutable}
 {$define ctlFetch}
@@ -10,7 +10,7 @@ USES ServerLoop,opcode
     ,Sockets,BaseUnix
     ,SysUtils
     ,Crypto
-    {$ifdef ctlDHT},dht,dhtLookup{$endif}
+    {$ifdef ctlDHT},dht{$endif}
     ,Store2
     {$ifdef ctlMutable},Mutable{$endif}
     {$ifdef ctlFetch},Fetch{$endif}

@@ -250,6 +250,18 @@ procedure cmdFETCH;
   readln;
 end;
 
+procedure cmdPEER;
+  var st:byte;
+  begin
+  if paramcount<>2 then errParams;
+  req.WriteWord2(02);
+  req.Write(tNetAddr(paramstr(2)),18);
+  aSend; aRecv; st:=res.ReadByte;
+  if st=0 then begin
+    writeln('ok');
+  end else writeln('error ',st);
+end;
+
 BEGIN
   if paramcount<1 then ErrParams;
   req.Init(4096);
@@ -259,6 +271,7 @@ BEGIN
   case upcase(paramstr(1)) of
     'INFO'  : cmdINFO;
     'STOP'  : cmdSTOP;
+    'ADDPEER'  : cmdPEER;
     {'PUTCP' : cmdPUT_local(0);}
     'PUTLN' : cmdPUT_local(1);
     'PUTMV' : cmdPUT_local(2);
