@@ -153,7 +153,7 @@ end;
 
 procedure Timer;
   var cur:^tSheduled;
-  var delta:LongWord;
+  var delta:LongInt;
   begin
   {Sheduling}
   mNow:=GetMTime;
