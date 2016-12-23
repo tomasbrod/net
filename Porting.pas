@@ -24,6 +24,7 @@ Const
 
 function clock_gettime(clk_id : cint; tp: ptimespec) : cint;
   cdecl; external name 'clock_gettime';
+{$LINKLIB c}
 
 procedure po_monotonicnanoclocks(out seconds:Int64; out nano:LongWord);
   var time:timespec;
