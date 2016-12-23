@@ -8,14 +8,14 @@ procedure RequestTerminate(c:byte);
 
 {#Message handling#}
 type tSMsg=object
- Source: tNetAddr;
- Length: {Long}Word;
- Data: pointer;
- st: tMemoryStream;
- channel: word;
- ttl: word;
- OP: byte;
- end;
+   Source: tNetAddr;
+   Length: {Long}Word;
+   Data: pointer;
+   st: tMemoryStream;
+   channel: word;
+   ttl: word;
+   OP: byte;
+  end;
 type tMessageHandler=procedure(msg:tSMsg);
 type tObjMessageHandler=procedure(msg:tSMsg) of object;
 procedure SetupOpcode(OpCode:byte; handler:tMessageHandler);
@@ -23,7 +23,6 @@ procedure NewMsgTr(out ID:Word; handler:tObjMessageHandler);
 procedure SetMsgTr(ID:Word; handler:tObjMessageHandler);
 //procedure DelMsgTr(ID:Word);
 
-function GetSocket(const rcpt:tNetAddr):tSocket;
 procedure SendMessage(const data; len:word; const rcpt:tNetAddr );
 {procedure SendReply(const data; len:word; const rcpt:tSMsg );}
 procedure SendMessage(const data; len:word; const rcpt:tNetAddr; channel:word );
@@ -33,6 +32,7 @@ type tFDEventHandler=procedure(ev:Word) of object;
 type tOnTimer=procedure of object;
 procedure WatchFD(fd:tHandle; h:tFDEventHandler);
 procedure WatchFDRW(fd:tHandle; h:tFDEventHandler);
+
 procedure Shedule(timeout{ms}: LongWord; h:tOnTimer);
 procedure UnShedule(h:tOnTimer);
  {note unshed will fail when called from OnTimer proc}
@@ -45,10 +45,11 @@ var OnTerminate:procedure;
 type tTimeVal=UnixType.timeval;
 type tMTime=DWORD;
 var iNow:tTimeVal;
-var mNow:tMTime; { miliseconds since start }
-                  {overflows in hunderd hours }
+var mNow:tMTime;
 function GetMTime:tMTime;
+
 procedure SetThreadName(name:pchar);
+function GetSocket(const rcpt:tNetAddr):tSocket;
 procedure SC(fn:pointer; retval:cint);
 
 function GetCfgStr(name:pchar):String;
@@ -60,12 +61,48 @@ IMPLEMENTATION
 
 USES SysUtils,BaseUnix
      ,Unix
-     ,Linux
+     ,Porting
      ,gitver
      ;
 
+(**** Terminate and Signals ****)
 
-{aim for most simple implementation, since could be extended anytime}
+var Terminated:boolean=false;
+var ReExec:boolean=false;
+procedure SignalHandler(sig:cint);CDecl;
+ begin
+  writeln;
+  if terminated then raise eControlC.Create('CtrlC DoubleTap') ;
+  Terminated:=true;
+ end;
+procedure FatalSignalHandler(sig:cint);CDecl;
+  begin
+  raise eExternal.Create('Unexpected Signal '+IntToStr(sig)) ;
+  Terminated:=true;
+end;
+procedure RequestTerminate(c:byte);
+begin Terminated:=true;
+  if c=9 then ReExec:=true;
+end;
+
+(**** Time Tracking ****)
+
+var GetMTimeOffsetSec:Int64=0;
+
+function GetMTime:tMTime;
+  var sec:Int64;
+  var mil:LongWord;
+  begin
+  po_monotonicnanoclocks(sec,mil);
+  GetMTime:= ((sec-GetMTimeOffsetSec)*1000 + (mil div 1000000)) and $FFFFFFFF;
+end;
+procedure InitMTime;
+  var mil:LongWord;
+  begin
+  po_monotonicnanoclocks(GetMTimeOffsetSec,mil);
+end;
+
+
 
 var s_inet:tSocket;
 
@@ -109,7 +146,6 @@ procedure SC(fn:pointer; retval:cint);
 procedure s_SetupInet;
  var bind_addr:tInetSockAddr;
  var turnon:cint;
- var oi:word;
  begin
   with bind_addr do begin
    sin_family:=AF_INET;
@@ -127,8 +163,6 @@ procedure s_SetupInet;
    revents:=0;
   end;
  end;
-
-var Terminated:boolean=false;
 
 function GetSocket(const rcpt:tNetAddr):tSocket;
  begin
@@ -150,17 +184,6 @@ procedure SendMessage(const data; len:word; const rcpt:tNetAddr; channel:word );
  {todo: optimization??}
 end;
 
-procedure SignalHandler(sig:cint);CDecl;
- begin
-  writeln;
-  if terminated then raise eControlC.Create('CtrlC DoubleTap') ;
-  Terminated:=true;
- end;
-procedure FatalSignalHandler(sig:cint);CDecl;
-  begin
-  raise eExternal.Create('Unexpected Signal '+IntToStr(sig)) ;
-  Terminated:=true;
-end;
 
 (*** Extended message delegation ***)
 
@@ -223,26 +246,6 @@ procedure Reciever(var p:tPollFD);
   end;
 end;
 
-var GetMTimeOffsetSec:DWORD=0;
-function GetMTime:tMTime;
- {$IFDEF UNIX}
- var time:UnixType.timespec;
- var trans:QWORD;
- begin
- assert(clock_gettime(CLOCK_MONOTONIC,@time)=0);
- trans:=((time.tv_sec-GetMTimeOffsetSec)*1000)+(time.tv_nsec div 1000000);
- GetMTime:=trans and $FFFFFFFF;
- {$ELSE}{$ERROR Not Implemented on non unix}
- begin GetMTime:=0;
-{$ENDIF}end;
-procedure InitMTime; {$IFDEF UNIX}
- var time:UnixType.timespec;
- begin
- assert(clock_gettime(CLOCK_MONOTONIC,@time)=0);
- GetMTimeOffsetSec:=time.tv_sec;
- {$ELSE}{$ERROR Not Implemented on non unix}
- begin
-{$ENDIF}end;
 
 {$IFDEF Linux}
 function prctl( option:cint; arg2,arg3,arg4,arg5:culong):cint; cdecl; external;
@@ -301,7 +304,6 @@ procedure Timer;
  end;
 end;
 
-var ReExec:boolean=false;
 procedure Main;
  begin
  s_setupInet;
@@ -414,10 +416,6 @@ function OptParamCount(o:word):word;
   if paramstr(i)[1]<>'-' then inc(result)
   else break;
  end;
-end;
-procedure RequestTerminate(c:byte);
-begin Terminated:=true;
-  if c=9 then ReExec:=true;
 end;
 
 var ConfigFile:tConfigFile;

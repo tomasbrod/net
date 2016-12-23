@@ -269,8 +269,7 @@ function ConvertFamily( a:tFamily ): sa_family_t;
 
 IMPLEMENTATION
 uses
-  {$IFDEF UNIX}BaseUnix
-  {$ELSE}DateUtils{$ENDIF}
+   Porting
   ,StrUtils
   ;
 
@@ -632,11 +631,7 @@ end;
 
 function UnixNow:Int64;
   begin
-  {$IFDEF UNIX}
-  fpTime(result);
-  {$ELSE}
-  result:=DateTimeToUnix(SysUtils.Now);
-  {$ENDIF}
+  result:=po_unixtimenow;
 end;
 
 const cLocalHostIP4:Sockets.tInAddr=( s_bytes:(127,0,0,1) );
