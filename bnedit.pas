@@ -7,7 +7,7 @@ program bnedit;
   bnedit host host-key.dat : generate host key or renew PoW
 *)
 
-USES Profile,ObjectModel,SysUtils,DateUtils,ed25519,Crypto;
+USES Profile,Message,ObjectModel,SysUtils,DateUtils,ed25519,Crypto;
 
 {$LINKLIB c}
 {$INCLUDE gitver.inc}
@@ -18,7 +18,6 @@ const
   cLoginIdent:array [1..8] of char='BNLogin'#26;
   cSecretIdent:array [1..8] of char='BNSecKs'#26;
   cHostIdent:array [1..8] of char='BNHosSW'#26;
-  cMessageIdent:array [1..8] of char='BNMesag'#26;
 
 const helphint='Run bnedit without parameters to get help.';
 
@@ -102,6 +101,26 @@ procedure ShowHostKeyID(var pfs:tFileStream);
   writeln('ID:  ',string(id));
 end;
 
+procedure DumpMessage(var txt:text; var pfs:tFileStream);
+  var m:tMessageRead;
+  var i:integer;
+  var s:string[9]='XXXXXX...';
+  begin
+  pfs.Seek(0);
+  m.ReadFrom(pfs,0);
+  Writeln('SenderID:  ',string(m.SenderID));
+  writeln('sender_encr_key: ',string(m.sender_encr_key));
+  Writeln('Created: ',UnixTimeToStr(m.created),' UTC');
+  Writeln('Expires: ',UnixTimeToStr(m.expires),' UTC');
+  Writeln('Flags: ',m.flags);
+  for i:=0 to m.cRcpts-1 do begin
+    Writeln('Recipient: ',string(m.rcpts[i].id));
+    BinToHex(@s[1],m.rcpts[i].prefix,3);
+    writeln('  priority=',m.rcpts[i].priority, ' key=',s);
+  end;
+  m.Done;
+end;
+
 procedure DisplayInfoAboutFile(whatfile:string);
   var s:tFileStream;
   var ident:packed array [1..8] of char;
@@ -116,6 +135,10 @@ procedure DisplayInfoAboutFile(whatfile:string);
   if CompareByte(ident,Profile.cMagic,7)=0 then begin
     writeln(whatfile,': BrodNet Profile v',byte(ident[8]));
     DumpProfile(stdout,s);
+  end else
+  if CompareByte(ident,Message.cMagic,8)=0 then begin
+    writeln(whatfile,': BrodNet Message');
+    DumpMessage(stdout,s);
   end else
   if CompareByte(ident,tokyoident,8)=0 then begin
     writeln(whatfile,': Tokyo Cabinet database file');
@@ -465,108 +488,152 @@ procedure EditProfile;
   writeln('Changes Saved.');
 end;
 
-procedure MessageEncrypt;
-  var keyring, outmsg, inmsg, rfprof:tFileStream;
-  var myID : tKey20;
-  var myKey: tKey64;
-  var myKeyPub: tkey32;
-  var use: char;
-  var session, shared, kek: tkey32;
-  var exkek: tAES;
-  var wrapped: array [1..40] of byte;
-  var rprof: tProfileRead;
-  var hmacx: tSHA256HMAC;
-  var seskx: tAES_FB;
-  var hmac: tKey32;
-  var i,count:integer;
+procedure MessageEncryptData(
+      var inp: tCommonStream;
+      var outp: TCommonStream;
+      var seskx: tAES_FB;
+      var hmacx: tSHA256 );
   var gzc: tGZip;
   var minleft: LongWord;
   var minbuf: array [1..2048] of byte;
   var mencr, mdefl: array [1..16] of byte;
   begin
-  writeln('WIP message encrypt');
-  writeln('keyring '+paramstr(2));
-  keyring.OpenRO(paramstr(2));
-  writeln('outmsg '+paramstr(3));
-  outmsg.OpenRW(paramstr(3));
-  writeln('inmsg '+paramstr(4));
-  inmsg.OpenRO(paramstr(4));
-  count:=ParamCount-4;
-  writeln('rcpt_count ',count);
-  {read ID and latest enck from keyring}
-  keyring.Seek(8+6);
-  keyring.Read(myKeyPub,32);
-  SHA256_Buffer(myid,20,myKeyPub,32);
-  writeln('myID: ':10,string(myid));
-  keyring.Seek(first_sec_ofs+7);
-  use:=char(keyring.ReadByte);
-  keyring.Read(myKey,64);
-  ed25519.CreateKeyPair(myKeyPub, myKey);
-  writeln('myKeyPub ':10,string(myKeyPub),' use=',use);
-  GetOSRandom(@session,32);
-  writeln('sesk ':10,string(session));
-  outmsg.Trunc(0);
-  outmsg.Write(cMessageIdent,8);
-  outmsg.Write(MyID,20);
-  outmsg.Write(MyKeyPub,32);
-  outmsg.WriteWord6(UnixNow);
-  outmsg.WriteByte(count);
-  outmsg.WriteByte(0);
-  {} {decide: default encrypt to self?}
-  if count<=0 then raise exception.create('required at least one recipient');
-  for i:=1 to count do begin
-    writeln('rcpt prof ',paramstr(4+i));
-    rfprof.OpenRO(paramstr(4+i));
-    rprof.ReadFrom(rfprof,0);
-    writeln('rcpt ID ':10,string(rprof.profID));
-    writeln('rcpt encr ':10,string(rprof.encr_key));
-    SharedSecret(shared, rprof.encr_key, myKey);
-    writeln('shared ':10,string(shared));
-    SHA256_Buffer( kek, 32, shared, 32);
-    writeln('kek ':10,string(kek));
-    exkek.InitEnCrypt(kek, 256);
-    exkek.Wrap(wrapped, session, 32, nil);
-    outmsg.Write(rprof.profid,20);
-    outmsg.Write(rprof.encr_key,7);
-    outmsg.WriteByte(69);
-    outmsg.Write(wrapped,40);
-  end;
-  hmacx.Init(session,32);
-  seskx.InitEnCrypt(session, 256);
-  seskx.SetIV(MyID); {!?}
+  FillChar(seskx.feedback,16,0);
   gzc.InitDeflate;
   gzc.avail_out:=sizeof(mdefl);
   gzc.next_out:=@mdefl;
-  minleft:=inmsg.Length;
-  count:=0;
-  writeln('hmacx, seskx and deflate initialized');
+  minleft:=inp.Length;
   repeat
     if (gzc.avail_in=0) and (minleft>0) then begin
       gzc.avail_in:=sizeof(minbuf);
       gzc.next_in:=@minbuf;
       if minleft<sizeof(minbuf) then gzc.avail_in:=minleft;
-      inmsg.Read(minbuf,gzc.avail_in);
+      inp.Read(minbuf,gzc.avail_in);
       hmacx.Update(minbuf,gzc.avail_in);
       minleft:=minleft-gzc.avail_in;
     end;
     gzc.Deflate;
-    if (gzc.avail_out<16) and ((gzc.avail_out=0) or gzc.eof) then begin
-      if gzc.avail_out>0 then writeln('output buffer ',gzc.avail_out);
+    if gzc.eof then begin
+      FillChar(gzc.next_out,gzc.avail_out,0);
+      gzc.avail_out:=0;
+    end;
+    if gzc.avail_out=0 then begin
       seskx.EnCryptPCBC(mencr, mdefl);
-      outmsg.Write(mencr, sizeof(mencr));
+      outp.Write(mencr, sizeof(mencr));
       gzc.avail_out:=sizeof(mdefl);
       gzc.next_out:=@mdefl;
-      inc(count);
     end;
   until gzc.eof;
-  writeln('end of compressed stream, count=',count);
-  hmacx.Final(hmac);
-  writeln('hmac ':10,string(hmac));
-  outmsg.Write(hmac,sizeof(hmac));
-  outmsg.Done;
 end;
-  
-  
+
+procedure MessageEncrypt;
+
+  var myID : tKey20;
+  var myKey: tKey64;
+  var myKeyPub: tkey32;
+
+  procedure LoadKeyring;
+    var keyring :tFileStream;
+    var use:char;
+    begin
+    {read ID and latest enck from keyring}
+    keyring.OpenRO(paramstr(2));
+    keyring.Seek(8+6);
+    keyring.Read(myKeyPub,32);
+    SHA256_Buffer(myid,20,myKeyPub,32);
+    writeln('myID: ':10,string(myid));
+    keyring.Seek(first_sec_ofs+7);
+    use:=char(keyring.ReadByte);
+    keyring.Read(myKey,64);
+    ed25519.CreateKeyPair(myKeyPub, myKey);
+    writeln('myKeyPub ':10,string(myKeyPub),' use=',use);
+    keyring.Done;
+  end;
+
+  var kek: array of tKey32;
+  var session: tkey32;
+  var outmsg: tFileStream;
+  var hash: tSHA256;
+
+  procedure LoadRecipients;
+    var ob: tMemoryStream;
+    var i,count:integer;
+    var rfprof:tFileStream;
+    var rprof: tProfileRead;
+    var tmp: tkey32;
+    var wrap: array [1..40] of byte;
+    var exkek: tAES;
+    begin
+    count:=ParamCount-4;
+    SetLength(kek,count);
+    ob.Init(72+(64*count));
+    ob.Write(Message.cMagic,8);
+    ob.Write(MyID,20);
+    ob.Write(MyKeyPub,32);
+    ob.WriteWord6(UnixNow);
+    ob.WriteByte(count);
+    ob.WriteByte(0); {flags}
+    ob.WriteWord4(1209600); {expire}
+    for i:=0 to count-1 do begin
+      writeln('rcpt prof ',paramstr(5+i));
+      rfprof.OpenRO(paramstr(5+i));
+      rprof.ReadFrom(rfprof,0);
+      rfprof.Done;
+      writeln('rcpt ID ':10,string(rprof.profID),' ',rprof.Nick);
+      writeln('rcpt encr ':10,string(rprof.encr_key));
+      SharedSecret(tmp, rprof.encr_key, myKey);
+      SHA256_Buffer( kek[i], 32, tmp, 32);
+      writeln('kek ':10,string(kek[i]));
+      exkek.InitEnCrypt(kek, 256);
+      exkek.Wrap(wrap, session, 32, nil);
+      ob.Write(rprof.profid,20);
+      ob.Write(rprof.encr_key,3);
+      ob.WriteByte(69); {priority}
+      ob.Write(wrap,40);
+    end;
+    hash.Update(ob.base^, ob.vlength);
+    outmsg.Write(ob.base^, ob.vlength);
+  end;
+
+  procedure WriteMAC;
+    var i: integer;
+    var h1, h2: tKey32;
+    var hc: tSHA256;
+    begin
+    hash.Final(h1);
+    writeln('hash ':10,string(h1));
+    for i:=0 to high(kek) do begin
+      hc.Init;
+      hc.Update(kek[i],32);
+      hc.Update(h1,32);
+      hc.Final(h2);
+      outmsg.Write(h2,32);
+    end;
+  end;
+
+  var inmsg: tFileStream;
+  var seskx: tAES_FB;
+
+  begin
+  writeln('WIP message encrypt');
+  writeln('inmsg '+paramstr(4));
+  inmsg.OpenRO(paramstr(4));
+  writeln('outmsg '+paramstr(3));
+  outmsg.OpenRW(paramstr(3));
+  outmsg.Trunc(0);
+  writeln('keyring '+paramstr(2));
+  LoadKeyring;
+  GetOSRandom(@session,32);
+  writeln('session: ':10,string(session));
+  hash.InitWithKey(session,32,$36);
+  seskx.InitEnCrypt(session, 256);
+  LoadRecipients;
+  MessageEncryptData( inmsg, outmsg, seskx, hash);
+  WriteMAC;
+  outmsg.Done;
+  inmsg.Done;
+end;
+
 
 const eoln=LineEnding;
 const helptext:ansistring
