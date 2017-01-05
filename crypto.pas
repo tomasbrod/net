@@ -34,6 +34,7 @@ type tSHA256 = object
   procedure Update( const data; len: longword);
   procedure Final( out md:tsha256digest);
   procedure TruncFinal( out md; mdlen: longword );
+  procedure InitWithKey( const data; len: longword; pad: byte);
 end;
 procedure SHA256_Buffer( out md; mdlen: word; const data; len:longword);
 
@@ -205,6 +206,16 @@ end;
 procedure tSHA256.Init;
   begin
   SHA256_Init(ctx);
+end;
+
+procedure tSha256.InitWithKey( const data; len: longword; pad: byte);
+  var block: array [0..63] of byte;
+  begin
+  if len>64 then len:=64;
+  SHA256_Init(ctx);
+  FillChar(block,sizeof(block),pad);
+  BlockXOR(block,block,data,len);
+  SHA256_Update(ctx,block,sizeof(block));
 end;
 
 procedure tSHA256.Update( const data; len: longword);
