@@ -1,122 +1,134 @@
 UNIT ProfCache;
 {
-
+  Associate profile ID to latest profile Object.
+  Manage profile refcounts.
+  Delete unused profiles.
 }
 {
   unit ProfCache  (store)
   unit ProfUpdate (search and fetch and publish)
-  unit Profile    (read (write?) profile files)
+  unit Profile    (read and write profile files)
 }
 
 INTERFACE
-USES MemStream,NetAddr,Store2;
+USES ObjectModel,Store2,Profile;
 type tFID=Store2.tFID;
-     tProfileID=tFID;
-     tProfID=tFID;
-const cProfDir=4;
+     tProfileID=tKey20;
+     tProfID=tProfileID;
 
-{result = profile file valid}
-function SetProf( var so:tStoreObject; out id: tProfileID ): boolean;
-function SetProf( var so:tStoreObject; out ID: tProfileID; out Ver: LongWord ): boolean;
-{result = found}
-function GetProf( id: tFID; out FID: tFID; out Ver: LongWord ): boolean;
-function GetProf( id: tFID; out FID: tFID         ): boolean;
-function GetProf( id: tFID; out so:  tStoreObject ): boolean; experimental;
+{
+set v*
+get v*
+Query handler
+lookup object
+---
+refcounting
+auto publish
+auto update
+}
+
+function GetProf( id: tProfID; out FID: tFID; out Ver: Int64 ): boolean;
+function GetProf( id: tProfID; out FID: tFID         ): boolean;
+
+procedure SetProf( var so: tStoreObject; const p: tProfileRead );
 
 IMPLEMENTATION
-USES sha512,ed25519,SysUtils,Profile,Database;
+USES SysUtils,Database,ServerLoop,DHT,opcode;
 
-function GetProf( id: tFID; out FID: tFID; out Ver: LongWord ): boolean;
+function GetProf( id: tFID; out FID: tFID; out Ver: Int64 ): boolean;
   begin
   result:=false;
-  with dbGet(cProfDir,id,20) do if Length>0 then begin
+  with dbGet(dbProfile,id,20) do if Length>0 then begin
     Read(FID,20);
-    Ver:=ReadWord4;
+    Ver:=ReadWord6;
     result:=true;
     Free;
   end;
 end;
 
-function SetMutable( var so:tStoreObject; out ID: tProfileID; out Ver: LongWord ): boolean;
-  {no-op if same file ID}
-  {full parse of profile file using Profile to validate format}
-  var de:tProfileRead;
-  var pubkey:tKey32;
-  var isold:boolean;
-  var OldFid:tFID;
-  var OldVer,NewVer,hbs:LongWord;
-  var buf:array [0..511] of byte;
-  var hash:tSha512context;
-  var signature:tKey64 absolute buf;
-  var meta:tMutableMeta absolute buf;
-  var pID:tFID absolute meta.fid;
-  var f:file of tMutableMeta;
+function GetProf( id: tProfID; out FID: tFID         ): boolean;
+  var tmp:int64;
   begin
-  result:=false;
-  de.Init; de.blk:=@so; de.Init2;
-  de.Select(pfLogin);
-  de.Read(Pubkey,32);
-  de.Read(NewVer,4); NewVer:=BEtoN(NewVer);
-  SHA512Buffer(Pubkey,32,pID,sizeof(pID));
-  isold:=GetMutable(pID,OldFid,OldVer);
-  if isold then begin
-    if (OldVer>=NewVer)or(pID=so.fid) then begin
-      ID:=pID; Ver:=OldVer;
-      result:=true;
-    exit end;
+  GetProf:=GetProf(id,fid,tmp);
+end;
+
+procedure SetProf( var so: tStoreObject; const p: tProfileRead );
+  var exver:int64;
+  var exso:tStoreObject;
+  var meta:tMemoryStream;
+  begin
+  assert(p.Valid=true);
+  meta:=dbGet(dbProfile,p.ProfID,20);
+   if meta.Length>0 then begin
+    meta.Read(exso.FID,20);
+    exVer:=meta.ReadWord6;
+    meta.Free;
+    if exVer < p.Updated then begin
+      exso.Init(exso.fid);
+      exso.Reference(-1);
+    end else exit;
   end;
-  
-  {hash for signature check}
-  Sha512Init(hash);
-  so.Seek(0);
-  while so.left>0 do begin
-    hbs:=so.left;
-    if hbs>sizeof(buf) then hbs:=sizeof(buf);
-    so.Read(buf,hbs);
-    Sha512Update(hash,buf,hbs);
-  end;
-  
-  {load signature}
-  de.Select(pfSignature);
-  de.Read(signature,64);
-  if not ed25519.Verify2(hash, signature, pubkey) then exit;
-  
-  {update db if all checks passed}
-  meta.FID:=so.fid;
-  meta.Ver:=NewVer;
-  meta.Magic:=cProfMagic;
-  Assign(f,cProfDir+string(id));
-  {$I-}ReSet(f);{$I+} if IOResult>0 then ReWrite(f);
-  Write(f,meta); Close(f);
-  
-  {reference the new object and dereference the old one}
-  if isold then Store2.Reference(oldfid,-1);
+  meta.Init(26);
+  meta.write(so.FID,20);
+  meta.writeword6(p.Updated);
+  dbSet(dbProfile,p.ProfID,20,meta);
   so.Reference(+1);
-  ID:=pID;
-  Ver:=NewVer;
-  RESULT:=TRUE;
 end;
 
+procedure CheckProfiles;
+  var li:integer;
+  {var pid:tFID;}
+  {var usageData: QWORD=0;}
+  var usageMeta: QWORD=0;
+  begin
+  for li:=0 to length(dbKeyList)-1 do begin
+    if tDbSect(byte(dbKeyList[li].v^))<>dbProfile then continue;
+    {Move((dbKeyList[li].v+1)^,pid,20);}
+    {}
+    Inc(usageMeta,dbKeyList[li].vl+dbKeyList[li].l);
+    {Inc(usageData,LongWord(Word4((dbKeyList[li].v+4)^)));}
+  end;
+  writeln('ProfCache.Usage: meta=',SizeToString(usageMeta),'B');
+end;
 
-(*overloads*)
-function SetMutable( var so:tStoreObject; out   id: tProfileID ): boolean;
-  var Ver: LongWord;
+procedure MaybeStartUpdatingProfile(const src: tNetAddr; const prid: tProfID);
   begin
-  result:=SetMutable(so,id,ver);
 end;
-function GetMutable( id: tFID; out fid: tFID ): boolean;
-  var Ver: LongWord;
+
+procedure QueryHandler(msg:tSMsg);
+  var r:tMemoryStream;
+  var trid:word;
+  var sID,Target:^tPID;
+  var sFID:^tFID;
+  var lFID:tFID;
+  var sVer,lVer:Int64;
   begin
-  result:=GetMutable(id,fid,ver);
-end;
-function GetMutable( id: tFID; out so:  tStoreObject ): boolean;
-  var Ver: LongWord;
-  var fid: tFID;
-  begin
-  result:=GetMutable(id,fid,ver);
-  if result then so.Init(fid);
+  msg.st.skip(1);
+  msg.st.read(trid,2);
+  sID:=msg.st.ReadPtr(20);
+  if not DHT.CheckNode(sID^, msg.source, true) then exit;
+  Target:=msg.st.ReadPtr(20);
+  sFID:=msg.st.ReadPtr(20);
+  sVer:=msg.st.ReadWord6;
+  writeln('ProfCache.QueryHandler: ',string(Target),' v',sVer);
+  if GetProf( Target^, lFID, lVer )
+    and (lVer > sVer)
+  then begin
+    r.Init(cDgramSz);
+    r.WriteByte(opcode.profQuery);
+    r.Write(trid,2);
+    r.Write(lFID,20);
+    r.WriteWord6(lVer);
+    r.WriteByte(0{ttl,todo...});
+    DHT.GetNodes(r,Target^,99);
+    SendMessage(r.base^,r.length,msg.source);
+    r.Free;
+  end else begin
+    MaybeStartUpdatingProfile(msg.Source,Target^);
+    DHT.SendNodes(msg.source,Target^,trid);
+  end;
 end;
 
 BEGIN
-  CreateDir(cProfDir);
+  CheckProfiles;
 END.

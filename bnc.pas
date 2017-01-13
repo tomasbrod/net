@@ -186,6 +186,7 @@ procedure cmdPUT_local(m:integer);
 end;
 
 procedure cmdGET;
+  var left:LongWord;
   begin
   if paramcount<>2 then errParams;
   req.WriteWord2(04);
@@ -194,7 +195,9 @@ procedure cmdGET;
   req.WriteWord4($FFFFFFFF);
   aSend;aRecv;
   if (res.Left>=5) and (res.ReadByte=0) then begin
-    writeln('Length: ',res.ReadWord4);
+  left:=res.ReadWord4;
+    writeln('Length: ',left);
+      {sck.Read(res.base^, 4);}
   end else writeln('failed');
 end;
 
@@ -262,6 +265,77 @@ procedure cmdPEER;
   end else writeln('error ',st);
 end;
 
+procedure cmdDhtDump;
+  var st:byte;
+    Depth,Ban:byte;
+    ModifyTime,LastMsgFrom,i,bktsize:LongWord;
+    ReqDelta:Word;
+    id:tKey20;
+    addr:tnetaddr;
+  begin
+  req.WriteWord2(14);
+  aSend; aRecv; st:=res.ReadByte;
+  if st=0 then begin
+    writeln('DHT Dump');
+    while res.left>0 do begin
+      depth:=res.ReadByte;
+      bktsize:=res.ReadByte;
+      ModifyTime:=res.ReadWord4;
+      writeln('Bucket depth ',depth,' mod ',ModifyTime);
+      for i:=1 to bktsize do begin
+        res.Read(ID,20);
+        res.Read(Addr,sizeof(tNetAddr));
+        ReqDelta:=res.ReadWord2();
+        LastMsgFrom:=res.ReadWord4();
+        ban:=res.ReadByte;
+        write('  ',string(ID),' ',string(Addr));
+        if (ban and 1)=1 then writeln(' Banned')
+        else begin
+          if (ban and 2)=0 then write(' Unverified');
+          if ReqDelta>0 then write(' Retry',ReqDelta);
+          writeln(' T',LastMsgFrom div 1000,'s');
+        end;
+      end;
+    end;
+  end else writeln('error ',st);
+end;
+
+
+procedure cmdSETPROF;
+  var st:byte;
+  var id:tKey20;
+  var ver:int64;
+  begin
+  if paramcount<>2 then errParams;
+  req.WriteWord2(16);
+  id:=paramstr(2);
+  req.Write(id,20);
+  aSend; aRecv; st:=res.ReadByte;
+  if st=0 then begin
+    res.read(id,20);
+    ver:=res.readword6;
+    writeln(string(ID), ' ',ver);
+  end else writeln('error ',st);
+end;
+
+
+procedure cmdGETPROF;
+  var st:byte;
+  var id:tKey20;
+  var ver:int64;
+  begin
+  if paramcount<>2 then errParams;
+  req.WriteWord2(15);
+  id:=paramstr(2);
+  req.Write(id,20);
+  aSend; aRecv; st:=res.ReadByte;
+  if st=0 then begin
+    res.read(id,20);
+    ver:=res.readword6;
+    writeln(string(ID), ' ',ver);
+  end else writeln('error ',st);
+end;
+
 BEGIN
   if paramcount<1 then ErrParams;
   req.Init(4096);
@@ -272,6 +346,7 @@ BEGIN
     'INFO'  : cmdINFO;
     'STOP'  : cmdSTOP;
     'ADDPEER'  : cmdPEER;
+    'DHTDUMP'   : cmdDhtDump;
     {'PUTCP' : cmdPUT_local(0);}
     'PUTLN' : cmdPUT_local(1);
     'PUTMV' : cmdPUT_local(2);
@@ -282,6 +357,8 @@ BEGIN
     'STAT'  : cmdSTAT;
     'REFADJ'  : cmdREFADJ;
     'FETCH'  : cmdFETCH;
+    'SETPROF'  : cmdSETPROF;
+    'GETPROF'  : cmdGETPROF;
     else ErrParams;
   end;
 END.

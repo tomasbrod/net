@@ -10,7 +10,7 @@ uses cmem,ObjectModel;
 type tDbMemStream=object(tMemoryStream)
     procedure Free; virtual;
 end;
-type tDbSect=(dbObject,dbObjData);
+type tDbSect=(dbObject,dbObjData,dbProfile);
 
 function dbGet(sect:tDbSect; const key; ks:longword ): tDbMemStream;
 

@@ -4,6 +4,7 @@ IMPLEMENTATION
 {$define ctlDHT}
 {$define ctlStore}
 {$undef ctlMutable}
+{$define ctlProf}
 {$define ctlFetch}
 USES ServerLoop,opcode
     ,ObjectModel
@@ -13,6 +14,7 @@ USES ServerLoop,opcode
     {$ifdef ctlDHT},dht{$endif}
     ,Store2
     {$ifdef ctlMutable},Mutable{$endif}
+    {$ifdef ctlProf},Profile,ProfCache{$endif}
     {$ifdef ctlFetch},Fetch{$endif}
     ;
 
@@ -67,6 +69,28 @@ procedure DhtPeer(var client:tClient; var a,r:tMemoryStream);
   contact:=a.ReadPtr(sizeof(tNetAddr));
   DHT.NodeBootstrap(contact^);
   r.WriteByte(0);
+end;
+
+procedure DhtDump(var client:tClient; var a,r:tMemoryStream);
+  var bkt: ^DHT.tBucket;
+  var i:integer;
+  begin
+  r.WriteByte(0);
+  bkt:=DHT.GetDHTTable;
+  while assigned(bkt) do with bkt^ do begin
+    {r.Write(Prefix,20);}
+    r.WriteByte(Depth);
+    r.WriteByte(high(peer));
+    r.WriteWord4(MNow-ModifyTime);
+    for i:=1 to high(peer) do with peer[i] do begin
+      r.Write(ID,20);
+      r.Write(Addr,sizeof(tNetAddr));
+      r.WriteWord2(ReqDelta);
+      r.WriteWord4(MNow-LastMsgFrom);
+      r.WriteByte( ord(Banned) or (ord(Verified) shl 1));
+    end;
+    bkt:=next;
+  end;
 end;
 {$endif}
 
@@ -332,6 +356,49 @@ procedure tClient.MutatorEvent( ev:tMutEvt; ver:longword; const fid:tFID; const 
 end;
 {$endif}
 
+
+{$ifdef ctlProf}
+procedure ProfSet(var client:tClient; var a,r:tMemoryStream);
+  var fid:^tFID;
+  var p:tProfileRead;
+  var o:tStoreObject;
+  begin
+  fid:=a.ReadPtr(20);
+  try
+    o.Init(fid^);
+    p.ReadFrom(o,0);
+    if not p.valid then raise eInvalidContainer.Create('zidan');
+    ProfCache.SetProf( o, p );
+    r.WriteByte(0);
+    r.Write(p.ProfID,20);
+    r.WriteWord6(p.Updated);
+    o.Done;
+  except
+    on eObjectNF do r.WriteByte(opcode.otNotFound);
+    on eInOutError do r.WriteByte(opcode.otFail);
+    on eFormatError do r.WriteByte(5);
+    on eInvalidContainer do r.WriteByte(6);
+  end;
+end;
+
+procedure ProfGet(var client:tClient; var a,r:tMemoryStream);
+  var found:boolean;
+  var pid:^tPID;
+  var fid:tFID;
+  var ver:Int64;
+  begin
+  pid:=a.ReadPtr(20);
+  found:=GetProf(pid^,fid,ver);
+  if found then begin
+    r.WriteByte(0);
+    r.Write(FID,20);
+    r.WriteWord6(Ver);
+  end else begin
+    r.WriteByte(opcode.otNotFound);
+  end;
+end;
+{$endif}
+
 procedure tClient.Init2;
   begin
   {$ifdef ctlMutable}
@@ -357,6 +424,7 @@ BEGIN
   methods[01].Init(@Terminate,0);
   {$ifdef ctlDHT}
   methods[02].Init(@DhtPeer,sizeof(tNetAddr));
+  methods[14].Init(@DhtDump,0);
   {$endif}
   {$ifdef ctlStore}
     {$ifdef ctlStoreAdv}
@@ -376,6 +444,10 @@ BEGIN
   methods[05].Init(@MutableGet,sizeof(tPID));
   methods[06].Init(@MutableSet,sizeof(tFID));
   methods[07].Init(@MutableUpdate,sizeof(tFID));
+  {$endif}
+  {$ifdef ctlProf}
+  methods[15].Init(@ProfGet,sizeof(tPID));
+  methods[16].Init(@ProfSet,sizeof(tFID));
   {$endif}
 END.
 
