@@ -22,9 +22,9 @@ const {dgram opcode}
   tkAnnounce=$15;
   tkResult=$94;
   tkAnnOK=$95;
-  (*Mutable/Profile*)
-  mutableQuery=$12;
-  mutableNotify=$13;
+  (*Profile*)
+  profQuery=$12;
+  profResult=$92;
   (*Messages*)
 
 const {chat init}
