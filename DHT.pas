@@ -10,7 +10,7 @@ unit DHT;
 {used by: messages, fileshare}
 
 INTERFACE
-uses ServerLoop,ObjectModel,HostKey,Crypto;
+uses ObjectModel,HostKey,Crypto,ServerLoop;
 
 TYPE
   tPID=tKey20;
@@ -85,6 +85,8 @@ function CheckNode(const id: tPID; const addr: tNetAddr; recv:boolean): boolean;
 function FindBucket(const prefix:tPID):tBucket_ptr; overload;
 function GetDhtTable:tBucket_ptr;
 
+procedure GetNodes(var r:tMemoryStream; const Target: tPID; max: word);
+procedure SendNodes(const rcpt: tNetAddr; const Target: tPID; trid:word);
 
 IMPLEMENTATION
 uses opcode,sysutils;
@@ -278,6 +280,40 @@ function CheckNode(const id: tPID; const addr: tNetAddr; recv:boolean): boolean;
     VerifyInit(b,i);
     CheckNode:=true;
   end
+end;
+
+procedure GetNodes(var r:tMemoryStream; const Target: tPID; max: word);
+  var i,ctrl:integer;
+  var bucket:tBucket_ptr;
+  begin
+  ctrl:=0;
+  bucket:=DHT.FindBucket(Target);
+  while assigned(bucket) do begin
+    if r.WRBufLen<36 then break;
+    for i:=1 to high(bucket^.peer) do begin
+      if r.WRBufLen<36 then break;
+      if bucket^.peer[i].Addr.isNil then break;
+      r.Write(bucket^.peer[i].Addr,18);
+      r.Write(bucket^.peer[i].ID,20);
+    end;
+    bucket:=bucket^.next;
+    if (bucket=nil) and (ctrl=0) then begin
+      bucket:=GetDhtTable;
+      ctrl:=1;
+    end;
+  end;
+end;
+
+procedure SendNodes(const rcpt: tNetAddr; const Target: tPID; trid:word);
+  var r:tMemoryStream;
+  begin
+  r.Init(cDGramSz);
+  r.WriteByte(opcode.dhtNodes);
+  r.Write(trid,2);
+  r.Write(dht.MyID,20);
+  GetNodes(r,target,99);
+  ServerLoop.SendMessage(r.base^,r.length,rcpt);
+  r.Free;
 end;
 
 (*** PeerList object ***)
@@ -475,9 +511,6 @@ procedure RecvCheckR(msg:tSMsg);
 end;
 
 procedure RecvGetNodes(Msg:tSMsg);
-  var bucket:tBucket_ptr;
-  var i,ctrl:integer;
-  var r:tMemoryStream;
   var trid:word;
   var sID:^tPID;
   var Target:^tKey20;
@@ -488,28 +521,7 @@ procedure RecvGetNodes(Msg:tSMsg);
   if not DHT.CheckNode(sID^, msg.source, true) then exit;
   Target:=msg.st.ReadPtr(20);
   writeln('DHT.RecvGetNodes: from ',string(msg.source));
-  r.Init(cDGramSz);
-  r.WriteByte(opcode.dhtNodes);
-  r.Write(trid,2);
-  r.Write(dht.MyID,20);
-  ctrl:=0;
-  bucket:=DHT.FindBucket(Target^);
-  while assigned(bucket) do begin
-    if r.WRBufLen<36 then break;
-    for i:=1 to high(bucket^.peer) do begin
-      if r.WRBufLen<36 then break;
-      if bucket^.peer[i].Addr.isNil then break;
-      r.Write(bucket^.peer[i].Addr,18);
-      r.Write(bucket^.peer[i].ID,20);
-    end;
-    bucket:=bucket^.next;
-    if (bucket=nil) and (ctrl=0) then begin
-      bucket:=GetDhtTable;
-      ctrl:=1;
-    end;
-  end;
-  ServerLoop.SendMessage(r.base^,r.length,msg.source);
-  r.Free;
+  SendNodes(msg.source, target^, trid);
 end;
 
 procedure NodeBootstrap(const contact:tNetAddr);
@@ -827,7 +839,7 @@ procedure tPersist.SaveState;
   bkt:=Table;
   cntr:=0;
   while assigned(bkt) and (cntr<cMaxNodesDat) do begin
-    for p:=1 to 4 do begin
+    for p:=1 to high(bkt^.peer) do begin
       if bkt^.peer[p].Addr.IsNil then continue;
       statef.Write(bkt^.peer[p].Addr,sizeof(tNetAddr));
       inc(cntr);
