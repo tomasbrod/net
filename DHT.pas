@@ -30,7 +30,7 @@ tPeer=object
 tBucket=object
     Prefix: tPID;
     Depth:  byte;
-    peer:   array [1..4] of tPeer;
+    peer:   array [1..6] of tPeer;
     ModifyTime: tMTime;
     //ll: ^tll;
     desperate:word;
