@@ -20,6 +20,7 @@ type tSMsg=object
   end;
 type tMessageHandler=procedure(msg:tSMsg);
 type tObjMessageHandler=procedure(msg:tSMsg) of object;
+const cDGramSz = 420; {plz do this better}
 procedure SetupOpcode(OpCode:byte; handler:tMessageHandler);
 procedure NewMsgTr(out ID:Word; handler:tObjMessageHandler);
 procedure SetMsgTr(ID:Word; handler:tObjMessageHandler);

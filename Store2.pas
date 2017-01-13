@@ -367,7 +367,7 @@ procedure tStoreObject.InsertCopyInline(var ins:tCommonStream);
   location:=tsoLoc(99);
   ins.Seek(0);
   len:=ins.Length;
-  vl.Init(len+sizeof(tMeH)); mh:=vl.Base; vl.vLength:=sizeof(tMeH);
+  vl.Init(len+sizeof(tMeH)); mh:=vl.Base; vl.vLength:=sizeof(tMeH); vl.Position:=sizeof(tMeH);
   ins.Read(vl.WRBuf^,len);
   ctx.Init;
   ctx.Update(vl.WRBuf^,len);

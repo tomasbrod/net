@@ -84,6 +84,7 @@ constructor tProfileRead.ReadFrom(var src:tCommonStream; parseLevel:byte);
   var Magic:packed array [1..8] of char;
   var i:longword;
   var m,m2:tHashingStream;
+  var now2:Int64;
   begin
   InitEmpty;
   m.Init(src);
@@ -126,7 +127,8 @@ constructor tProfileRead.ReadFrom(var src:tCommonStream; parseLevel:byte);
     m2.Read(master_key,32);
     m2.Read(sign_key,32);
     m.Read(master_sig,64);
-    valid:=valid and (updated<UnixNow) and (expires>UnixNow);
+    now2:=UnixNow;
+    valid:=valid and (updated<now2) and (expires>now2);
     valid:=valid
       and ed25519.Verify2(m2.ctx, master_sig, master_key);
     SHA256_Buffer( ProfID, 20, master_key, 32);

@@ -138,7 +138,6 @@ type
     end{record};
   end{object};
 
-const cDGramSz=768 deprecated;
 type
   tMemoryStream=object(tCommonStream)
     vlength: LongWord;
