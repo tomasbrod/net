@@ -249,7 +249,7 @@ function CheckNode(const id: tPID; const addr: tNetAddr; recv:boolean): boolean;
     {updating}
     if adm and idm then begin
       CheckNode:=true;
-      if recv and b^.peer[idup].Verified then begin
+      if recv and (b^.peer[idup].Verified  or (not PublicPoWReady)) then begin
         {only update by self and verified, else waiting for auth}
         b^.peer[idup].LastMsgFrom:=mNow;
         b^.peer[idup].ReqDelta:=0;
@@ -451,22 +451,24 @@ procedure RecvCheckQ(msg:tSMsg);
   SHA256_Buffer(id,20{<-},Pub^,sizeof(pub^));
   {CheckNode}
   if not CheckNode(id,msg.source,true) then exit;
-  {Verify PoW}
-  if not HostKey.VerifyPoW(pow^,pub^) then begin
-    writeln('DHT.CheckQ: Invalid PoW in request from ',string(msg.source));
-  exit end;
-  {Solve C/R}
-  HostKey.CreateResponse(Challenge^, right_resp, pub^);
-  {reply}
-  r.Init(cDGramSz);
-  r.WriteByte(opcode.dhtCheckR);
-  r.Write(HostKey.PublicKey,sizeof(HostKey.PublicKey));
-  r.Write(HostKey.PublicPoW,sizeof(HostKey.PublicPoW));
-  r.Write(right_resp,sizeof(right_resp));
-  r.Write(VersionString[1],Length(VersionString));
-  writeln('DHT.CheckQ: responding to ',string(msg.source),' ',r.length,'B');
-  SendMessage(r.base^,r.length,msg.source);
-  r.Free;
+  if PublicPoWReady then begin
+    {Verify PoW}
+    if not HostKey.VerifyPoW(pow^,pub^) then begin
+      writeln('DHT.CheckQ: Invalid PoW in request from ',string(msg.source));
+    exit end;
+    {Solve C/R}
+    HostKey.CreateResponse(Challenge^, right_resp, pub^);
+    {reply}
+    r.Init(cDGramSz);
+    r.WriteByte(opcode.dhtCheckR);
+    r.Write(HostKey.PublicKey,sizeof(HostKey.PublicKey));
+    r.Write(HostKey.PublicPoW,sizeof(HostKey.PublicPoW));
+    r.Write(right_resp,sizeof(right_resp));
+    r.Write(VersionString[1],Length(VersionString));
+    //writeln('DHT.CheckQ: responding to ',string(msg.source),' ',r.length,'B');
+    SendMessage(r.base^,r.length,msg.source);
+    r.Free;
+  end else writeln('DHT.CheckQ:',string(msg.source),' not responding, PoW is not ready.');
 end;
 
 procedure RecvCheckR(msg:tSMsg);
@@ -540,7 +542,7 @@ procedure tBucket.Refresh;
  var debug:ansistring;
  procedure lSend(var peer:tPeer; const trg:tPID);
   begin
-  if peer.Verified 
+  if peer.Verified or (not PublicPoWReady)
   then SendBeat(peer.addr,trg,0)
   else SendCheck(peer);
   Inc(peer.ReqDelta);
@@ -549,14 +551,14 @@ procedure tBucket.Refresh;
  my:=MatchPrefix(MyID);
  ol:=0; rtr:=false;
  {1 of 10 times try to contact dead nodes in attempt to recover from network split}
- debug:='DHT.Refresh('+self.IDString+')';
+ //debug:='DHT.Refresh('+self.IDString+')';
  stich:=Random(cStichRar)=0;
  for i:=1 to high(tBucket.peer)
   do if (not peer[i].Addr.isNil) and (not peer[i].Banned) then begin
    if peer[i].ReqDelta>=crdDoPingThr then begin
     if (peer[i].ReqDelta<=crdDontPingThr) xor stich then begin
      {this will get rid of half-dead nodes}
-     writeln(debug,' R',peer[i].ReqDelta,' ',copy(string(peer[i].id),1,6),string(peer[i].addr));
+     //writeln(debug,' R',peer[i].ReqDelta,' ',copy(string(peer[i].id),1,6),string(peer[i].addr));
      lSend(peer[i],prefix);{todo: use random target with prefix}
      rtr:=true;
     end
@@ -566,7 +568,7 @@ procedure tBucket.Refresh;
  end;
  {now nudge the most quiet peer, but not too often}
  if (ol>0) and ((mNow-peer[ol].LastMsgFrom)>cNudgeQuietThr) then begin
-  writeln(debug,' T',mNow-peer[ol].LastMsgFrom,' ',string(peer[ol].addr));
+  //writeln(debug,' T',mNow-peer[ol].LastMsgFrom,' ',string(peer[ol].addr));
   lSend(peer[ol],MyID);
  end;
  {try to recover bucket full of bad nodes}
@@ -575,7 +577,7 @@ procedure tBucket.Refresh;
   list.bans:=true;
   list.maxRD:=desperate; list.Next;
   if assigned(list.bkt) then begin
-   writeln(debug,' V ',copy(string(list.p^.id),1,6),string(list.p^.addr));
+   //writeln(debug,' V ',copy(string(list.p^.id),1,6),string(list.p^.addr));
    lSend(list.p^,prefix);
   end else inc(desperate);
  end else desperate:=3;
@@ -587,10 +589,13 @@ procedure tBucket.Refresh;
 end;
  
 procedure VerifyInit(b:tBucket_ptr; i:byte);
-  begin with b^.peer[i] do begin
+  begin
+  with b^.peer[i] do begin
     Verified:=false;
-    HostKey.CreateChallenge(challenge);
-    SendCheck(b^.peer[i]);
+    if PublicPoWReady then begin
+      HostKey.CreateChallenge(challenge);
+      SendCheck(b^.peer[i]);
+    end;
 end end;
 
 (*** The Search Object ***)

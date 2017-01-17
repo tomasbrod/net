@@ -11,6 +11,7 @@ type tPoWRec=packed record
 var SecretKey:tKey64;
 var PublicKey:tEccKey;
 var PublicPoW:tPoWRec;
+var PublicPoWReady:boolean;
 var ZeroDigest:tSha512Digest;
 {$IFDEF ENDIAN_LITTLE}
 const cPowMask0:DWORD=$FF0FFFFF;
@@ -56,35 +57,7 @@ function VerifyPoW(const proof:tPoWRec; const RemotePub:tEccKey ):boolean;
  SHA256_Update(shactx,RemotePub,sizeof(RemotePub));
  SHA256_Final(digest,shactx);
  result:= (dig_4dw and cPoWMask0) =0;
- writeln('pow ',string(digest));
  end else result:=false;
-end;
-
-const cSeckeyFN='hostkey.dat';
-
-procedure PoWGenerate;
-  var i:byte;
-  var start:tDateTime;
-  var shactx:tSha256Context;
-  var wp:tPoWRec;
-  var counter:LongWord absolute wp.data;
-  var digest: tKey32;
-  var dig_4dw: dword absolute digest[0];
-  begin
-  wp.stamp:=Word6(UnixNow);
-  for i:=0 to 31 do wp.data[i]:=Random(256);
-  Start:=Now; counter:=0;
-  repeat
-    if counter=high(counter) then raise eXception.Create('some shit happend');
-    inc(counter);
-    SHA256_Init(shactx);
-    SHA256_Update(shactx,wp,sizeof(wp));
-    SHA256_Update(shactx,PublicKey,sizeof(PublicKey));
-    SHA256_Final(digest,shactx);
-  until (dig_4dw and cPowMask0) =0;
-  PublicPoW:=wp;
-  writeln('HostKey: PoW found in ',(Now-start)*SecsPerDay:3:0,'s speed=',SizeToString(trunc(counter/((Now-start)*SecsPerDay))),'h/s');
-  Assert(VerifyPoW(PublicPoW,PublicKey));
 end;
 
 procedure GetOSRandom(buf:pointer; cnt:word);
@@ -109,41 +82,63 @@ procedure GetOSRandom(buf:pointer; cnt:word);
   {$ENDIF}
 end;
 
-type tPoWRefreshObj=object thrid:tThreadID; regen:boolean; procedure Timer; procedure Wait; end;
+type tPoWRefreshObj=object procedure Timer; end;
 var PoWGenBg:tPoWRefreshObj;
+const cSeckeyFN='hostkey.dat';
+
 function PoWGenThr(param:pointer):ptrint;
   var f:tFileStream;
+  var i:byte;
+  var start:tDateTime;
+  var shactx:tSha256Context;
+  var wp:tPoWRec;
+  var counter:LongWord absolute wp.data;
+  var digest: tKey32;
+  var dig_4dw: dword absolute digest[0];
   begin result:=0;
   SetThreadName('PoW_Gen');
-  PoWGenerate;
+  wp.stamp:=Word6(UnixNow);
+  for i:=0 to 31 do wp.data[i]:=Random(256);
+  Start:=Now; counter:=0;
+  repeat
+    if counter=high(counter) then raise eXception.Create('some shit happend');
+    inc(counter);
+    SHA256_Init(shactx);
+    SHA256_Update(shactx,wp,sizeof(wp));
+    SHA256_Update(shactx,PublicKey,sizeof(PublicKey));
+    SHA256_Final(digest,shactx);
+  until (dig_4dw and cPowMask0) =0;
+  EnterCriticalSection(GlobalLock);
+  PublicPoW:=wp;
+  writeln('HostKey: PoW found in ',(Now-start)*SecsPerDay:3:0,'s speed=',SizeToString(trunc(counter/((Now-start)*SecsPerDay))),'h/s');
+  writeln('pow ',string(digest));
+  Assert(VerifyPoW(PublicPoW,PublicKey));
   f.OpenRW(cSeckeyFN); f.Seek(72); {This is offset of PoW in hostkey file}
   f.Write(PublicPoW,sizeof(PublicPoW));
   f.Done;
+  PoWGenBg.Timer;
+  LeaveCriticalSection(GlobalLock);
+  EndThread;
 end;
-procedure tPoWRefreshObj.Wait;
-  begin end;
+
 procedure tPoWRefreshObj.Timer;
-  var time:LongWord;
   begin
-  time:=600000;
-  if thrid>0 then begin
-    write('HostKey: Waiting for PoW to generate, this may take a while...'); flush(output);
-    WaitForThreadTerminate(thrid,high(longint));
-    thrid:=0; writeln; end
-  else if regen or((UnixNow-Int64(PublicPow.Stamp))>=(cPoWValidFor-1200)) then begin
+  PublicPoWReady:=true;
+  if  (not VerifyPoW(PublicPoW,PublicKey))
+  or  ( (Int64(PublicPoW.stamp)+cPoWValidFor-UnixNow) <600 )
+  then begin
     writeln('HostKey: Started generating PoW');
-    thrid:=BeginThread(@PoWGenThr,nil);
-    {ThreadSetPriority(thrid,-15);}
-    if regen then time:=5 else time:=160000;
-     regen:=false;
-  end;  Shedule(Time,@Timer);
+    PublicPoWReady:=false;
+    BeginThread(@PoWGenThr,nil);
+  end
+  else Shedule(120000,@timer);
 end;
 
 procedure Load;
   var f:tFileStream;
   var ident:array [1..8] of char;
   begin
-  write();
+  PublicPoWReady:=false;
   f.OpenRW(cSeckeyFN);
   try
     f.Read(ident,sizeof(cHostIdent));
@@ -159,11 +154,8 @@ procedure Load;
   CreatekeyPair(PublicKey,SecretKey);
   writeln('HostKey: '+cSeckeyFN+' ',string(PublicKey));
   try f.Read(PublicPoW,sizeof(PublicPoW));
-      if not VerifyPoW(PublicPoW,PublicKey) then raise eInOutError.Create('invalid or expired');
-      PoWGenBg.regen:=false;
-  except on e:eInOutError do PoWGenBg.regen:=true; end;
+  except ; end;
   f.Done;
-  PoWGenBg.thrid:=0;
   PoWGenBg.Timer;
 end;
 

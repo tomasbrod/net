@@ -33,6 +33,7 @@ procedure SendMessage(const data; len:word; const rcpt:tNetAddr; channel:word );
 {#Sheduling and watching#}
 type tFDEventHandler=procedure(ev:Word) of object;
 type tOnTimer=procedure of object;
+var GlobalLock:tRTLCriticalSection;
 procedure WatchFD(fd:tHandle; h:tFDEventHandler);
 procedure WatchFDRW(fd:tHandle; h:tFDEventHandler);
 
@@ -386,7 +387,9 @@ procedure Main;
   PollTimeout:=5000;
   Timer;
   Flush(OUTPUT);
+  LeaveCriticalSection(GlobalLock);
   EventsCount:=fpPoll(@PollArr[0],PollTop,PollTimeout);
+  EnterCriticalSection(GlobalLock);
   Timer;
   if (eventscount=-1)and terminated then break;
   if eventscount=-1 then break;  {fixme: print error}
@@ -403,6 +406,7 @@ procedure Main;
  end;
  if assigned(onTerminate) then onTerminate;
  CloseSocket(PollArr[0].fd);
+ DoneCriticalSection(GlobalLock);
  if ReExec then fpExecv(paramstr(0),argv);
 end;
 
@@ -469,6 +473,8 @@ end;
 BEGIN
  VersionString:='BrodNetD'+' '+GIT_VERSION;
  writeln('ServerLoop: ',VersionString);
+ InitCriticalSection(GlobalLock);
+ EnterCriticalSection(GlobalLock);
  if OptIndex('-h')>0 then DoShowOpts:=true;
  InitConfig;
  Randomize;
