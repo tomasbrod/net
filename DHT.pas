@@ -21,6 +21,7 @@ tPeer=object
     ID   :tPID;
     Addr :tNetAddr;
     ReqDelta:word;
+    Hops: byte;
     LastMsgFrom,
     LastResFrom  :tMTime;
     Banned,Verified:boolean;
@@ -368,6 +369,7 @@ procedure RecvBeatQ(msg:tSMsg);
   sID:=s.ReadPtr(20);
   Target:=s.ReadPtr(20);
   s.Read(mark,2);
+  {TTL:=}s.ReadByte;
   //writeln('DHT.BeatQ: ',string(msg.source),' Request for ',string(Target^));
   if not CheckNode(sID^,msg.source,true) then exit;
   list.Init(Target^);
@@ -375,6 +377,7 @@ procedure RecvBeatQ(msg:tSMsg);
   r.WriteByte(opcode.dhtBeatR);
   r.Write(MyID,20);
   r.Write(mark,2);
+  r.WriteByte({ttl}0);
   while r.WrBufLen>=36 do begin
     list.Next;
     if not assigned(list.bkt) then break; {simply no more peers}
@@ -395,6 +398,7 @@ procedure SendBeat(const contact:tNetAddr; const forid: tPID; mark:word);
  r.Write(MyID,sizeof(tPID));
  r.Write(ForID,sizeof(tPID));
  r.Write(mark,2);
+ r.WriteByte(0{TTL});
  SendMessage(r.base^,r.length,contact);
  r.Free;
 end;
@@ -405,7 +409,7 @@ procedure RecvBeatR(msg:tSMsg);
   begin
   msg.st.skip(1);
   ID:=msg.st.ReadPtr(20);
-  msg.st.skip(2); //todo
+  msg.st.skip(3); {todo,ttl}
   //writeln('DHT.BeatR: ',string(msg.source),' is ',string(ID^));
   if not CheckNode(ID^,msg.source,true) then exit;
   while msg.st.RdBufLen>36 do begin

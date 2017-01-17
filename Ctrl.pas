@@ -88,6 +88,7 @@ procedure DhtDump(var client:tClient; var a,r:tMemoryStream);
       r.WriteWord2(ReqDelta);
       r.WriteWord4(MNow-LastMsgFrom);
       r.WriteByte( ord(Banned) or (ord(Verified) shl 1));
+      r.WriteByte( Hops );
     end;
     bkt:=next;
   end;

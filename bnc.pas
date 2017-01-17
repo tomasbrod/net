@@ -267,7 +267,7 @@ end;
 
 procedure cmdDhtDump;
   var st:byte;
-    Depth,Ban:byte;
+    Depth,Ban,Hops:byte;
     ModifyTime,LastMsgFrom,i,bktsize:LongWord;
     ReqDelta:Word;
     id:tKey20;
@@ -288,12 +288,13 @@ procedure cmdDhtDump;
         ReqDelta:=res.ReadWord2();
         LastMsgFrom:=res.ReadWord4();
         ban:=res.ReadByte;
+        hops:=res.ReadByte;
         write('  ',string(ID),' ',string(Addr));
         if (ban and 1)=1 then writeln(' Banned')
         else begin
           if (ban and 2)=0 then write(' Unverified');
           if ReqDelta>0 then write(' Retry',ReqDelta);
-          writeln(' T',LastMsgFrom div 1000,'s');
+          writeln(' H',Hops,' T',LastMsgFrom div 1000,'s');
         end;
       end;
     end;
