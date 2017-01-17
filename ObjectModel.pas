@@ -4,6 +4,8 @@ unit ObjectModel;
 { Note: see here is a lot of RTL reimplemented,
   i did'nt like the way RTL impemented thinks :( }
 
+{$HINT bug, netaddr crashes to convert sometimes, isNil fails on port 0, toString fails when port 0 and not isNil}
+
 {$mode objfpc}
 {$PACKENUM 1}
 INTERFACE
