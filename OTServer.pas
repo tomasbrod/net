@@ -4,33 +4,22 @@ unit OTServer;
 
 INTERFACE
 IMPLEMENTATION
-USES Sockets,BaseUnix,ServerLoop,ObjectModel,opcode,SysUtils,Store2;
+USES Sockets,BaseUnix,Porting,ServerLoop,ObjectModel,opcode,SysUtils,Store2;
 
 { Protocol:
- Client init with REQ (op=otCtrl,st=req,ch>0) to server
- Client can bind addr+otData...
- Server send info and proceed sending segments of file
- Client must send SPEED periodicaly and SIACK when requested (st=flow)
- Server->Client data and controll are sent with opcode otData,
-   then channel number
-   highest bit of first byte of offset determine packet type
-   0:data
-   1:ctrl
-   128=ifno, 129=fail, 130=EoT 131=SINC 132=rateinfo
- Server should send EoT at least 5 times before cloing.
- Simple and fast. Transfer begins within 1 round trip time.
- messages to server:
-  op=otCtrl op=otReq+prio ch=x id:20 [ofs:5 len:4]
-  op=otCtrl op=otFin ch=x
-  op=otCtrl speed/siack
- messages to client:
-  info length:5 max-seg-req:1 ttl:1
-  fail code:1 message:string
-  rateinfo message:string
+...
 }
 
-var thrID:tThreadID;
-var sock:tSockPairArray;
+var thread: record
+  ID: tThreadID;
+  mutex:po_tmutex;
+  condv:po_tcondv;
+  flag:boolean;
+  source:tNetAddr;
+  dgdata:array [1..1024] of byte;
+  dglen:longword;
+end;
+
 var PollTimeout:LongInt;
 var mNow:tMTime; {override for our thread}
 var sharedbuf:array [1..2048] of byte; {->1k}
@@ -367,49 +356,33 @@ var LastSlowTick:tMTime;
 const cSlowTick=100;
 function SFSThread(param:pointer):PtrInt;
  var cmd:tMemoryStream;
- var rc:LongInt;
  var source:^tNetAddr;
  var op:byte;
  var client:^tClient;
  var p1:^pointer;
- {$IFDEF USE_UNIXDGQ}
- var PollStruct:array [0..0] of BaseUnix.pollfd;
- {$ELSE}
- {$ENDIF}
  begin
  result:=0;
  SetThreadName('ObjTransServer');
- {$IFDEF USE_UNIXDGQ}
- PollStruct[0].fd:=sock[1];
- PollStruct[0].Events:=BaseUnix.PollIN;
- {$ENDIF}
  cmd.Init(@sharedbuf,0,sizeof(sharedbuf));
  mNow:=GetMTime;
  LastSlowTick:=mNow;
  PollTimeout:=0;
  repeat
-  {$IFDEF USE_UNIXDGQ}
-  PollStruct[0].rEvents:=0;
-  Assert(fpPoll(@PollStruct,1,PollTimeout)>=0);
-  mNow:=GetMTime;
-  if PollStruct[0].rEvents=PollIN then begin
-   cmd.Init(@sharedbuf,0,sizeof(sharedbuf));
-   rc:=fpRecv(sock[1],cmd.base,cmd.size,0);
-   assert(rc>=0); if rc=0 then break;
-   cmd.vlength:=rc;
-   source:=cmd.ReadPtr(sizeof(tNetAddr));
-   if cmd.rdbuflen>=2 then begin
-    op:=cmd.ReadByte;
-    client:=FindClient(source^,op>=otReq);
-    if assigned(client) then Client^.Recv(op,cmd);
-   end;
-  end;
-  {$ELSE}
-  unlock...
-  sleep...
-  lock...
-  mNow:=GetMTime;
-  {$ENDIF}
+    po_lock(thread.mutex);
+    po_wait(thread.condv,thread.mutex,PollTimeout);
+    mNow:=GetMTime;
+    if thread.flag then begin
+      po_unlock(thread.mutex);
+      cmd.Init(@thread.dgdata,thread.dglen,sizeof(thread.dgdata));
+      source:=@thread.source;
+      if cmd.rdbuflen>=2 then begin
+        cmd.skip(1);
+        op:=cmd.ReadByte;
+        client:=FindClient(source^,op>=otReq);
+        if assigned(client) then Client^.Recv(op,cmd);
+      end;
+      thread.flag:=false;
+    end else po_unlock(thread.mutex);
   if assigned(clients) then begin
    if (mNow-LastSlowTick)>cSlowTick then begin
     LastSlowTick:=mNow;
@@ -507,38 +480,26 @@ function FindClient(const addr:tNetAddr; creat:boolean):tClient_ptr;
  end;
 end;
 
-{$IFDEF USE_UNIXDGQ}
 procedure CtrlForward(msg:tSMsg);
- var buf:array [0..1024+sizeof(tNetAddr)] of byte;
- var s:tMemoryStream;
- begin {Forward message to thread with sender addr}
- s.Init(@buf,0,sizeof(buf));
- s.Write(msg.source,sizeof(tNetAddr));
- msg.st.skip(1);
- s.Write(msg.st.RdBuf^,msg.st.RdBufLen);
- fpSend(sock[0],s.base,s.length,0);
+  begin {Forward message to thread with sender addr}
+  po_lock(thread.mutex);
+  if  (not thread.flag)
+  and (msg.length<=sizeof(thread.dgdata))
+  then begin
+    Move(msg.Data^,{->}thread.dgdata,msg.Length);
+    thread.dglen:=msg.Length;
+    thread.source:=msg.Source;
+    thread.flag:=true;
+    po_signal(thread.condv,thread.mutex);
+  end;
+  po_unlock(thread.mutex);
 end;
 
-{$ELSE}
-procedure CtrlHandle(msg:tSMsg);
- begin
- lock...
- doit...
- unlock...
-end;
-{$ENDIF}
 
 BEGIN
- {$IFDEF USE_UNIXDGQ}
- {$IFDEF windows}{$WARNING Windows does not support AF_LOCAL sockets!}{$ENDIF}
- assert(fpSocketpair(AF_LOCAL,SOCK_DGRAM,0,@sock)=0);
- SetupOpcode(opcode.otCtrl,@CtrlForward);
- thrid:=BeginThread(@SFSThread);
- {$ELSE}
- setup_lock...
- thrid:=BeginThread(@SFSThread);
- SetupOpcode(opcode.otCtrl,@CtrlHandle);
- {$ENDIF}
- Assert(thrid>0);
  clients:=nil;
+ SetupOpcode(opcode.otCtrl,@CtrlForward);
+ po_cvar_init(thread.condv,thread.mutex);
+ thread.id:=BeginThread(@SFSThread);
+ Assert(thread.id>0);
 END.
