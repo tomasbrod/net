@@ -21,7 +21,6 @@ tPeer=object
     ID   :tPID;
     Addr :tNetAddr;
     ReqDelta:word;
-    Hops: byte;
     LastMsgFrom,
     LastResFrom  :tMTime;
     Banned,Verified:boolean;
