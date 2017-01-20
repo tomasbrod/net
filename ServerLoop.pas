@@ -16,6 +16,7 @@ type tSMsg=object
    st: tMemoryStream;
    channel: word;
    ttl: word;
+   tos: byte;
    OP: byte;
   end;
 type tMessageHandler=procedure(msg:tSMsg);
@@ -27,8 +28,8 @@ procedure SetMsgTr(ID:Word; handler:tObjMessageHandler);
 //procedure DelMsgTr(ID:Word);
 
 procedure SendMessage(const data; len:word; const rcpt:tNetAddr );
-{procedure SendReply(const data; len:word; const rcpt:tSMsg );}
-procedure SendMessage(const data; len:word; const rcpt:tNetAddr; channel:word );
+function GetSocket(const rcpt:tNetAddr):tSocket;
+function GetSocketTTL(const rcpt:tNetAddr): Word;
 
 {#Sheduling and watching#}
 type tFDEventHandler=procedure(ev:Word) of object;
@@ -50,7 +51,6 @@ var iNow:tTimeVal;
 var mNow:tMTime;
 function GetMTime:tMTime;
 
-function GetSocket(const rcpt:tNetAddr):tSocket;
 procedure SetThreadName(name:pchar);
 
 function GetCfgStr(name:pchar):String;
@@ -210,25 +210,56 @@ procedure SetMsgTr(ID:Word; handler:tObjMessageHandler);
   TrDesc[ID].hnd:=handler;
 end;
 
+
+
 procedure Reciever(var p:tPollFD);
-  var pkLen:LongWord;
-  var From:tSockAddrL;
-  var FromLen:LongWord;
   var Msg:tSMsg;
   var op :byte absolute Buffer[1];
   var tr :word;
+
+  procedure RecieverP1;
+    var
+      AuxBuf:array [1..128] of dword; {size??}
+      msgtop:tMsgHdr;
+      IOV:Tiovec;
+      nret:cint;
+      SrcAddr:tSockAddrL;
+      cmsg:^tCMsgHdr;
+    begin
+    FillChar(msgtop,sizeof(msgtop),0);
+    FillChar(AuxBuf,sizeof(AuxBuf),9);
+    msgtop.IOV:=@IOV;
+    msgtop.IOVlen:=1;
+    IOV.base:=@Buffer;
+    IOV.len:=sizeof(Buffer);
+    msgtop.control:=pointer((PtrUInt(@AuxBuf)+15)and(not 15));
+    msgtop.controllen:=sizeof(AuxBuf)-16;
+    msgtop.name:=@SrcAddr;
+    msgtop.namelen:=sizeof(SrcAddr);
+    Msg.ttl:=0;
+    Msg.tos:=0;
+    Msg.channel:=0; {!multisocket}
+    nret:= RECVMSG( p.FD, @msgtop, 0 );
+    SC(@fprecvfrom,nret);
+    cmsg:=pointer(msgtop.control);
+    if msgtop.controllen<sizeof(cmsg^) then cmsg:=nil;
+    while assigned(cmsg) do begin
+      //writeln('attrib level ',cmsg^.level,' name ',cmsg^.name,' len ',cmsg^.len,' v ',cmsg^.val);
+      if (cmsg^.level=IPPROTO_IP)and(cmsg^.name=IP_TTL)
+        then  Msg.ttl:=cint(cmsg^.val)
+      else if (cmsg^.level=IPPROTO_IP)and(cmsg^.name=IP_TOS)
+        then  Msg.tos:=byte(pointer(@cmsg^.val)^);
+    cmsg:=cmsg_nxthdr(@msgtop, cmsg) end;
+    Msg.Source.FromSocket(SrcAddr);
+    Msg.Length:=nret;
+    Msg.Data:=@Buffer;
+    Msg.st.Init(@Buffer,Msg.Length,sizeof(Buffer));
+  end;
+
   begin
   if (p.revents and pollIN)=0 then exit;
-  FromLen:=sizeof(From);
-  pkLen:=fprecvfrom(p.FD,@Buffer,sizeof(Buffer),0,@from,@fromlen);
-  SC(@fprecvfrom,pkLen);
-  p.revents:=0;
-  Msg.Source.FromSocket(from);
-  Msg.Length:=pkLen;
-  Msg.Data:=@Buffer;
-  Msg.st.Init(@Buffer,pkLen,sizeof(Buffer));
-  Msg.channel:=0; {!multisocket}
-  Msg.ttl:=0;
+    p.revents:=0;
+  RecieverP1;
   if op<128 then begin
     if (op>=low(OpDesc))and(op<=high(OpDesc)) and assigned(OpDesc[op].hnd) then begin
       OpDesc[op].hnd(Msg);
@@ -412,10 +443,15 @@ end;
 
 (**** Sockets ****)
 var s_ip4: tSocket;
+var s_ip4_ttl:Word;
 
 function GetSocket(const rcpt:tNetAddr):tSocket;
  begin
  result:=s_ip4;
+end;
+function GetSocketTTL(const rcpt:tNetAddr): Word;
+  begin
+  result:=s_ip4_ttl;
 end;
 procedure SendMessage(const data; len:word; const rcpt:tSockAddrL );
  begin
@@ -435,7 +471,8 @@ end;
 
 procedure s_SetupInet;
  var bind_addr:tInetSockAddr;
- var turnon:cint;
+ var optval:cint;
+ var optlen:csize_t;
  begin
   with bind_addr do begin
    sin_family:=AF_INET;
@@ -443,8 +480,14 @@ procedure s_SetupInet;
    sin_addr.s_addr:=0; {any}
    s_ip4:=fpSocket(sin_family,SOCK_DGRAM,IPPROTO_UDP);
    SC(@fpSocket,s_ip4);
-   turnon:=IP_PMTUDISC_DO;
-   SC(@fpsetsockopt,fpsetsockopt(s_ip4, IPPROTO_IP, IP_MTU_DISCOVER, @turnon, sizeof(turnon)));
+   optval:=IP_PMTUDISC_DO;
+   SC(@fpsetsockopt,fpsetsockopt(s_ip4, IPPROTO_IP, IP_MTU_DISCOVER, @optval, sizeof(optval)));
+   optlen:=sizeof(optval);
+   SC(@fpgetsockopt,fpgetsockopt(s_ip4, IPPROTO_IP, IP_TTL, @optval, @optlen));
+   s_ip4_ttl:=optval;
+   optval:=1;
+   SC(@fpsetsockopt,fpsetsockopt(s_ip4, IPPROTO_IP, IP_RECVTTL, @optval, sizeof(optval)));
+   SC(@fpsetsockopt,fpsetsockopt(s_ip4, IPPROTO_IP, IP_RECVTOS, @optval, sizeof(optval)));
   end;
   SC(@fpBind,fpBind(s_ip4,@bind_addr,sizeof(bind_addr)));
   with PollArr[0] do begin

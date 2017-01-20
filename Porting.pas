@@ -1,6 +1,6 @@
 UNIT Porting;
 INTERFACE
-uses PThreads,UnixType;
+uses PThreads,UnixType,CTypes;
 
 function po_unixtimenow:Int64; inline;
 procedure po_monotonicnanoclocks(out seconds:Int64; out nano:LongWord);
@@ -16,8 +16,37 @@ procedure po_unlock(var m:po_tmutex);
 procedure po_signal(var v: po_tcondv; var m:po_tmutex);
 procedure po_wait(var v: po_tcondv; var m:po_tmutex; DelayMS: LongWord);
 
+{$packrecords C}
+type
+  Piovec = ^Tiovec;
+  Tiovec = record
+    base : pointer;
+    len : size_t;
+  end;
+  Pmsghdr = ^tmsghdr;
+  Tmsghdr = record
+     name : pointer;
+     namelen : socklen_t;
+     iov : piovec;
+     iovlen : size_t;
+     control : pointer;
+     controllen : socklen_t;
+     flags : cInt;
+  end;
+  Pcmsghdr = ^Tcmsghdr;
+  Tcmsghdr = record
+    len   : csize_t;
+    level : cInt;
+    name  : cInt;
+    val   : cInt;
+  end;
+
+function sendmsg(__fd: cInt; __message: pmsghdr; __flags: cInt): ssize_t; cdecl; external name 'sendmsg';
+function recvmsg(__fd: cInt; __message: pmsghdr; __flags: cInt): ssize_t; cdecl; external name 'recvmsg';
+function cmsg_nxthdr(__mhdr:Pmsghdr;__cmsg:Pcmsghdr):Pcmsghdr; cdecl; external name '__cmsg_nxthdr';
+
 IMPLEMENTATION
-uses CTypes,BaseUnix,Syscall;
+uses BaseUnix;
 
 function po_unixtimenow:Int64;
   begin
@@ -34,10 +63,7 @@ Const
   CLOCK_REALTIME_COARSE           = 5;
   CLOCK_MONOTONIC_COARSE          = 6;
 
-function clock_gettime(clk_id : cint; tp: ptimespec) : cint;
-begin
-  clock_gettime:=do_SysCall(syscall_nr_clock_gettime,tsysparam(clk_id),tsysparam(tp));
-end;
+function clock_gettime(clk_id : cint; tp: ptimespec) : cint; cdecl; external name 'clock_gettime';
 
 procedure po_monotonicnanoclocks(out seconds:Int64; out nano:LongWord);
   var time:timespec;

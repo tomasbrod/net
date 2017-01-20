@@ -363,20 +363,22 @@ procedure RecvBeatQ(msg:tSMsg);
   var mark:word;
   var r:tMemoryStream;
   var list:tPeerList;
+  var Hops:integer;
   begin
   s.skip(1);
   sID:=s.ReadPtr(20);
   Target:=s.ReadPtr(20);
   s.Read(mark,2);
-  {TTL:=}s.ReadByte;
-  //writeln('DHT.BeatQ: ',string(msg.source),' Request for ',string(Target^));
+  Hops:=s.ReadByte-msg.TTL;
+  //writeln('DHT.BeatQ: ',string(msg.source),' Request for ',string(Target^),' HC',Hops);
+  Hops:=hops;{???}
   if not CheckNode(sID^,msg.source,true) then exit;
   list.Init(Target^);
   r.Init(cDGramSz);
   r.WriteByte(opcode.dhtBeatR);
   r.Write(MyID,20);
   r.Write(mark,2);
-  r.WriteByte({ttl}0);
+  r.WriteByte(GetSocketTTL(msg.source));
   while r.WrBufLen>=36 do begin
     list.Next;
     if not assigned(list.bkt) then break; {simply no more peers}
@@ -397,7 +399,7 @@ procedure SendBeat(const contact:tNetAddr; const forid: tPID; mark:word);
  r.Write(MyID,sizeof(tPID));
  r.Write(ForID,sizeof(tPID));
  r.Write(mark,2);
- r.WriteByte(0{TTL});
+ r.WriteByte(GetSocketTTL(contact));
  SendMessage(r.base^,r.length,contact);
  r.Free;
 end;

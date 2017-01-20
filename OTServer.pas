@@ -49,6 +49,7 @@ tClient=object
  {serverside client object}
  next:tClient_ptr;
  addr:tNetAddr; socket:tSocket; saddr:tSockAddrL;
+ socket_ttl:Word;
  {channel sheduler}
  channel:array [1..32] of ^tChannel;
  ccnt:byte; cur:byte; wcur:word;
@@ -87,6 +88,7 @@ procedure tClient.Init(const iaddr:tNetAddr);
  addr:=iaddr;
  addr.ToSocket(saddr);
  socket:=GetSocket(addr);
+ socket_ttl:=GetSocketTTL(addr);
  for i:=high(channel) downto 1 do channel[i]:=nil;
  cur:=0; ccnt:=0; wcur:=0;
  IdleTicks:=0; AckCount:=0;
@@ -198,7 +200,7 @@ procedure tChannel.Reset(prio:byte; const cmd:tMemoryStream);
  info.WriteByte(0);
  info.WriteWord4(fo.length);
  info.WriteByte(High(seg));
- info.WriteByte(0);
+ info.WriteByte(cli^.socket_ttl);
  s2:=1+high(seg)-(cmd.Left div 9);
  if s2<0 then s2:=0;
  si:=s2; reqlen:=0;
