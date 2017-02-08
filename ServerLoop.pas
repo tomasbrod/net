@@ -531,7 +531,6 @@ BEGIN
  ShedUU:=nil; {todo: allocate a few to improve paging}
  InitMTime;
  mNow:=GetMTime;
- writeln('MTimE=',mnow);
  OnTerminate:=nil;
  //SetTextBuf(OUTPUT,nb);
  Flush(OUTPUT);

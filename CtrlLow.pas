@@ -1,14 +1,6 @@
 {INCLUDE FILE}
 {***Low-Level Part***}
 
-type tMethodProc=procedure(var client:tClient; var a,r:tMemoryStream);
-type tMethod=object
- ptr:tMethodProc;
- len:word;
- procedure Init(proc:tMethodProc; argl:word);
-end;
-{change this if Ctrl fails to compile}
-var methods:array [0..32] of tMethod;
 type tServer=object
  listen:tSocket;
  prevot:procedure;
@@ -17,13 +9,14 @@ type tServer=object
  procedure InitUnix;
  procedure InitInet(port:word);
 end;
+const cSocketName='ctrl';
 var Server1:tServer;
 
 procedure tServer.InitUnix;
  var addr:Sockets.sockaddr_un;
  begin
  addr.sun_family:=AF_UNIX;
- addr.sun_path:='ctrl.sock'; //automagically converted to c-string
+ addr.sun_path:=cSocketName; //automagically converted to c-string
  fpUnlink(@addr.sun_path);
  listen:=fpSocket(addr.sun_family,SOCK_STREAM,0);
  SC(@fpSocket,listen);
@@ -44,17 +37,16 @@ procedure tServer.InitInet(port:word);
 end;
 procedure OnTerminate;
   begin
-  fpUnlink('ctrl.sock');
+  fpUnlink(cSocketName);
   if assigned(Server1.PrevOT) then Server1.PrevOT;
 end;
 procedure tServer.Init;
- var oi:byte;
+ var port:word;
  begin
- oi:=OptIndex('-ctrl-port');
- if oi=0 then InitUnix
+ port:=trunc(GetCfgNum('ctrl.port'));
+ if port=0 then InitUnix
  else begin
-  assert(OptParamCount(oi)=1);
-  InitInet(StrToInt(paramstr(oi+1)));
+  InitInet(port);
  end;
  SC(@fpListen,fpListen(listen,8));
  ServerLoop.WatchFD(listen,@ListenEvent);
@@ -93,8 +85,10 @@ end;
 
 procedure tClient.Done;
  begin
- Int;
+ Interrupt;
+ {$ifdef ctlStore}
  if assigned(SndObj) then Dispose(SndObj,Done);
+ {$endif}
  ServerLoop.WatchFD(s,nil);
  fpClose(s);
  FreeMem(@self,sizeof(self));
@@ -120,8 +114,8 @@ procedure tClient.Event(ev:word);
          method:Word;
          end;
  var arg:pointer;
- var rc,sndc:LongInt;
- var msg_stream,resp_stream:tMemoryStream;
+ var rc:LongInt;
+ var msg_stream:tMemoryStream;
  const cBuf=2048;
  begin
  rc:=1;
@@ -132,9 +126,9 @@ procedure tClient.Event(ev:word);
       {$endif}
       ServerLoop.WatchFD(s,nil);
       ServerLoop.WatchFD(s,@Event);
+      {$ifdef ctlStore}
       Dispose(SndObj,Done);
       SndObj:=nil;
-      {$ifdef ctlStore}
     end else begin
       arg:=GetMem(cBuf);
       rc:=SndObjLeft;
@@ -170,9 +164,6 @@ procedure tClient.Event(ev:word);
       if rc=1 then begin
         hdr.method:=ntohs(hdr.method);
         hdr.length:=ntohs(hdr.length);
-        if (hdr.method>high(methods))(*or(hdr.method<low(methods))*)or(not assigned(methods[hdr.method].ptr)) then rc:=-4 else
-        if (methods[hdr.method].len=0)and(hdr.length>0) then rc:=-4;
-        if hdr.length<methods[hdr.method].len then rc:=-4; {range check error? here?}
         if hdr.length>cBuf then rc:=-4;
       end;
       if (hdr.length>0)and(rc=1) then begin
@@ -181,15 +172,13 @@ procedure tClient.Event(ev:word);
       end;
       if rc=1 then begin
         msg_stream.Init(arg,hdr.length,cBuf);
-        resp_stream.Init(cBuf);
-        resp_stream.Write(arg,2);
-        //Writeln('CtrlLow.Event: method=',hdr.method,' arglen=',hdr.length);
-        Int;
-        methods[hdr.method].ptr(self,msg_stream,resp_stream);
-        if not error then begin
-          resp_stream.Seek(0);
-          resp_stream.WriteWord2(resp_stream.Length-2);
-          self.SendTo(resp_stream); resp_stream.Free;
+        try
+        
+          Interrupt;
+          Command(hdr.method,msg_stream);
+        except
+          Writeln('CtrlLow.Event: error while processing command method=',hdr.method,' arglen=',hdr.length);
+          raise;
         end;
       end;
       if hdr.length>0 then FreeMem(arg,hdr.length);
@@ -232,11 +221,4 @@ procedure tClient.SendObject(var o:tStoreObject; ilen:LongWord);
   ServerLoop.WatchFDRW(s,@Event);
 end;
 {$endif}
-
-procedure tMethod.Init(proc:tMethodProc; argl:word);
- begin
- assert(ptr=nil);
- ptr:=proc;
- len:=argl;
-end;
 

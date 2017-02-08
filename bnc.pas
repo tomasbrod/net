@@ -11,7 +11,7 @@ procedure InitUnix;
   var addr:Sockets.sockaddr_un;
   begin
   addr.sun_family:=AF_UNIX;
-  addr.sun_path:='ctrl.sock';
+  addr.sun_path:='ctrl';
   sck.h:=fpSocket(addr.sun_family,SOCK_STREAM,0);
   SC(@fpSocket,sck.h);
   SC(@fpConnect,fpConnect(sck.h,@addr,sizeof(addr)));
@@ -267,7 +267,7 @@ end;
 
 procedure cmdDhtDump;
   var st:byte;
-    Depth,Ban,Hops:byte;
+    Depth,Ban:byte;
     ModifyTime,LastMsgFrom,i,bktsize:LongWord;
     ReqDelta:Word;
     id:tKey20;
@@ -276,7 +276,9 @@ procedure cmdDhtDump;
   req.WriteWord2(14);
   aSend; aRecv; st:=res.ReadByte;
   if st=0 then begin
-    writeln('DHT Dump');
+    res.Read(ID,20);
+    writeln('DHT Dump of node ',string(ID));
+    if res.left=0 then writeln('No buckets, DHT is empty.');
     while res.left>0 do begin
       depth:=res.ReadByte;
       bktsize:=res.ReadByte;

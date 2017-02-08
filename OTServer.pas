@@ -4,11 +4,7 @@ unit OTServer;
 
 INTERFACE
 IMPLEMENTATION
-USES Sockets,BaseUnix,Porting,ServerLoop,ObjectModel,opcode,SysUtils,Store2;
-
-{ Protocol:
-...
-}
+USES Sockets,BaseUnix,Porting,ServerLoop,ObjectModel,opcode,SysUtils,Store;
 
 var thread: record
   ID: tThreadID;
@@ -24,7 +20,6 @@ var PollTimeout:LongInt;
 var mNow:tMTime; {override for our thread}
 var sharedbuf:array [1..2048] of byte; {->1k}
 
-type tFID=Store2.tFID;
 type
 tClient_ptr=^tClient; tChannel_ptr=^tChannel;
 tSegDescr=record
@@ -36,7 +31,7 @@ tChannel=object
  chn: byte;
  weight,eotrtr:byte;
  opened:boolean;
- fo:tSObj;
+ fo:tStoreObject;
  FID:tFID;
  seg:array [0..47] of tSegDescr;
  si:shortint;
@@ -181,20 +176,21 @@ procedure tChannel.Reset(prio:byte; const cmd:tMemoryStream);
  var tmp:tSegDescr;
  var reqlen:LongWord;
  begin
- id:=cmd.ReadPtr(20);
+ id:=cmd.ReadPtr(24);
  info.Init(@fn,0,sizeof(fn));
  info.WriteByte(otData);
  info.WriteByte(chn);
  if (not opened)or(FID<>ID^) then begin
    if opened then fo.Done;
    try
+    if not IsBlob(id^) then raise eObjectNF.Create('');
     FID:=id^;
     fo.Init(FID);
     opened:=true;
    except on eObjectNF do begin
     info.WriteByte(otNotFound);
     cli^.Send(info.base^,info.length);
-    Finish;  exit end end;
+   Finish;  exit end end;
  end;
  info.WriteByte(otInfo);
  info.WriteByte(0);

@@ -2,17 +2,17 @@ Unit CTRL;
 INTERFACE
 IMPLEMENTATION
 {$define ctlDHT}
-{$define ctlStore}
-{$undef ctlMutable}
-{$define ctlProf}
-{$define ctlFetch}
+{-define ctlStore}
+{-define ctlMutable}
+{-define ctlProf}
+{-define ctlFetch}
 USES ServerLoop,opcode
     ,ObjectModel
     ,Sockets,BaseUnix
     ,SysUtils
     ,Crypto
-    {$ifdef ctlDHT},dht{$endif}
-    ,Store2
+    {$ifdef ctlDHT},DHT{$endif}
+    ,Store
     {$ifdef ctlMutable},Mutable{$endif}
     {$ifdef ctlProf},Profile,ProfCache{$endif}
     {$ifdef ctlFetch},Fetch{$endif}
@@ -20,16 +20,26 @@ USES ServerLoop,opcode
 
 type tClient=object
   s:tSocket;
-  hash:tKey20;
+  hash:tKey32;
   error:boolean;
   procedure Init(i_s:tSocket);
   procedure Init2;
   procedure Done;
-  procedure Int;
+  procedure Interrupt;
   procedure Event(ev:word);
+  procedure Command(method:word; var args:tMemoryStream); inline;
   procedure SendTo(msg:tMemoryStream);
+
+  procedure Terminate(var a,r:tMemoryStream);
+  procedure GetInfo(var a,r:tMemoryStream);
+
+  {$ifdef ctlDHT}public
+  procedure DhtPeer(var a,r:tMemoryStream);
+  procedure DhtDump(var a,r:tMemoryStream);
+  {$endif}
+
   {$ifdef ctlStore}public
-  SndObj:^Store2.tStoreObject;
+  SndObj:^Store.tStoreObject;
   SndObjLeft:LongWord;
   RcvObj:^tFileStream;
   RcvObjLeft:LongWord;
@@ -37,48 +47,92 @@ type tClient=object
   procedure SendObject(var o:tStoreObject; ilen:LongWord);
   procedure RcvObjComplete;
   {$endif}
+
   {$ifdef ctlFetch}public
   transf:Fetch.pFetch;
   procedure FetchEvent( task_:tTask_ptr; ev:tTaskEvent; data:pointer );
   {$endif}
+
   {$ifdef ctlMutable}public
   mutator:^tMutator;
   procedure MutatorEvent( ev:tMutEvt; ver:longword; const fid:tFID; const Src:tNetAddr );
   procedure MutatorComplete;
   {$endif}
 end;
-{$I CtrlLow.pas}
 
-procedure Terminate(var client:tClient; var a,r:tMemoryStream);
+procedure tClient.Command(method:word; var args:tMemoryStream);
+  var resp_stream:tMemoryStream;
+  begin
+  resp_stream.Init(2048);
+  resp_stream.Write(method,2);
+  case method of
+    000: GetInfo(args,resp_stream);
+    001: Terminate(args,resp_stream);
+    {$ifdef ctlDHT}
+    002: DhtPeer(args,resp_stream);
+    014: DhtDump(args,resp_stream);
+    {$endif}
+  end;
+  if not error then begin
+    resp_stream.Seek(0);
+    resp_stream.WriteWord2(resp_stream.Length-2);
+    self.SendTo(resp_stream); resp_stream.Free;
+  end;
+end;
+procedure tClient.Init2;
+  begin
+  {$ifdef ctlMutable}
+  mutator:=nil;
+  {$endif}
+  {$ifdef ctlFetch}
+  transf:=nil;
+  {$endif}
+end;
+procedure tCLient.Interrupt; begin
+  {$ifdef ctlMutable}
+  if assigned(mutator) then mutator^.done; mutator:=nil;
+  {$endif}
+  {$ifdef ctlFetch} if assigned(transf) then begin
+    transf^.Detach(@FetchEvent);
+    transf:=nil;
+  end; {$endif}
+end;
+
+{$I CtrlLow.pas} {**** Commands implementation ****}
+
+procedure tClient.Terminate(var a,r:tMemoryStream);
  begin
  writeln('Ctrl.Terminate');
  ServerLoop.RequestTerminate(0);
 end;
 
-procedure GetInfo(var client:tClient; var a,r:tMemoryStream);
+procedure tClient.GetInfo(var a,r:tMemoryStream);
  begin
  r.Write(VersionString[1],length(VersionString));
- //r.Write(VersionString[1],length(VersionString));
  r.WriteByte(0);
 end;
 
 {$ifdef ctlDHT}
-procedure DhtPeer(var client:tClient; var a,r:tMemoryStream);
+procedure tClient.DhtPeer(var a,r:tMemoryStream);
   var contact:^tNetAddr;
   begin
-  contact:=a.ReadPtr(sizeof(tNetAddr));
+  try
+    contact:=a.ReadPtr(sizeof(tNetAddr));
+  except
+    on eReadPastEoF do begin error:=true; exit; end;
+  end;
   DHT.NodeBootstrap(contact^);
   r.WriteByte(0);
 end;
 
-procedure DhtDump(var client:tClient; var a,r:tMemoryStream);
+procedure tClient.DhtDump(var a,r:tMemoryStream);
   var bkt: ^DHT.tBucket;
   var i:integer;
   begin
   r.WriteByte(0);
+  r.Write(DHT.MyID,20);
   bkt:=DHT.GetDHTTable;
   while assigned(bkt) do with bkt^ do begin
-    {r.Write(Prefix,20);}
     r.WriteByte(Depth);
     r.WriteByte(high(peer));
     r.WriteWord4(MNow-ModifyTime);
@@ -96,7 +150,7 @@ end;
 
 {$ifdef ctlStore}
   {$ifdef ctlStoreAdv}
-procedure StorePutLN(var client:tClient; var a,r:tMemoryStream);
+procedure tClient.StorePutLN(var client:tClient; var a,r:tMemoryStream);
   var path:ansistring;
   var l:longword;
   var so:tStoreObject;
@@ -118,7 +172,7 @@ procedure StorePutLN(var client:tClient; var a,r:tMemoryStream);
   end;
 end;
 
-procedure StorePutMV(var client:tClient; var a,r:tMemoryStream);
+procedure tClient.StorePutMV(var client:tClient; var a,r:tMemoryStream);
   var path:ansistring;
   var l:longword;
   var so:tStoreObject;
@@ -141,7 +195,7 @@ procedure StorePutMV(var client:tClient; var a,r:tMemoryStream);
 end;
   {$endif}
 
-procedure StoreStat(var client:tClient; var a,r:tMemoryStream);
+procedure tClient.StoreStat(var client:tClient; var a,r:tMemoryStream);
   var so:tStoreObject;
   var id:^tFID;
   var path:AnsiString;
@@ -168,7 +222,7 @@ procedure StoreStat(var client:tClient; var a,r:tMemoryStream);
   end;
 end;
 
-procedure StoreRefAdj(var client:tClient; var a,r:tMemoryStream);
+procedure tClient.StoreRefAdj(var client:tClient; var a,r:tMemoryStream);
   var so:tStoreObject;
   var id:^tFID;
   var adj:integer;
@@ -186,7 +240,7 @@ procedure StoreRefAdj(var client:tClient; var a,r:tMemoryStream);
   end;
 end;
 
-procedure StoreGet(var client:tClient; var a,r:tMemoryStream);
+procedure tClient.StoreGet(var client:tClient; var a,r:tMemoryStream);
   var o:^tStoreObject;
   var id:^tFID;
   var ofs,len:LongWord;
@@ -213,7 +267,7 @@ procedure StoreGet(var client:tClient; var a,r:tMemoryStream);
   Dispose(o,Done);
 end;
 
-procedure StorePut(var client:tClient; var a,r:tMemoryStream);
+procedure tClient.StorePut(var client:tClient; var a,r:tMemoryStream);
   var len:LongWord;
   begin
   len:=a.ReadWord4;
@@ -242,7 +296,7 @@ end;
 {$endif}
 
 {$ifdef ctlFetch}
-procedure FetchStart(var client:tClient; var a,r:tMemoryStream);
+procedure tClient.FetchStart(var client:tClient; var a,r:tMemoryStream);
   var fid:^tFID;
   var src:^tNetAddr;
   var prio:byte;
@@ -261,7 +315,7 @@ procedure FetchStart(var client:tClient; var a,r:tMemoryStream);
   r.WriteByte(0);
 end;
 
-procedure FetchQuery(var client:tClient; var a,r:tMemoryStream);
+procedure FtClient.etchQuery(var client:tClient; var a,r:tMemoryStream);
   begin
   Client.Error:=true;
 end;
@@ -284,7 +338,7 @@ end;
 {$endif}
 
 {$ifdef ctlMutable}
-procedure MutableSet(var client:tClient; var a,r:tMemoryStream);
+procedure tClient.MutableSet(var client:tClient; var a,r:tMemoryStream);
   var fid:^tFID;
   var meta:tMutableMeta;
   var o:tStoreObject;
@@ -307,7 +361,7 @@ procedure MutableSet(var client:tClient; var a,r:tMemoryStream);
   end;
 end;
 
-procedure MutableGet(var client:tClient; var a,r:tMemoryStream);
+procedure tClient.MutableGet(var client:tClient; var a,r:tMemoryStream);
   var des:tMutableMeta;
   var found:boolean;
   var pid:^tPID;
@@ -323,7 +377,7 @@ procedure MutableGet(var client:tClient; var a,r:tMemoryStream);
   end;
 end;
 
-procedure MutableUpdate(var client:tClient; var a,r:tMemoryStream);
+procedure tClient.MutableUpdate(var client:tClient; var a,r:tMemoryStream);
   var pid:^tPID;
   begin
   pid:=a.ReadPtr(20);
@@ -358,7 +412,7 @@ end;
 
 
 {$ifdef ctlProf}
-procedure ProfSet(var client:tClient; var a,r:tMemoryStream);
+procedure tClient.ProfSet(var client:tClient; var a,r:tMemoryStream);
   var fid:^tFID;
   var p:tProfileRead;
   var o:tStoreObject;
@@ -381,7 +435,7 @@ procedure ProfSet(var client:tClient; var a,r:tMemoryStream);
   end;
 end;
 
-procedure ProfGet(var client:tClient; var a,r:tMemoryStream);
+procedure tClient.ProfGet(var client:tClient; var a,r:tMemoryStream);
   var found:boolean;
   var pid:^tPID;
   var fid:tFID;
@@ -399,55 +453,6 @@ procedure ProfGet(var client:tClient; var a,r:tMemoryStream);
 end;
 {$endif}
 
-procedure tClient.Init2;
-  begin
-  {$ifdef ctlMutable}
-  mutator:=nil;
-  {$endif}
-  {$ifdef ctlFetch}
-  transf:=nil;
-  {$endif}
-end;
-procedure tCLient.Int; begin
-  {$ifdef ctlMutable}
-  if assigned(mutator) then mutator^.done; mutator:=nil;
-  {$endif}
-  {$ifdef ctlFetch} if assigned(transf) then begin
-    transf^.Detach(@FetchEvent);
-    transf:=nil;
-  end; {$endif}
-end;
 BEGIN
   Server1.Init;
-  FillChar(methods,sizeof(methods),0);
-  methods[00].Init(@GetInfo,0);
-  methods[01].Init(@Terminate,0);
-  {$ifdef ctlDHT}
-  methods[02].Init(@DhtPeer,sizeof(tNetAddr));
-  methods[14].Init(@DhtDump,0);
-  {$endif}
-  {$ifdef ctlStore}
-    {$ifdef ctlStoreAdv}
-  methods[03].Init(@StorePutLN,2); {path:string[all]}
-  methods[09].Init(@StorePutMV,2); {path:string[allg]}
-    {$endif}
-  methods[04].Init(@StoreGet,28); {fid:20;ofs,len:Word4}
-  methods[08].Init(@StorePut,4); {len:Word4}
-  methods[10].Init(@StoreStat,20); {fid:20}
-  methods[11].Init(@StoreRefAdj,21); {fid:20, adj:byte+128}
-  {$endif}
-  {$ifdef ctlFetch}
-  methods[12].Init(@FetchStart,39); {fid:20; addr:18; prio:byte}
-  methods[13].Init(@FetchQuery,20); {fid:20}
-  {$endif}
-  {$ifdef ctlMutable}
-  methods[05].Init(@MutableGet,sizeof(tPID));
-  methods[06].Init(@MutableSet,sizeof(tFID));
-  methods[07].Init(@MutableUpdate,sizeof(tFID));
-  {$endif}
-  {$ifdef ctlProf}
-  methods[15].Init(@ProfGet,sizeof(tPID));
-  methods[16].Init(@ProfSet,sizeof(tFID));
-  {$endif}
 END.
-

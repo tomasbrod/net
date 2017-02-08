@@ -15,6 +15,7 @@ USES SysUtils,Sockets;
 
 type tKey16=packed array [0..15] of byte;
 type tKey20=packed array [0..19] of byte;
+type tKey24=packed array [0..23] of byte;
 type tKey32=packed array [0..31] of byte;
 type tKey64=packed array [0..63] of byte;
 
@@ -206,6 +207,9 @@ operator :=(a:pointer) r:shortstring;
 operator :=(a:tKey20) r:string;
 operator :=(a:string) r:tKey20;
 
+operator :=(k:tKey24) s:string;
+operator :=(a:string) r:tKey24;
+
 operator :=(k:tKey32) s:string;
 operator :=(a:string) r:tKey32;
 
@@ -224,6 +228,7 @@ operator := (net : Word6) host:Int64;
 operator := (host: Int64) net:Word6;
 
 operator = (a,b:tKey20) r:boolean;
+operator = (a,b:tKey24) r:boolean;
 Operator = (aa, ab :tNetAddr) b : boolean;
 
 (*** Stream Read/Write Overloads for some types ***)
@@ -277,21 +282,16 @@ uses
   ;
 
 {*** MemStram ***}
-operator :=(a:tKey20) r:string;
-  begin
-  SetLength(r,40);
-  BinToHex(@r[1], a, 20);
-end;
-operator :=(a:string) r:tKey20;
-  begin
-  if HexToBin(@a[1],pchar(@r),20)<20 then raise
-  eConvertError.Create('Invalid Hex String');
-end;
 
 operator  =(a,b:tKey20) r:boolean;
   begin
   r:=CompareDWord(a,b,5)=0;
 end;
+operator  =(a,b:tKey24) r:boolean;
+  begin
+  r:=CompareDWord(a,b,6)=0;
+end;
+
 
 function PrefixLength(const a,b:tKey20):byte;
  var i:byte;
@@ -309,6 +309,28 @@ function PrefixLength(const a,b:tKey20):byte;
   m:=m shr 1;
   inc(result);
  end;
+end;
+
+operator :=(a:tKey20) r:string;
+  begin
+  SetLength(r,40);
+  BinToHex(@r[1], a, 20);
+end;
+operator :=(a:string) r:tKey20;
+  begin
+  if HexToBin(@a[1],pchar(@r),20)<20 then raise
+  eConvertError.Create('Invalid Hex String');
+end;
+
+operator :=(k:tKey24) s:string;
+  begin
+  SetLength(s,48);
+  BinToHex(@s[1], k, 24);
+end;
+operator :=(a:string) r:tKey24;
+  begin
+  if HexToBin(@a[1],pchar(@r),24)<24 then raise
+  eConvertError.Create('Invalid Hex String');
 end;
 
 operator :=(k:tKey32) s:string;
