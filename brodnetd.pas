@@ -7,10 +7,8 @@ uses cmem,cthreads,ServerLoop, ObjectModel
 	,OTServer
 	,DHT
 	,Ctrl
-  //,ott
   ,dhlt
-  //,TestMutable
-  //,TestMutator
+  ,Mutable
 	;
 
 BEGIN

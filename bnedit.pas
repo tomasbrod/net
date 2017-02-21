@@ -65,15 +65,17 @@ const first_sec_ofs=8+6+32+64+64;
 
 procedure ShowSecretID(var pfs:tFileStream);
   var pk:tKey32;
-  var id:tKey20;
+  var id:tKey24;
   var use:char;
   var left:LongWord;
   var msg:string;
   begin
   pfs.Seek(8+6);
   pfs.Read(pk,32);
-  SHA256_Buffer(id,20,pk,32);
+  SHA256_Buffer(id,24,pk,32);
+  id[23]:=id[23] and 254;
   writeln('ID: ',string(id));
+  writeln('PUB L ',string(pk));
   pfs.Seek(first_sec_ofs);
   left:=pfs.Length-first_sec_ofs;
   msg:='SEC X XXXXXXXXXXXXXX...';

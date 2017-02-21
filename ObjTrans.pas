@@ -3,7 +3,7 @@ UNIT ObjTrans;
   Object Transfer Client
 }
 INTERFACE
-uses ObjectModel,Store2,ServerLoop;
+uses ObjectModel,Store,ServerLoop;
 
 type
 tAggr_ptr=^tAggr;
@@ -25,21 +25,25 @@ tJob=object
   private
   ch:byte;
   FirstSeg:pointer;
-  MaxReqCnt:word;
   RetryCounter:word;
   DgrCntSinceReq:LongWord;
-  procedure OnData(msg:tMemoryStream; rcvttl:word);
+  procedure OnData(msg:tMemoryStream);
+  procedure OnInfo(icode:byte; ifilelen:LongWord; ireqlen:LongWord; msg:tMemoryStream);
   procedure OnTimeout; {nothing is flowing thru aggr or afterrequest check}
   end;
 
 tAggr=object
   Remote:tNetAddr;
-  refc, maxchan: byte;
-  distance: word;
+  refc: byte;
+  distance: longint;
+  max_channels{highest channel number},
+  max_segments{one less then real max}: byte;
   procedure ResetIdle;
   private
   channel: array [1..16] of ^tJob;
   ncpt, idletick: byte;
+  MarkValue: byte;
+  LargestDgr: Word;
   ByteCnt:LongWord;
   DgrCnt:LongWord;
   DgrCntCheck:LongWord;
@@ -48,6 +52,7 @@ tAggr=object
   procedure Init;
   procedure Add(var job: tJob);
   procedure Del(var job: tJob);
+  procedure OnInfo(msg:tSMsg);
   procedure OnData(msg:tSMsg);
   procedure Periodic;
   end;
@@ -98,7 +103,6 @@ procedure tJob.Init;
   Callback:=nil;
   Received:=0;
   Total:=$FFFFFFFF;
-  MaxReqCnt:=99;
   RetryCounter:=0;
   FirstSeg:=nil;
   Aggr:=nil;
@@ -108,7 +112,6 @@ end;
 
 procedure tJob.Start;
   begin
-  Assert( (Weight+opcode.otReq)<=high(byte));
   Assert(assigned(callback));
   Assert(assigned(aggr));
   assert(ch=0);
@@ -154,12 +157,12 @@ procedure tJob.MakeRequest(diag:byte);
   seg:=nil;
   ReqLen:=0;
   ReqCnt:=0;
-  {TODO: derive request size from connection datagram size}
-  s.Init(383); {23+(40*9)=383}
-  s.WriteByte(opcode.otCtrl);
-  s.WriteByte(opcode.otReq+Weight);
+  {$hint derive request size from connection datagram size}
+  s.Init(27+(40*9));
+  s.WriteByte(opcode.otRequest);
   s.WriteByte(ch);
-  s.Write(FID,20);
+  s.WriteByte(Weight);
+  s.Write(FID,24);
   repeat
     if seg=nil then begin
       b:=0;
@@ -181,10 +184,10 @@ procedure tJob.MakeRequest(diag:byte);
     s.WriteWord4(l);
     inc(ReqLen,l);
     inc(ReqCnt);
-  until (s.WrBufLen<9)or(ReqLen>=ReqLenLim)or(ReqCnt>MaxReqCnt);
+  until (s.WrBufLen<9)or(ReqLen>=ReqLenLim)or(ReqCnt>aggr^.max_segments);
   if ReqLen=0 then begin
     writeln(' done');
-    FreeMem(s.base,s.size);
+    s.Free;
     error:=1;
     Callback;
   end else begin
@@ -198,11 +201,25 @@ procedure tJob.MakeRequest(diag:byte);
   end;
 end;
 
-procedure tJob.OnData(msg:tMemoryStream; rcvttl:word);
+procedure tJob.OnInfo(icode:byte; ifilelen:LongWord; ireqlen:LongWord; msg:tMemoryStream);
+  begin
+  if (icode=0) or (icode=1) then begin
+    Total:=ifilelen;
+    {...:=}{ireqlen};
+    if ireqlen=0 then begin
+      {$hint some rate limiting}
+      MakeRequest(3);
+    end;
+  end else begin
+    error:=icode;
+    Callback;
+  end
+end;
+  
+procedure tJob.OnData(msg:tMemoryStream);
   var hiOfs:byte;
   var Offset:LongWord;
   var dtlen:word;
-  var dist:integer;
   procedure SetSegment(first,after:LongWord);
     var p:^pointer;
     var c,k:^tSegItem;
@@ -234,29 +251,16 @@ procedure tJob.OnData(msg:tMemoryStream; rcvttl:word);
   end;
   begin
   hiOfs:=msg.ReadByte;
-  if hiOfs<otInfo then begin
-    Offset:=msg.ReadWord4;
-    dtlen:=msg.RdBufLen;
-    dataf.Seek(Offset);
-    dataf.Write(msg.RdBuf^,dtlen);{$note iocheck todo}
-    SetSegment(Offset,Offset+dtlen);
-    RetryCounter:=0;
-    Inc(DgrCntSinceReq);
-    Inc(Received,dtLen);
-  {otSINC handled in Aggr}
-  end else if hiOfs=otInfo then begin
-    hiOfs:=msg.ReadByte;
-    Offset:=msg.ReadWord4;
-    MaxReqCnt:=msg.ReadByte;
-    try dist:=msg.ReadByte-rcvttl;
-    except dist:=0 end;
-    if dist>=0 then Aggr^.Distance:=dist;
-    Total:=Offset; {$hint dangerous}
-  end else if (hiOfs=otFail) or (hiOfs=otNotFound) then begin
-    error:=hiOfs;
-    Callback;
-  end
-  else if hiOfs=otEoT then MakeRequest(3);  //ERROR! too often
+  assert(hiOfs=0{!!!});
+  Offset:=msg.ReadWord4;
+  dtlen:=msg.RdBufLen;
+  dataf.Seek(Offset);
+  dataf.Write(msg.RdBuf^,dtlen);
+  {$hint iocheck todo}
+  SetSegment(Offset,Offset+dtlen);
+  RetryCounter:=0;
+  Inc(DgrCntSinceReq);
+  Inc(Received,dtLen);
 end;
 
 procedure tJob.OnTimeout;
@@ -274,47 +278,76 @@ procedure tJob.OnTimeout;
   else DgrCntSinceReq:=0; {next time aggr calls its probably serious}
 end;
 
-procedure tAggr.OnData(msg:tSMsg);
-  var chn,oh:byte;
-  var sm:Word;
-  var slen:LongWord;
-  var rate:single;
+procedure tAggr.OnInfo(msg:tSMsg);
+  var rr:packed record op,chn,code:byte end;
+  var flenhi:byte;
+  var flen,rlen:LongWord;
   var s:tMemoryStream absolute msg.st;
   var debugmsg:string[127];
   begin
-  s.Skip(1);
-  chn:=s.ReadByte;
-  oh:=s.ReadByte;
-  if DgrCnt=0 then StartT:=mNow;
-  Inc(ByteCnt,s.Length);
-  Inc(DgrCnt); Inc(DgrCntCheck);
-  if oh=otRateInfo then begin
+  {common things}
+  s.Read(rr,3);
+  {handle debug info}
+  if rr.code=2 then begin
     SetLength(debugmsg,s.RdBufLen);
     s.Read(debugmsg[1],s.RdBufLen);
-    writeln('ObjTrans.',string(remote),'#',chn,'.ServerDebug: '#10+debugmsg);
+    writeln('ObjTrans.',string(remote),'#',rr.chn,'.ServerDebug: '#10+debugmsg);
   exit end;
+  max_channels:=s.ReadByte;
+  max_segments:=s.ReadByte;
+  distance:=s.ReadByte-msg.ttl;
+  flenhi:=s.ReadByte;
+  flen:=s.ReadWord4;
+  rlen:=s.ReadWord4;
+  assert(flenhi=0{!!!});
+  if rr.chn>0 then begin
+    if (rr.chn<=high(channel)) and assigned(channel[rr.chn]) then begin
+      channel[rr.chn]^.OnInfo(rr.code,flen,rlen,s);
+    end {else invalid info...}
+  end else begin
+    {info/error to all channels...}
+  end;
+end;
+
+procedure tAggr.OnData(msg:tSMsg);
+  var op,chn,code:byte;
+  var rate:single;
+  var s:tMemoryStream absolute msg.st;
+  begin
+  {common things}
+  op:=s.ReadByte;
+  chn:=s.ReadByte;
+  code:=s.ReadByte;
+  {handle invalid channel}
   if chn=0 then exit;
   if (chn>high(channel)) or (not assigned(channel[chn])) then begin
     s.Seek(0); s.Trunc;
-    s.WriteByte(otCtrl);
-    s.WriteByte(otFin);
+    s.WriteByte(opcode.otStop);
     s.WriteByte(chn);
     SendMessage(s.base^,s.length,Remote);
   exit end;
-  if oh=otSINC then s.Read(sm,2) else s.seek(s.position-1);
-  channel[chn]^.OnData(s,msg.TTL);
-  if oh=otSINC then begin
-    slen:=s.Length;
+  {measurements}
+  if (DgrCnt=0)or(MarkValue<>code) then begin
+    StartT:=mNow;
+    ByteCnt:=0;
+    DgrCnt:=0;
+    MarkValue:=code;
+    LargestDgr:=0;
+  end;
+  Inc(ByteCnt,s.Length);
+  Inc(DgrCnt);
+  Inc(DgrCntCheck);
+  if LargestDgr<s.Length then LargestDgr:=s.Length;
+  {give channel data up}
+  channel[chn]^.OnData(s);
+  {send report}
+  if (op=otDataSync) or ((DgrCnt>=3) and ((mNow-StartT)>=100)) then begin
     s.Seek(0); s.Trunc;
-    s.WriteByte(otCtrl); s.WriteByte(otSIACK);
-    s.Write(sm,2);
-    s.WriteWord2(slen);
-    SendMessage(s.base^,s.length,Remote);
-  end else if (DgrCnt>=2) and ((mNow-StartT)>=100) then begin
-    s.Seek(0); s.Trunc;
-    s.WriteByte(otCtrl); s.WriteByte(otSPEED);
+    s.WriteByte(otReport);
+    s.WriteByte(MarkValue);
     rate:=(ByteCnt/(mNow-StartT))*16;
     s.WriteWord4(round(rate));
+    s.WriteWord2(LargestDgr);
     ByteCnt:=1;
     DgrCnt:=0;
     SendMessage(s.base^,s.length,Remote);
@@ -333,8 +366,11 @@ procedure tAggr.Init;
   DgrCnt:=0;
   DgrCntCheck:=0;
   StartT:=0;
-  MaxChan:=high(channel)-1;
+  LargestDgr:=32;
   Distance:=65535;
+  max_channels:=32;
+  max_segments:=15;
+  MarkValue:=255;
 end;
 
 procedure tAggr.Add(var job: tJob);
@@ -379,7 +415,9 @@ procedure tAggr.Periodic;
   end else begin
     {check idle time and delete self}
     if idletick>17 then begin
+      writeln('ObjTrans.tAggr.Periodic.IdleDeleteSelf ',string(remote));
       i:=FindIndex(@Aggrs[0], high(Aggrs)+1, @Remote, @compareAggr);
+      writeln('ObjTrans.tAggr.Periodic.IdleDeleteSelf ',i);
       Aggrs[i]:=nil;
       ReadyForData:=false;
       FreeMem(@self,sizeof(self)); EXIT;
@@ -393,10 +431,14 @@ procedure DataHandler(msg:tSMsg);
   begin
   aggr:=GetAggr(Msg.Source, False);
   if assigned(aggr) and (aggr^.ReadyForData) then begin
-    aggr^.OnData(Msg);
+    if byte(msg.Data^)=opcode.otInfo
+      then aggr^.OnInfo(Msg)
+      else aggr^.OnData(Msg);
   end;
 end;
 
 BEGIN
   SetupOpcode(opcode.otData,@DataHandler);
+  SetupOpcode(opcode.otDataSync,@DataHandler);
+  SetupOpcode(opcode.otInfo,@DataHandler);
 END.

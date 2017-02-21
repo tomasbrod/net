@@ -253,6 +253,7 @@ procedure Reciever(var p:tPollFD);
     Msg.Source.FromSocket(SrcAddr);
     Msg.Length:=nret;
     Msg.Data:=@Buffer;
+    Msg.OP:=op;
     Msg.st.Init(@Buffer,Msg.Length,sizeof(Buffer));
   end;
 

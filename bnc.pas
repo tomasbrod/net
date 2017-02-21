@@ -1,5 +1,5 @@
 program bnc;
-USES ObjectModel,SockStream,SysUtils,Sockets,BaseUnix;
+USES ObjectModel,SockStream,SysUtils,Sockets,BaseUnix,opcode;
 
 {BrodNet CLI programs}
 {bncmd communicate with daemon}
@@ -28,31 +28,11 @@ procedure CopySP(var s1:tCommonStream; var s2:tMemoryStream);
   s2.position:=0;
 end;
 
-function CheckStatus(var s:tMemoryStream; op:Word; min:Word):boolean;
-  var e:byte;
+function IsBlob(const id: tKey24): boolean;
   begin
-  e:=s.ReadByte;
-  result:=true;
-  //writeln(e,' ',s.left);
-  if e=0 then begin
-    if s.Left<min then begin
-      writeln(stderr,'Truncated server response. Got ',s.Left,' expected ',min,' bytes.');
-      halt(1);
-    end;
-  end else begin
-    write('Server Error: ');
-    if true then case e of
-      129: writeln('Server Admitted Failure');
-      130: writeln('Not Found');
-      001: case op of
-        13: writeln('Profile Invalid');
-        else writeln(e);
-        end;
-      else writeln(e);
-    end;
-    halt(e);
-  end;
+  IsBlob:=((id[23] and 1) = 1);
 end;
+
 function StringProfileInfo(var s:tMemoryStream):string;
   var fid:tKey20;
   var Update:Word4;
@@ -70,6 +50,7 @@ end;
 
 var req:tMemoryStream;
 var res:tMemoryStream;
+var resc:byte;
 (*
 procedure ShowPUPD;
   var st:byte;
@@ -114,6 +95,7 @@ procedure aRecv;
   if res.vlength>res.size then raise eInvalidMemStreamAccess.Create('Message Too Long');
   sck.Read(res.base^, res.vlength);
   res.Seek(0);
+  resc:=res.ReadByte;
 end;
 
 procedure cmdINFO;
@@ -132,7 +114,6 @@ procedure cmdSTOP;
   {no input}
   req.WriteWord2(01);
   aSend;aRecv;
-  {checkstatus}
 end;
 
 procedure cmdPUT;
@@ -141,12 +122,16 @@ procedure cmdPUT;
   begin
   if paramcount<>2 then errParams;
   ins.OpenRO(ParamStr(2));
-  req.WriteWord2(08);
+  req.WriteWord2(23);
   left:=ins.left;
   req.WriteWord4( Left );
   writeln('sending object ',left);
   aSend;
   aRecv;
+  if resc<>0 then begin
+    writeln('Failed init transfer e=',resc);
+    exit;
+  end;
   while left>0 do begin
     req.Seek(0);
     if left>req.size then bc:=req.size else bc:=left;
@@ -155,9 +140,9 @@ procedure cmdPUT;
     left:=left-bc;
   end;
   aRecv;
-  if (res.Left>=21) and (res.ReadByte=0) then begin
-    writeln(string(tKey20(res.ReadPtr(20)^)));
-  end else writeln('failed');
+  if (res.Left>=24) and (resc=0) then begin
+    writeln(string(tKey24(res.ReadPtr(24)^)));
+  end else writeln('Failed to send object e=');
 end;
 
 procedure cmdPUT_local(m:integer);
@@ -186,70 +171,69 @@ procedure cmdPUT_local(m:integer);
 end;
 
 procedure cmdGET;
-  var left:LongWord;
+  var left,flen:LongWord;
   begin
   if paramcount<>2 then errParams;
-  req.WriteWord2(04);
-  req.Write(tKey20(paramstr(2)),20);
+  req.WriteWord2(22);
+  req.Write(tKey24(paramstr(2)),24);
   req.WriteWord4(0);
   req.WriteWord4($FFFFFFFF);
   aSend;aRecv;
-  if (res.Left>=5) and (res.ReadByte=0) then begin
-  left:=res.ReadWord4;
-    writeln('Length: ',left);
-      {sck.Read(res.base^, 4);}
-  end else writeln('failed');
+  if (res.Left>=8) and (resc=0) then begin
+    flen:=res.ReadWord4;
+    left:=res.ReadWord4;
+    writeln('FileSize: ',flen);
+    writeln('ReqLen: ',left);
+        {sck.Read(res.base^, 4);}
+  end else if resc=2 then writeln('Object Not Found')
+  else if resc=3 then writeln('Is Link')
+  else if resc=4 then writeln('Out of Bounds')
+  else writeln('failed e=',resc);
 end;
 
 procedure cmdSTAT;
-  var st:byte;
-  var id2:^tKey20;
+  var id:tKey24;
   var path:ansistring;
-  var olength:LongWord;
   begin
   if paramcount<>2 then errParams;
-  req.WriteWord2(10);
-  req.Write(tKey20(paramstr(2)),20);
-  aSend;aRecv; st:=res.ReadByte;
-  if st=0 then begin
-    id2:=res.ReadPtr(20);
-    writeln('FID: ',string(id2^));
-    olength:=res.ReadWord4;
-    writeln('Length: ',SizeToString(olength),'B (',olength,')');
-    writeln('RefCout: ',res.ReadWord2);
-    writeln('Temp: ',res.ReadByte);
-    writeln('Storage: ',res.ReadByte);
-    SetLength(path,res.left);
-    res.Read(path[1],res.left);
-    writeln('File: ',path);
-  end else writeln('error ',st);
-end;
-
-procedure cmdREFADJ;
-  var st:byte;
-  begin
-  if paramcount<>3 then errParams;
-  req.WriteWord2(11);
-  req.Write(tKey20(paramstr(2)),20);
-  req.WriteByte(StrToInt(paramstr(3))+128);
-  aSend;aRecv; st:=res.ReadByte;
-  if st=0 then begin
-    writeln('ok');
-  end else writeln('error ',st);
+  id:=tKey24(paramstr(2));
+  while not IsBlob(id) do begin
+    req.WriteWord2(24);
+    req.Write(id,24);
+    aSend;aRecv;
+    if resc<>0 then begin
+      if resc=2 then writeln('Link Object Not Found')
+      else writeln('failed e=',resc);
+      exit;
+    end;
+    res.Read(id,24);
+    writeln('Link to: ',string(id));
+    req.Seek(0);req.Trunc;
+  end;
+  req.WriteWord2(21);
+  req.Write(id,24);
+  aSend;aRecv;
+  if resc=0 then begin
+    path:=res.ReadStringAll;
+    Writeln('Path: ',path);
+    {that's it?}
+  end
+  else if resc=2 then writeln('Blob Object Not Found')
+  else if resc=4 then writeln('Blob stored Inline')
+  else writeln('failed e=',resc);
 end;
 
 procedure cmdFETCH;
-  var st:byte;
   begin
   if paramcount<>3 then errParams;
   req.WriteWord2(12);
   req.Write(tKey20(paramstr(2)),20);
   req.Write(tNetAddr(paramstr(3)),18);
   req.WriteByte(64);
-  aSend; aRecv; st:=res.ReadByte;
-  if st=0 then begin
+  aSend; aRecv;
+  if resc=0 then begin
     writeln('ok');
-  end else writeln('error ',st);
+  end else writeln('error ',resc);
   readln;
 end;
 
@@ -259,14 +243,14 @@ procedure cmdPEER;
   if paramcount<>2 then errParams;
   req.WriteWord2(02);
   req.Write(tNetAddr(paramstr(2)),18);
-  aSend; aRecv; st:=res.ReadByte;
+  aSend; aRecv; st:=resc;
   if st=0 then begin
     writeln('ok');
   end else writeln('error ',st);
 end;
 
 procedure cmdDhtDump;
-  var st:byte;
+  var
     Depth,Ban:byte;
     ModifyTime,LastMsgFrom,i,bktsize:LongWord;
     ReqDelta:Word;
@@ -274,8 +258,8 @@ procedure cmdDhtDump;
     addr:tnetaddr;
   begin
   req.WriteWord2(14);
-  aSend; aRecv; st:=res.ReadByte;
-  if st=0 then begin
+  aSend; aRecv;
+  if resc=0 then begin
     res.Read(ID,20);
     writeln('DHT Dump of node ',string(ID));
     if res.left=0 then writeln('No buckets, DHT is empty.');
@@ -299,7 +283,7 @@ procedure cmdDhtDump;
         end;
       end;
     end;
-  end else writeln('error ',st);
+  end else writeln('failed e=',resc);
 end;
 
 
@@ -357,7 +341,6 @@ BEGIN
     'PUT'   : cmdPUT;
     'GET'   : cmdGET;
     'STAT'  : cmdSTAT;
-    'REFADJ'  : cmdREFADJ;
     'FETCH'  : cmdFETCH;
     'SETPROF'  : cmdSETPROF;
     'GETPROF'  : cmdGETPROF;

@@ -9,7 +9,7 @@ unit ObjectModel;
 {$mode objfpc}
 {$PACKENUM 1}
 INTERFACE
-USES SysUtils,Sockets;
+USES SysUtils,Sockets,StrUtils;
 
 (*** Elemental Types ***)
 
@@ -27,11 +27,14 @@ type Word8=array [1..8] of byte; {todo}
 
 (*** Simple Functions ***)
 
-procedure BinToHex(hexValue:pChar; const orig; len:word);
+procedure BinToHex(hexValue:pChar; const orig; len:word); inline;
+function BinToHexStr(const orig; len:word): ansistring;
+function  HexToBin(out BinValue; HexValue: PChar; BinBufSize: Integer): Integer; inline;
 function PrefixLength(const a,b:tKey20):byte;
 function SizeToString( v:LongWord):string;
 function IntHash(init:LongWord;const data;len:longword):LongWord;
 function UnixNow:Int64;
+function StrCompAt(const a: string; ofs:longword; const b: string): boolean;
 
 (*** Base Object types ***)
 
@@ -277,7 +280,6 @@ procedure SC(fn:pointer; retval:longint);
 IMPLEMENTATION
 uses
    Porting
-  ,StrUtils
   ,Errors
   ;
 
@@ -311,6 +313,20 @@ function PrefixLength(const a,b:tKey20):byte;
  end;
 end;
 
+procedure BinToHex(hexValue:pChar; const orig; len:word);
+  begin
+  StrUtils.BinToHex(pchar(@orig), hexValue, len);
+end;
+function  HexToBin(out BinValue; HexValue: PChar; BinBufSize: Integer): Integer;
+  begin
+  result:=StrUtils.HexToBin(HexValue,pchar(@BinValue),BinBufSize);
+end;
+function BinToHexStr(const orig; len:word): ansistring;
+  begin
+  SetLength(result,len*2);
+  StrUtils.BinToHex(pchar(@orig), @result[1], len);
+end;
+
 operator :=(a:tKey20) r:string;
   begin
   SetLength(r,40);
@@ -318,7 +334,7 @@ operator :=(a:tKey20) r:string;
 end;
 operator :=(a:string) r:tKey20;
   begin
-  if HexToBin(@a[1],pchar(@r),20)<20 then raise
+  if HexToBin(r,@a[1],20)<20 then raise
   eConvertError.Create('Invalid Hex String');
 end;
 
@@ -329,7 +345,7 @@ operator :=(k:tKey24) s:string;
 end;
 operator :=(a:string) r:tKey24;
   begin
-  if HexToBin(@a[1],pchar(@r),24)<24 then raise
+  if HexToBin(r,@a[1],24)<24 then raise
   eConvertError.Create('Invalid Hex String');
 end;
 
@@ -340,7 +356,7 @@ operator :=(k:tKey32) s:string;
 end;
 operator :=(a:string) r:tKey32;
   begin
-  if HexToBin(@a[1],pchar(@r),32)<32 then raise
+  if HexToBin(r,@a[1],32)<32 then raise
   eConvertError.Create('Invalid Hex String');
 end;
 
@@ -514,17 +530,16 @@ procedure tCommonStream.WriteWord6(v:Int64);
   Write((pointer(@v)+2)^,6);
 end;
 
-const
-  HexTbl: array[0..15] of char='0123456789ABCDEF';
-procedure BinToHex(hexValue:pChar; const orig; len:word);
- var i:word;
- var b:array [byte] of byte absolute orig;
- begin
- dec(len);
- for i:=0 to len do begin
-  hexValue[i*2+0]:=HexTbl[b[i] shr 4];
-  hexValue[i*2+1]:=HexTbl[b[i] and 15];
- end;
+function StrCompAt(const a: string; ofs:longword; const b: string): boolean;
+  var i: longword;
+  begin
+  StrCompAt:=false;
+  if (length(b)+ofs)>length(a) then exit;
+  ofs:=ofs-1;
+  for i:=1 to length(b) do begin
+    if a[i+ofs]<>b[i] then exit;
+  end;
+  StrCompAt:=true;
 end;
 
 operator :=(a:pointer) r:shortstring;

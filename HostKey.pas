@@ -1,5 +1,7 @@
 unit HostKey;
 
+{BUG: PublicPoWReady is set to false when PoW starts regenerating}
+
 INTERFACE
 uses ed25519,Crypto,ObjectModel;
 type tEccKey=tKey32;
@@ -14,7 +16,7 @@ var PublicPoW:tPoWRec;
 var PublicPoWReady:boolean;
 var ZeroDigest:tSha512Digest;
 {$IFDEF ENDIAN_LITTLE}
-const cPowMask0:DWORD=$FF0FFFFF;
+const cPowMask0:DWORD=$FF7FFFFF;
 {$ELSE}
 const cPowMask0:DWORD=$FFFF0FFF;
 {$ENDIF}

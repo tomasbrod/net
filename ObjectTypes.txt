@@ -1,0 +1,117 @@
+
+  Static CHK Object ... Blob
+  updatable symbolic name of other object ... Link
+
+  Object identifier is 24 Byte
+    Bit[254]=1 ... Blob, SHA256 of Blob data truncated to 255 bits
+    Bit[254]=0 ... Link, SHA256 of public key
+
+  6BC03BAFE0EFF54A0011637C4A96E734 (16B, NodeID)
+  7172C0964DBCA42D8F334AC6A357A2085394FED8 (20B, Old)
+  54FF2F830E0954C5978A2AD94AE51DE825B8ECD1BECA92D8 (24B, Blob)
+  BC4ED4695AC98ADB9B5A4CC3F25AE928BBD6D91B9F75C497 (24B, Link)
+  BC4ED4695AC98ADB9B5A4CC3F25AE928BBD6D91B9F75C49F3F05E7BE933C7EF7 (32B, pubkey)
+
+  * All blobs, announce to DHT.
+  * Link (132), store on Target.
+
+  Link format:
+    signed_data:
+      what:24B;
+      pubkey:32B;
+      updated:6B;
+      expires:6B;
+    signature:64B;
+
+  API, Blob:
+    - Open -> Stream
+    - Insert <- mem
+    - Insert <- tmpfile, hash
+    - InsertSoft <- filename, hash
+    - Stat
+    - Delete
+
+  API, Link:
+    - Readlink -> id
+    - ReadLinkData -> mem
+    - WriteLinkData
+    - Delete
+    - Open -> Stream
+
+* rewrite OT units for new protocol.
+* rewrite protile things to use mutable Links
+* write mutable server
+* fix ctrl
+
+
+cli unit: Keyring, rpc primitives
+
+
+Prof:
+$ bin/bnedit profi
+$ bin/bnc put prof.dat
+$ bin/bnc sign prof_hash new keyring.dat
+$ bin/bnc sign lnk_1 new masterkey.dat
+ sign what pub [keyring] [expires]
+
+
+Profile Keys for messages
+To send: - single key from progfile
+To verify: all previously used keys
+  * All keys in profile
+    - scalability
+    - current
+  * Link to previous profile versions
+    - old blobs already deleted
+  * Sign message hash with Lv2 key
+    - save space on MAC
+    - easy to verify with data in store
+    - breaks when lv2 key changes
+  * Sign messages with lv2 key and attach lv1 sig
+    - sig64,pub1:32,exp:12,sig1:64
+  * Don't care
+    - breaks on any key change
+  * Multiple modes
+    - SIMPLE, HMAC, Lv2+Lv1
+
+New message formats:
+
+ElGamal: r, P, m -> R, Sm
+
+file Message is
+  format identifier
+  flags
+  created
+  expires
+  TempPubKey
+  if MultiRecipient in flags then
+    rcpt_count
+    for each rcpt
+      rcpt.id
+      prio
+      rcpt.pub_first_3B
+      E(DH(TempSecKey,rcpt.pub),sk);
+    end for
+  end else
+    prio
+    rcpt.pub_first_3B
+    let sk=H(DH(TempSecKey,rcpt.pub))
+  end
+  encrypted E(sk,Z(...))
+    message
+    if Signed in flags then
+      SenderSigPub
+      if MasterCert in flags then
+        MasterPub
+        Master upd/exp
+        MasterSig
+      end
+      Signeture
+    end if
+  end encrypted
+end file
+
+
+
+
+

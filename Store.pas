@@ -8,7 +8,7 @@ USES Crypto,ObjectModel,Database,SysUtils;
 
 type tFID=ObjectModel.tKey24;
 type tFID_ptr=^tFID;
-type tsoLocation = (solNormal, solInline,solReference);
+type tsoLocation = (solNormal=1, solInline=2,solReference=3);
 
 type tStoreObject=OBJECT(tCommonStream)
   StorageMode: tsoLocation;
@@ -18,7 +18,6 @@ type tStoreObject=OBJECT(tCommonStream)
   function  Tell:LongWord; virtual;
   procedure Read(out blk; len:word); virtual;
   function  Length:LongWord; virtual;
-  function GetPath(const id: tFID): AnsiString;
   private
   d:record
     case byte of
@@ -33,15 +32,17 @@ end;
 const cObjHeaderSize=0;
 const cDebugPrintOpen=true;
 const cInlineThr=8*1024;
+const cStoreDir='obj/';
 
 function GetTempName(const hash:tKey32; const ext:string): string;
 function ObjectExists(const id: tFID): boolean; overload;
+procedure GetBlobInfo(const id: tFID; out mode:byte; out path:Ansistring );
 function IsBlob(const id: tFID): boolean; overload;
 procedure DeleteObject(const id: tFID); unimplemented;
 
 procedure InsertBlobMem( out id: tFID; ms: tMemoryStream );
-procedure InsertBlobRename( const name:string; const hash:tKey32 );
-procedure InsertBlobRef( const name:string; const hash:tKey32 );
+procedure InsertBlobRename( const name:string; var hash:tKey32 );
+procedure InsertBlobRef( const name:string; var hash:tKey32 );
 
 function ReadLink(const id: tFID): tFID;
 function ReadLinkData(const id: tFID): tDbMemStream;
@@ -67,14 +68,13 @@ USES BaseUnix;
 }
 
 
-const cStoreDir='obj/';
 var opendebug:boolean;
 
 function GetTempName(const hash:tKey32; const ext:string): string;
   var t:string[48];
   begin
   setlength(t,48);
-  BinToHex(@t[1],hash,48);
+  BinToHex(@t[1],hash,24);
   GetTempName:=cStoreDir+t+'.'+ext;
 end;
 
@@ -133,23 +133,29 @@ function IsBlob(const id: tFID): boolean;
 end;
 
 
-function tStoreObject.GetPath(const id: tFID):AnsiString;
+procedure GetBlobInfo(const id: tFID; out mode:byte; out path:Ansistring );
   var vl:tDbMemStream;
   begin
-  if StorageMode = solReference then begin
-    vl:=dbGet( dbObject, id, 20 ); try
-    vl.Skip(4);
-    SetLength(result,vl.Left);
-    vl.Read(result[1],vl.Left);
-    finally vl.Free end;
-  end
-  else result:='';
+  path:='';
+  vl:=dbGet( dbObject, id, 24 ); try
+    if vl.length=0
+      then mode:=0
+    else begin
+      mode:=vl.ReadByte;
+      if mode=ord(solReference) then begin
+        vl.Skip(4);
+        SetLength(path,vl.Left);
+        vl.Read(path[1],vl.Left);
+      end else if mode=ord(solNormal)
+        then path:=cStoreDir+'/'+string(id);
+    end;
+  finally vl.Free end;
 end;
 
 function ObjectExists(const id: tFID): boolean;
   var vl:tDbMemStream;
   begin
-  vl:=dbGet( dbObject, id, 20 );
+  vl:=dbGet( dbObject, id, 24 );
   result:= (vl.length>0);
   vl.Free;
 end;
@@ -215,7 +221,7 @@ procedure DeleteObject(const id: tFID);
   begin
 end;
 
-procedure InsertBlobInline(out id: tFID; fs: tCommonStream; len:LongWord);
+procedure InsertBlobInline(out id: tFID; var fs: tCommonStream; len:LongWord);
   var vl:tMemoryStream;
   var hash:tKey32;
   begin
@@ -242,16 +248,16 @@ procedure InsertBlobMem( out id: tFID; ms: tMemoryStream );
   end;}
 end;
 
-procedure InsertBlobRef( const name:string; const hash:tKey32 );
+procedure InsertBlobRef( const name:string; var hash:tKey32 );
   var vl2:tDbMemStream;
   var vl:tMemoryStream;
   var id:tFID;
   var fs:tFileStream;
   var len:LongWord;
   begin
+  hash[23]:=hash[23] or 1;
   Move(hash,{->}id,24);
-  id[23]:=id[23] or 1;
-  vl2:=dbGet( dbObject, id, 20 );
+  vl2:=dbGet( dbObject, id, 24 );
   if vl2.length=0 then begin
     fs.OpenRO(name);
     len:=fs.Length;
@@ -273,7 +279,7 @@ procedure InsertBlobRef( const name:string; const hash:tKey32 );
   end;
 end;
 
-procedure InsertBlobRename( const name:string; const hash:tKey32 );
+procedure InsertBlobRename( const name:string; var hash:tKey32 );
   var vl2:tDbMemStream;
   var vl:tMemoryStream;
   var id:tFID;
@@ -281,9 +287,9 @@ procedure InsertBlobRename( const name:string; const hash:tKey32 );
   var len:LongWord;
   var dname:string;
   begin
+  hash[23]:=hash[23] or 1;
   Move(hash,{->}id,24);
-  id[23]:=id[23] or 1;
-  vl2:=dbGet( dbObject, id, 20 );
+  vl2:=dbGet( dbObject, id, 24 );
   if vl2.length=0 then begin
     fs.OpenRO(name);
     len:=fs.Length;
@@ -299,6 +305,7 @@ procedure InsertBlobRename( const name:string; const hash:tKey32 );
       writeln('Store.InsertBlob.Rename: ',name,'->',string(id));
     end else try
       InsertBlobInline(id, fs, len);
+      DeleteFile(name);
       finally  fs.Done;
     end;
   end else begin

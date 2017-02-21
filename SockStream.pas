@@ -1,4 +1,4 @@
-UNIT SockStream;
+UNIT SockStream deprecated;
 INTERFACE
 USES Sockets,BaseUnix,ObjectModel;
 

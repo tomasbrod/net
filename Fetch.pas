@@ -1,7 +1,9 @@
 UNIT Fetch;
 
+{$HINT BUG, Fetch from ctrl causes unref when file is alreay downloaded!}
+
 INTERFACE
-USES ObjectModel,ObjTrans,Store2;
+USES ObjectModel,ObjTrans,Store;
 
 type tFetchError=(fjsComplete=0, fjsIOError, fjsLarge, fjsNotFound, fjsFull, fjsCorrupt, fjsNoResp, fjsFail, fjsNoSource, fjsNew);
 type tSourceItem=object
@@ -63,7 +65,7 @@ procedure tFetchJob.DelayedStart;
         writeln(Format('Fetch@%P.DelayedStart: address=%S',[@self,string(s^.address)]));
         s^.state:=fjsNoSource;
         a:=ObjTrans.GetAggr(s^.Address, True);
-        if (a=nil) or (a^.maxchan=a^.refc) then begin
+        if (a=nil) or (a^.max_channels=a^.refc) then begin
           s^.state:=fjsFull;
           if fjsFull<error then error:=fjsFull;
           writeln('Full');
@@ -132,7 +134,7 @@ function tFetchJob.CheckObjectHash: boolean;
   Trx.DataF.Seek(0);
   {todo: Hash in second thread}
   HashAndCopy(Trx.DataF, nil, hash, Trx.DataF.Length);
-  so.InsertRename(Trx.DataF,Store2.GetTempName(Trx.fid,'prt'),hash);
+  so.InsertRename(Trx.DataF,Store.GetTempName(Trx.fid,'prt'),hash);
   {if id matches requested add enough refs else unref}
   result:=so.FID=Trx.FID;
   if result then begin
@@ -219,7 +221,7 @@ procedure tFetchjob.AddSource(const srce:tNetAddr);
   begin
   {calculate score}
   a:=ObjTrans.GetAggr(srce, false);
-  score:=17;
+  score:=0;
   if assigned(a) then begin
     tmp:=a^.refc;
     if tmp=a^.maxchan then score:=9999;

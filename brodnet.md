@@ -14,6 +14,7 @@ Expectations
 * personal web pages
 * message feeds
 * directories
+* keyword searching
 
 Architecture
 ------
@@ -164,6 +165,15 @@ Request to channel where transfer is active aborts that transfer, but
 the datagrams may still be in transit and arrive mixed. Therefore client
 should not reuse channels for other files immediately.
 
+
+
+
+When client recieves enough packets it sends report. When different mark ->
+reset packet counters.
+Server waits some time for the report based on sending speed and estimated rtt.
+If no report arrives, rates are reset to slow and later the session is closed.
+
+
 #### otCtrl [proto-otCtrl]
 
 ~~~
@@ -171,7 +181,7 @@ datagram otRequest is
   opcode : byte = $04;
   channel : byte;
   priority: byte;
-  file_id : 20 byte;
+  file_id : 24 byte;
   segments : array [until end of datagram] of
     offset : 5 byte word;
     length : 4 byte word;
@@ -205,15 +215,19 @@ datagram otInfo is
   error_code : byte;
     0 OK
     1 End of Transmission
-    2 Object Not Found
-    3 Channel out of range
-    4 Storage Error
-    5 Overload
-    6 other failure
-  length : 5 byte word;
-  max_segments : byte;
-  max_channels : byte;
-  server_socket_ttl : byte;
+    2 Debug message
+    3 Object Not Found
+    4 Channel out of range
+    5 Storage Error
+    6 Overload
+    7 other failure
+  if error_code<>2 then
+    max_channels : byte;
+    max_segments : byte;
+    server_socket_ttl : byte;
+    file_length : 5 byte word;
+    req_length : 4 byte word;
+  end
   message : char to end of datagram;
 end
 
@@ -362,7 +376,7 @@ datagram dhtTestResult is
 end
 ~~~
 
-### Tracker
+### Tracker [proto-tk]
 
 DHT service. Used to find who has a resource and announce nodes that
 has the resource.
@@ -375,7 +389,7 @@ For peer exchange set pex flag on tkAnnounce, returns tkResult.
 2. query to known nodes (order by ttl or ip prefix)
 
 3. dht announce
-4. 
+4. ???
 
 ~~~
 type flags is 1 byte bitpacked record
@@ -435,13 +449,23 @@ datagram tkAnnOK
 end
 ~~~
 
-### profile / mutable
+### Profile [proto-prof]
 
-profile separate from generic mutable?
-->yes
+User Profile service is separate from generic mutable becouse it is provides
+much more important. User profile is stored in nodes that have ID closest to
+the profile ID. Also on nodes in the User's swarm. Node where profile ID
+belongs to its own DHT bucket must store the profile.
 
-profile should be stored on any host,
-needs PoW to protect from spam.
+To update profile from network, execute DHT query with profQuery datagram with
++target = ProfID and +update +file_id = version of profile that you already
+have, zero othervise. When contacted node has newer version than you,
+profResult is returned, else dhtNodes. After the search is exhausted, fetch the
+latest version (with fallback). After the profile is fetched and verified, send
+queries to nodes that repoted older versions than the current but never than
+your previous. Update is published the same way.
+
+Stage 1 implementation:
+Every node that learns of a profile will fetch, verify and store it.
 
 ~~~
 datagram profQuery
@@ -492,7 +516,7 @@ file Profile is
   signature: 64B signature of signed_data;
 ~~~
 
-### msg protocol [proto-msg]
+### Message [proto-msg]
 
 Messages are delivered as a notice only and the recipient retrives the message
 file using [ot](#proto-ot) protocol. Sender tries to contact nodes in the
@@ -599,8 +623,8 @@ datagram msgReceipt is
   mark : 2 byte;
   state : msg_state 1 byte;
   host_pub : 32 byte;
-  message_fid : 20 byte;
-  user_id : 20 byte;
+  message_fid : 24 byte;
+  rcpt_user_id : 24 byte;
   profile_ver: 6 byte word;
   sign_time: 6 byte word;
   signature : 64 byte;
@@ -641,15 +665,15 @@ Message file format.
 file Message
   hashed_data:
     magic: 8 byte = 'BNMesag'#26;
-    sender_id: 20 byte;
+    sender_id: 24 byte;
     sender_encr_key: 32 byte;
     send_date: 6 byte word;
     rcpt_count: byte;
     flags: 1 byte;
     expires: 4 byte word;
     array [rcpt_count] of record
-      rcpt_id: 20 byte;
-      rcpt_key_prefix: 3 byte;
+      rcpt_id: 24 byte;
+      rcpt_key_prefix: 7 byte;
       priority: byte;
       encrypted_session_key: 40 byte AES_WRAP(kek, session_key, default_iv);
     end record;

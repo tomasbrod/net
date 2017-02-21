@@ -3,9 +3,15 @@ INTERFACE
 
 const {dgram opcode}
  {note: opcodes >=$80 are a reply and have transaction id so they can overlap}
- (*Object Transfer*)
- otCtrl=$09; {client->server}
- otData=$08; {server->client}
+   (*Object Transfer*)
+   otOldCtrl=$09;
+   otoldData=$08;
+   otRequest=$04;
+   otReport= $05;
+   otStop=   $06;
+   otData=   $08;
+   otInfo=   $07;
+   otDataSync=$09;
   (*Distributed Hash Table*)
   dhtBeatQ=$0A;
   dhtBeatR=$0B;
@@ -32,16 +38,14 @@ const {chat init}
  crAuthReq=3;
  testChat=32;
 const (*ObjectTransfer magic numbers*)
- otSPEED=1; {control type speed report}
- otSIACK=2; {control type size increase ack}
- otFin=3;   {control type finish}
- otReq=$80; {control type request}
- otInfo=$80;      {DataLineEscape type Info}
- otFail=otInfo+1; {DLE type ServerFail}
- otNotFound=otInfo+2; {DLE type ObjectNotFound}
- otEoT=otInfo+3;  {DLE type End Off Transmission}
- otSINC=otInfo+4; {DLE Explicit Ack Request}
- otRateInfo=otInfo+5; {DLE Rate Adjust Debug info}
+  otcOK=0;
+  otcEoT=1;
+  otcDebug=2;
+  otcNotFound=3;
+  otcChannelLimit=4;
+  otcStorageError=5;
+  otcServerThrottle=6;
+  otcFail=7;
 const {Ctrl opcodes}
  crtlGetInfo=0;
  crtlTerminate=1;

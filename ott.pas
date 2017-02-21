@@ -22,7 +22,7 @@ procedure t.DoTestFetch;
   var o:tStoreObject;
   begin
   id3:='D57465C655B1ED5DD6C04949CCA67007DB13EB52';
-  if ObjectExists(id3) then FetchComplete(nil, tevUser, @id3)
+  if ObjectReference(id3) then FetchComplete(nil, tevUser, @id3)
   else begin
     writeln('ott: start fetch');
     job:=NewFetch(id3);

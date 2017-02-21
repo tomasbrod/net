@@ -2,8 +2,8 @@ Unit CTRL;
 INTERFACE
 IMPLEMENTATION
 {$define ctlDHT}
-{-define ctlStore}
-{-define ctlMutable}
+{$define ctlStore}
+{$define ctlSignedLink}
 {-define ctlProf}
 {-define ctlFetch}
 USES ServerLoop,opcode
@@ -13,14 +13,14 @@ USES ServerLoop,opcode
     ,Crypto
     {$ifdef ctlDHT},DHT{$endif}
     ,Store
-    {$ifdef ctlMutable},Mutable{$endif}
+    {$ifdef ctlSignedLink},Mutable{$endif}
     {$ifdef ctlProf},Profile,ProfCache{$endif}
     {$ifdef ctlFetch},Fetch{$endif}
     ;
 
 type tClient=object
   s:tSocket;
-  hash:tKey32;
+  iphash:tKey32;
   error:boolean;
   procedure Init(i_s:tSocket);
   procedure Init2;
@@ -44,8 +44,17 @@ type tClient=object
   RcvObj:^tFileStream;
   RcvObjLeft:LongWord;
   RcvObjHctx:tSha256;
+  procedure StoreGetPath(var a,r:tMemoryStream);
+  procedure StoreGet(var a,r:tMemoryStream);
+  procedure StorePut(var a,r:tMemoryStream);
+  procedure StoreReadlink(var a,r:tMemoryStream);
   procedure SendObject(var o:tStoreObject; ilen:LongWord);
   procedure RcvObjComplete;
+  {$endif}
+
+  {$ifdef ctlSignedLink}
+  public
+  procedure StoreSetLink(var a,r:tMemoryStream);
   {$endif}
 
   {$ifdef ctlFetch}public
@@ -65,6 +74,7 @@ procedure tClient.Command(method:word; var args:tMemoryStream);
   begin
   resp_stream.Init(2048);
   resp_stream.Write(method,2);
+  try
   case method of
     000: GetInfo(args,resp_stream);
     001: Terminate(args,resp_stream);
@@ -72,7 +82,20 @@ procedure tClient.Command(method:word; var args:tMemoryStream);
     002: DhtPeer(args,resp_stream);
     014: DhtDump(args,resp_stream);
     {$endif}
+    {$ifdef ctlStore}
+    021: StoreGetPath(args,resp_stream);
+    022: StoreGet(args,resp_stream);
+    023: StorePut(args,resp_stream);
+    024: StoreReadlink(args,resp_stream);
+    {$endif}
+    {$ifdef ctlSignedLink}
+    025: StoreSetLink(args,resp_stream);
+    {$endif}
+    else error:=true;
   end;
+  except on eReadPastEoF do begin
+    resp_stream.writebyte(1); error:=true;
+  end end;
   if not error then begin
     resp_stream.Seek(0);
     resp_stream.WriteWord2(resp_stream.Length-2);
@@ -101,15 +124,16 @@ end;
 {$I CtrlLow.pas} {**** Commands implementation ****}
 
 procedure tClient.Terminate(var a,r:tMemoryStream);
- begin
- writeln('Ctrl.Terminate');
- ServerLoop.RequestTerminate(0);
+  begin
+  writeln('Ctrl.Terminate');
+  r.WriteByte(0);
+  ServerLoop.RequestTerminate(0);
 end;
 
 procedure tClient.GetInfo(var a,r:tMemoryStream);
- begin
- r.Write(VersionString[1],length(VersionString));
- r.WriteByte(0);
+  begin
+  r.Write(VersionString[1],length(VersionString));
+  r.WriteByte(0);
 end;
 
 {$ifdef ctlDHT}
@@ -195,103 +219,121 @@ procedure tClient.StorePutMV(var client:tClient; var a,r:tMemoryStream);
 end;
   {$endif}
 
-procedure tClient.StoreStat(var client:tClient; var a,r:tMemoryStream);
-  var so:tStoreObject;
+procedure tClient.StoreGetPath(var a,r:tMemoryStream);
   var id:^tFID;
   var path:AnsiString;
+  var mode:byte;
   begin
-  try
-    id:=a.ReadPtr(20);
-    so.Init(id^);
-    r.WriteByte(0);
-    r.Write(so.fid,20);
-    r.WriteWord4(so.Length);
-    r.WriteWord2(so.opentime_refcount);
-    r.WriteByte(Ord(so.temp));
-    r.WriteByte(Ord(so.Location));
-    if so.location=solReference
-      then path:=so.GetPath
-    else if so.location in [solObjdir,solHardlink]
-      then path:=GetCurrentDir+'/'+so.GetPath
-      else path:='%';
-    r.Write(path[1],length(path));
-    r.WriteByte(0);
-    so.Done;
-  except
-    on eObjectNF do r.WriteByte(opcode.otNotFound);
+  id:=a.ReadPtr(24);
+  if not IsBlob(id^) then begin
+    r.WriteByte(3);
+  end else begin
+    Store.GetBlobInfo(id^,mode,path);
+    if mode=0 then r.WriteByte(2)
+    else if mode=ord(solReference) then begin
+      r.WriteByte(0);
+      r.Write(path[1],length(path));
+    end else if mode=ord(solNormal) then begin
+      r.WriteByte(0);
+      path:=GetCurrentDir+'/'+cStoreDir+string(id^);
+      r.Write(path[1],length(path));
+    end else r.WriteByte(4);
   end;
 end;
 
-procedure tClient.StoreRefAdj(var client:tClient; var a,r:tMemoryStream);
-  var so:tStoreObject;
+procedure tClient.StoreReadlink(var a,r:tMemoryStream);
   var id:^tFID;
-  var adj:integer;
+  var kl:longword;
+  var vl:tMemoryStream;
   begin
-  try
-    id:=a.ReadPtr(20);
-    adj:=a.ReadByte;
-    adj:=adj-128;
-    so.Init(id^);
-    so.Reference(adj);
-    if(adj>0) then so.Done;
+  id:=a.ReadPtr(24);
+  if IsBlob(id^) then begin
+    r.WriteByte(3);
+  end else begin
+    try
+      vl:=Store.ReadLinkData(id^);
+    except
+      on eObjectNF do begin r.WriteByte(2); exit end;
+    end;
     r.WriteByte(0);
-  except
-    on eObjectNF do r.WriteByte(opcode.otNotFound);
+    kl:=vl.Left;
+    vl.Read(r.WrBuf^,kl);
+    r.WrEnd(kl);
   end;
 end;
 
-procedure tClient.StoreGet(var client:tClient; var a,r:tMemoryStream);
+procedure tClient.StoreGet(var a,r:tMemoryStream);
   var o:^tStoreObject;
   var id:^tFID;
-  var ofs,len:LongWord;
+  var ofs,len,flen:LongWord;
   begin
   id:=a.ReadPtr(20);
   ofs:=a.ReadWord4;
   len:=a.ReadWord4;
+  if not IsBlob(id^) then begin
+    r.WriteByte(3); exit;
+  end;
   try
     writeln('Ctrl.StoreGet: ',string(id^),' @',ofs,'+',len);
     New(o,Init(id^));
   except
-    on eObjectNF do begin r.WriteByte(opcode.otNotFound); exit end;
-    //on eInOutError do begin r.WriteByte(opcode.otFail); exit end;
+    on eObjectNF do begin r.WriteByte(2); exit end;
   end;
-  if ofs>o^.Length then r.WriteByte(opcode.otEoT)
-  else begin
-    o^.Seek(ofs);
-    if len>o^.Left then len:=o^.Left;
-    r.WriteByte(0);
-    r.WriteWord4(len);
-    client.SendObject(o^,len);
-    exit; {closed by low}
-  end;
-  Dispose(o,Done);
+  flen:=o^.Length;
+  if ofs>flen
+    then len:=0
+  else if (flen-ofs)<len
+    then len:=(flen-ofs);
+  r.WriteByte(0);
+  r.WriteWord4(flen);
+  r.WriteWord4(len);
+  o^.Seek(ofs);
+  SendObject(o^,len);
 end;
 
-procedure tClient.StorePut(var client:tClient; var a,r:tMemoryStream);
+procedure tClient.StorePut(var a,r:tMemoryStream);
   var len:LongWord;
   begin
   len:=a.ReadWord4;
-  New(client.RcvObj,OpenRW(Store2.GetTempName(client.hash,'ctl')));
-  client.RcvObjLeft:=len;
-  client.RcvObjHctx.Init;
+  New(RcvObj,OpenRW(Store.GetTempName(iphash,'ctl')));
+  RcvObj^.Trunc(0);
+  RcvObjLeft:=len;
+  RcvObjHctx.Init;
   writeln('Ctrl.StorePUT: ',len);
+  r.WriteByte(0);
 end;
 procedure tClient.RcvObjComplete;
-  var so:tStoreObject;
   var r:tMemoryStream;
-  var hash_id:tFID;
+  var hash_id:tKey32;
   begin
-  r.Init(26);
-  RcvObjHctx.TruncFinal(hash_id,sizeof(hash_id));
+  r.Init(27); try
+  RcvObjHctx.Final(hash_id);
+  Dispose(RcvObj,Done);
   writeln('Ctrl.RcvObjComplete: '+string(hash_id));
-  so.InsertRename(RcvObj^,Store2.GetTempName(hash,'ctl'),hash_id);
-  r.WriteWord2(21);
+  Store.InsertBlobRename( Store.GetTempName(iphash,'ctl'), hash_id );
+  r.WriteWord2(25);
   r.WriteByte(0);
-  r.Write(so.fid,20);
+  r.Write(hash_id,24);
   self.SendTo(r);
-  r.Free;
-  so.MakeTemp;
-  so.Reference(-1);
+  finally r.Free; end;
+end;
+{$endif}
+
+{$ifdef ctlSignedLink}
+procedure tClient.StoreSetLink(var a,r:tMemoryStream);
+  var info:tMutableInfo;
+  begin
+  try
+    SetSignedLink( a, info);
+  except
+    on eInvalidSignature do r.WriteByte(3);
+    on eExpired do r.WriteByte(4);
+  end;
+  if info.isnew then r.WriteByte(0)
+                else r.WriteByte(5);
+  r.Write(info.id,24);
+  r.WriteWord6(info.updated);
+  r.WriteWord6(info.expires);  
 end;
 {$endif}
 

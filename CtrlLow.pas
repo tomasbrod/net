@@ -67,7 +67,7 @@ procedure tServer.ListenEvent(ev:word);
  {writeln('CtrlLow.ListenEvent: accept');}
  New(cl);
  cl^.Init(s);
-  SHA256_Buffer(cl^.hash,20,addr,addrl);
+  SHA256_Buffer(cl^.iphash,24,addr,addrl);
 end;
 
 procedure tClient.Init(i_s:tSocket);
@@ -114,7 +114,7 @@ procedure tClient.Event(ev:word);
          method:Word;
          end;
  var arg:pointer;
- var rc:LongInt;
+ var rc,sndc:LongInt;
  var msg_stream:tMemoryStream;
  const cBuf=2048;
  begin
