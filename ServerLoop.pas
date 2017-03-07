@@ -1,19 +1,22 @@
 UNIT ServerLoop;
 
 INTERFACE
-uses ObjectModel,UnixType,Sockets;
+uses Classes,ObjectModel,UnixType,Sockets,IniFiles;
 
 procedure Main;
 procedure RequestTerminate(c:byte);
 var OnTerminate:procedure;
 var VersionString:AnsiString;
 
+var Log1: tEventLogBaseSink;
+procedure CreateLog(out log:tEventLog; ident:string);
+
 {#Message handling#}
 type tSMsg=object
    Source: tNetAddr;
    Length: {Long}Word;
    Data: pointer;
-   st: tMemoryStream;
+   st: tStream;
    channel: word;
    ttl: word;
    tos: byte;
@@ -53,10 +56,9 @@ function GetMTime:tMTime;
 
 procedure SetThreadName(name:pchar);
 
+var Config: TIniFile;
 function GetCfgStr(name:pchar):String;
 function GetCfgNum(name:pchar):Double;
-procedure AcquireConfigSection(out sect:tConfigSection; name:pchar);
-procedure ReleaseConfigSection(var sect:tConfigSection);
 
 IMPLEMENTATION
 
@@ -71,7 +73,7 @@ var Terminated:boolean=false;
 var ReExec:boolean=false;
 procedure SignalHandler(sig:cint);CDecl;
  begin
-  writeln;
+  Log1.LogMessage('ServerLoop',etWarning,' Shutting Down (Signal %D)',[sig]);
   if terminated then raise eControlC.Create('CtrlC DoubleTap') ;
   Terminated:=true;
  end;
@@ -254,7 +256,7 @@ procedure Reciever(var p:tPollFD);
     Msg.Length:=nret;
     Msg.Data:=@Buffer;
     Msg.OP:=op;
-    Msg.st.Init(@Buffer,Msg.Length,sizeof(Buffer));
+    Msg.st:=tBufferStream.Create(@Buffer,Msg.Length);
   end;
 
   begin
@@ -265,30 +267,32 @@ procedure Reciever(var p:tPollFD);
     if (op>=low(OpDesc))and(op<=high(OpDesc)) and assigned(OpDesc[op].hnd) then begin
       OpDesc[op].hnd(Msg);
     end
-    else writeln('ServerLoop: No handler for opcode '+IntToStr(op));
+    else Log1.LogMessage('ServerLoop',etWarning,' No handler for opcode %D',[op]);
   end else begin
     tr:=(Buffer[2] shl 8) or Buffer[3];
     if (tr<high(TrDesc)) and assigned(TrDesc[TR].hnd) then begin
       TrDesc[TR].hnd(Msg);
     end
-    else writeln('ServerLoop: No handler for transaction '+IntToStr(tr)+' opcode '+IntToStr(op));
+    else Log1.LogMessage('ServerLoop',etWarning,' No handler for transaction %D opcode %D',[tr,op]);
   end;
+end;
+
+(**** Logging ****)
+
+procedure CreateLog(out log:tEventLog; ident:string);
+  begin
+  Log:=tEventLog.Create(Log1,ident);
 end;
 
 (**** Config File ****)
 
 var DoShowOpts:boolean=false;
 
-var ConfigFile:tConfigFile;
-var ConfigRefs:word;
-var Config:tConfigSection;
-
 procedure InitConfig;
   var fs:tFileStream;
   var fn:ansistring;
   var oi:word;
   begin
-  ConfigRefs:=1;
   fn:='bn.cfg';
   oi:=OptIndex('-c');
   if oi>0 then begin
@@ -296,60 +300,45 @@ procedure InitConfig;
     fn:=ParamStr(oi+1);
   end;
   try
-    fs.OpenRO(fn);
-    ConfigFile.Init(fs);
-    AcquireConfigSection(Config,'');
+    fs:=tFileStream.Create(fn,fmOpenRead);
+    Config:=tIniFile.Create(fs,[]);
   except on e:eInOutError do begin
-      writeln('Server.Config.Init('+fn+'): ',e.Message);
+      Log1.LogMessage('ServerLoop',etError,'.ConfigInit(%S): %S',[fn,e.message]);
       Raise;
     end;
   end;
-  fs.Done;
-  Dec(ConfigRefs);
+  fs:=nil;
   if not (SetCurrentDir(ExtractFilePath(fn)) and SetCurrentDir(GetCfgStr('directory'))) then
     raise eInOutError.Create('ServerLoop: Error changing working directory');
-  writeln('ServerLoop:',' cfg=',fn,' pwd=',GetCurrentDir(),' pid=',GetProcessID);
+  Log1.LogMessage('ServerLoop',etInfo,': cfg=%S pwd=%S pid=%D',[fn,GetCurrentDir,GetProcessID]);
 end;
 
-procedure AcquireConfigSection(out sect:tConfigSection; name:pchar);
-  begin
-  assert(ConfigRefs>0);
-  Inc(ConfigRefs);
-  if DoShowOpts then writeln('ConfigSection: ', name);
-  sect.Init(ConfigFile,name);
-end;
-procedure ReleaseConfigSection(var sect:tConfigSection);
-  begin
-  Dec(ConfigRefs);
-  if ConfigRefs=0 then begin
-    ConfigFile.Done;
-  end;
-end;
 function GetCfgStr(name:pchar):String;
   var e:exception;
   begin
-  if DoShowOpts then writeln('Config: ', name);
-  result:=config.GetKey(name);
+  if DoShowOpts then Log1.LogMessage('ServerLoop',etDebug,'.Config: %S',[name]);
+  result:=config.ReadString('options',name,#1);
   if result=#1 then begin
-    e:=eXception.Create('Missing option '+name+' in config file');
-    writeln('Server.Config ',e.message);
+    e:=eXception.CreateFmt('Missing option %S in config file',[name]);
+    Log1.LogMessage('ServerLoop',etError,'.Config: %S',[e.Message]);
     raise e;
   end;
 end;
 function GetCfgNum(name:pchar):Double;
+  {$hint this is sub-optimal}
   var e:exception;
   begin
   try result:=StrToFloat(GetCfgStr(name));
   except on x:EConvertError do begin
     e:=eXception.Create('Numeric option "'+name+'" expected, '+x.message);
-    writeln('Server.Config ',e.message);
+    Log1.LogMessage('ServerLoop',etError,'.Config: %S',[e.Message]);
     raise e;
   end end;
 end;
 
 function OptIndex(o:string):word;
  begin
- if DoShowOpts then writeln('Option: ',o);
+ if DoShowOpts then Log1.LogMessage('ServerLoop',etDebug,'.Option: %S',[o]);
  result:=paramcount;
  while result>0 do begin
   if o=system.paramstr(result) then break;
@@ -414,7 +403,8 @@ procedure Main;
  var EventsCount:integer;
  begin
  s_setupInet;
- ReleaseConfigSection(Config);
+ Config.Stream.Free;
+ Config.Free;
  while not terminated  do begin
   PollTimeout:=5000;
   Timer;
@@ -516,7 +506,8 @@ end;
 (**** Unit Initialization ****)
 BEGIN
  VersionString:='BrodNetD'+' '+GIT_VERSION;
- writeln('ServerLoop: ',VersionString);
+ Log1:=tEventLogBaseSink.Create;
+ Log1.LogMessage('ServerLoop',etInfo,': %S',[VersionString]);
  InitCriticalSection(GlobalLock);
  EnterCriticalSection(GlobalLock);
  if OptIndex('-h')>0 then DoShowOpts:=true;

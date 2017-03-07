@@ -1,17 +1,13 @@
 unit ObjectModel;
-{ comcatenation of MemStream, NetAddr, Task units }
-{ Base object types and utils }
-{ Note: see here is a lot of RTL reimplemented,
-  i did'nt like the way RTL impemented thinks :( }
 
 {$HINT bug, netaddr crashes to convert sometimes, isNil fails on port 0, toString fails when port 0 and not isNil}
 
 {$mode objfpc}
 {$PACKENUM 1}
 INTERFACE
-USES SysUtils,Sockets,StrUtils;
+USES SysUtils,Sockets,StrUtils,Classes;
 
-(*** Elemental Types ***)
+(*** Basic Types ***)
 
 type tKey16=packed array [0..15] of byte;
 type tKey20=packed array [0..19] of byte;
@@ -27,87 +23,99 @@ type Word8=array [1..8] of byte; {todo}
 
 (*** Simple Functions ***)
 
-procedure BinToHex(hexValue:pChar; const orig; len:word); inline;
-function BinToHexStr(const orig; len:word): ansistring;
-function  HexToBin(out BinValue; HexValue: PChar; BinBufSize: Integer): Integer; inline;
+procedure ToHex(hexValue:pChar; const orig; len:word); inline;
+function ToHexStr(const orig; len:word): ansistring;
+function  UnHex(out BinValue; HexValue: PChar; BinBufSize: Integer): Integer; inline;
 function PrefixLength(const a,b:tKey20):byte;
-function SizeToString( v:LongWord):string;
+function SizeToString( v:SizeUInt ): string;
 function IntHash(init:LongWord;const data;len:longword):LongWord;
 function UnixNow:Int64;
 function StrCompAt(const a: string; ofs:longword; const b: string): boolean;
 
 (*** Base Object types ***)
 
-type
-  tCommonStream=object
-    constructor Init;
-
-    procedure Seek(absolute:LongWord); virtual;
-    function  Tell:LongWord; virtual;
-    function  Length:LongWord; virtual;
-    procedure Read(out buf; cnt:Word); virtual; overload;
-    procedure Write(const buf; cnt:word); virtual; overload;
-
-    procedure Skip(dis:LongInt); virtual;
-    function  Left:LongWord;
-    function  ReadByte:byte;
-    function  ReadWord2:word;
-    function  ReadWord4:dword;
-    function  ReadWord6:Int64;
-    procedure WriteByte(v:byte);
-    procedure WriteWord2(v:word);
-    procedure WriteWord4(v:dword);
-    procedure WriteWord6(v:Int64);
-    function ReadShortString:shortstring;
-    function ReadStringAll:shortstring;
-    procedure WriteShortString(s:shortstring);
-  end;
-  pCommonStream=^tCommonStream;
+(*** Additional functions for Streams ***)
+type tStreamHelper = class helper for tStream
+  function  ReadShortString:ansistring;
+  procedure WriteShortString(s:ansistring);
+  function  ReadStringAll:ansistring; inline;
+  procedure WriteStringAll(s:ansistring); inline;
+  procedure W1 (b: byte); inline;
+  procedure W2 (b: Word); inline;
+  procedure W4 (b: DWord); inline;
+  procedure W6 (b: Int64);
+  function R1: byte; inline;
+  function R2: Word; inline;
+  function R4: DWord; inline;
+  function R6: Int64;
+  procedure RB(out buf; cnt:LongWord); inline;
+  procedure WB(const buf; cnt:LongWord); inline;
+  procedure SeekB(const Offset: Int64); inline;
+  procedure Skip(const displacement: LongInt); inline;
+  procedure WriteZero(count:LongWord);
+  function  Left: LongWord;
+end;
 
 type
-  tTask_ptr=^tTask;
+  tTask=class;
   tTaskEvent=(tevComplete, tevError, tevClose, tevSubTask, tevUser, tevOther);
-  tTaskCallback=procedure( task:tTask_ptr; event:tTaskEvent; data:pointer ) of object;
-  tTask_SubItem=record
-    cb: tTaskCallback;
-    weak:boolean;
-  end;
+  tTaskCallback=procedure( task:tTask; event:tTaskEvent; data:pointer ) of object;
+  TTask_SubList=^tTaskCallback;
 
-  tTask=object
-    typeid:word;
-    procedure Attach( subscriber:tTask_ptr; callback:tTaskCallback);
+  tTask=class(tObject)
+    procedure Attach( subscriber:tTask; callback:tTaskCallback);
     procedure Attach( callback:tTaskCallback );
     procedure AttachWeak( callback:tTaskCallback );
     procedure Detach( callback:tTaskCallback );
+    procedure DetachWeak( callback:tTaskCallback );
     function ProgressPct: single; virtual; {scaled by 10000}
     function GetSubtaskCount: integer; virtual;
-    function GetSubTask(i:integer): tTask_ptr; virtual;
-    constructor Init;
+    function GetSubTask(i:integer): tTask; virtual;
+    constructor Create;
     protected
-    ObserversCount:word;
+    ObserversCount,WeakObserversCount:word;
     procedure Abort; virtual;
     procedure Cleanup; virtual;
     procedure SendEvent(event:tTaskEvent; data:pointer);
     private
-    subscriber:^tTask_SubItem;
+    subscriber: TTask_SubList;
     subscriberSize:word;
     inSendEvent:Word;
     complSent:boolean;
     procedure TaskIntAttach( callback:tTaskCallback; weak:boolean);
+    procedure TaskIntDetach( callback:tTaskCallback; weak:boolean);
   end;
 
-{type
-  tPtrList=object
-    firstn,lastn:^tPtrListNode;
-    constructor Init;
-    destructor Done;
-    function AddHead(a:pointer):pointer;
-    function AddTail(a:pointer):pointer;
-    function PopHead:pointer;
-    function PopTail:pointer;
-    function Head:pointer;
-    function Tail:pointer;
-  end;}
+type
+  TEventLogBaseSink=class(tObject)
+    procedure LogMessage(
+      const ident: string;
+      level: TEventType;
+      const Fmt: string;
+      const Args: array of Const ); virtual;
+    procedure FormatMessage(
+      out msg: string;
+      time: tDateTime;
+      const ident: string;
+      level: TEventType;
+      const Fmt: string;
+      const Args: array of Const ); virtual;
+  end;
+
+  TEventLog=class(tObject)
+    procedure Log(
+      level: TEventType;
+      const Fmt: string;
+      const Args: array of Const ); inline;
+    constructor Create(trg: tEventLogBaseSink; const Aident: string);
+    procedure Error( const Fmt: string; const Args: array of Const ); inline;
+    procedure Warn( const Fmt: string; const Args: array of Const ); inline;
+    procedure Info( const Fmt: string; const Args: array of Const ); inline;
+    procedure Debug( const Fmt: string; const Args: array of Const ); inline;
+    private
+    ident: string;
+    target: tEventLogBaseSink;
+  end;
 
 (*** Derived Object Types ***)
 
@@ -144,64 +152,35 @@ type
     end{record};
   end{object};
 
-type
-  tMemoryStream=object(tCommonStream)
-    vlength: LongWord;
-    size: LongWord;
-    base: pointer;
-    position: LongWord;
-    procedure Seek(absolute:LongWord); virtual;
-    function  Tell:LongWord; virtual;
-    function  Length:LongWord; virtual;
-    procedure Read(out buf; cnt:Word); virtual;
-    procedure Write(const buf; cnt:word); virtual;
-    function  ReadWord(cnt:byte): LongWord; deprecated;
-    function  ReadPtr(cnt:Word):pointer;
-    procedure Trunc;
-    procedure Append;
-    procedure WriteWord(v:LongWord; cnt:byte); deprecated;
-    constructor Init(ibuf:pointer; ilen,isize:LongWord);
-    constructor Init(isize:LongWord);
-    procedure Free; virtual;
-    function WRBuf:pointer;
-    function WRBufLen:LongWord;
-    procedure WREnd(used:LongWord);
-    function RDBuf:pointer;
-    function RDBufLen:LongWord;
-    procedure RDEnd(used:LongWord);
-  end;
-
-  tFileStream=object(tCommonStream)
-    handle:tHandle;
-    procedure Seek(absolute:LongWord); virtual;
-    procedure Skip(dis:LongInt); virtual;
-    procedure Read(out buf; cnt:Word); virtual;
-    procedure ReadAsMuch(out buf; var cnt:LongWord);
-    procedure Write(const buf; cnt:word); virtual;
-    function  Length:LongWord; virtual;
-    function  Tell:LongWord; virtual;
-    procedure Trunc(len:LongWord);
-    constructor OpenRO(const fn:string);
-    constructor OpenRW(const fn:string);
-    constructor OpenHandle(const ihandle:tHandle);
-    destructor Done;
-  end;
-
-type
-  tConfigFile = object
-    secarr:ppChar;
-    constructor Init(var fs:tFileStream);
-    function GetSection(name:pchar):pchar;
-    destructor Done;
-  end;
-
-  tConfigSection = object
-    sect,line:pchar;
-    constructor Init(var cfg:tConfigFile; name:pchar);
-    function GetKey(name:string):string;
-    function GetLine:string;
-    procedure Reset;
-  end;
+type tBufferStream=class(TCustomMemoryStream)
+  private
+  {FCapacity: Int64;}
+  fAutoFree:boolean;
+  public
+  {property Capacity: Int64 read FCapacity;}
+  property FreeOnDestroy: boolean read fAutoFree write fAutoFree;
+  {constructor Create(Ptr: Pointer; ASize, ACapacity: PtrInt);}
+  {constructor Create(ACapacity: PtrInt);}
+  constructor Create(Ptr: Pointer; ASize: PtrInt);
+  destructor Destroy; override;
+  {function Write( const Buffer; Count: LongInt): LongInt; override;}
+  {procedure Clear;}
+  function  Left: LongWord;
+  {function  SpaceLeft: LongWord;}
+  {function  WritePtr: pointer;}
+  {procedure WriteSkip(used:LongWord);}
+  function ReadPtr(cnt:Word): pointer;
+end;
+{type TMemoryStream = class(Classes.TMemoryStream)
+  (*Standard MS with configurable BlockSize*)
+  (*Original has 4k blocks*)
+  private
+    FBlockSize: PtrInt;
+  protected
+    function Realloc(var NewCapacity: PtrInt): Pointer; override;
+  public
+    property BlockSize: PtrInt read FBlockSize;
+end;}
 
 (*** to/from-string Conversion Operators ***)
 
@@ -265,7 +244,7 @@ function PtrListShiftRight(a: ppointer; max, i:longword): boolean;
 (*** Other ***)
 
 type eXception=SysUtils.eXception;
-type eInvalidMemStreamAccess=class(Exception)
+type eInvalidBufferStreamAccess=class(Exception)
   end;
 type eReadPastEoF=class(Exception)
   ActuallyReadBytes:LongWord;
@@ -313,15 +292,15 @@ function PrefixLength(const a,b:tKey20):byte;
  end;
 end;
 
-procedure BinToHex(hexValue:pChar; const orig; len:word);
+procedure ToHex(hexValue:pChar; const orig; len:word);
   begin
   StrUtils.BinToHex(pchar(@orig), hexValue, len);
 end;
-function  HexToBin(out BinValue; HexValue: PChar; BinBufSize: Integer): Integer;
+function  UnHex(out BinValue; HexValue: PChar; BinBufSize: Integer): Integer;
   begin
   result:=StrUtils.HexToBin(HexValue,pchar(@BinValue),BinBufSize);
 end;
-function BinToHexStr(const orig; len:word): ansistring;
+function ToHexStr(const orig; len:word): ansistring;
   begin
   SetLength(result,len*2);
   StrUtils.BinToHex(pchar(@orig), @result[1], len);
@@ -330,33 +309,33 @@ end;
 operator :=(a:tKey20) r:string;
   begin
   SetLength(r,40);
-  BinToHex(@r[1], a, 20);
+  ToHex(@r[1], a, 20);
 end;
 operator :=(a:string) r:tKey20;
   begin
-  if HexToBin(r,@a[1],20)<20 then raise
+  if UnHex(r,@a[1],20)<20 then raise
   eConvertError.Create('Invalid Hex String');
 end;
 
 operator :=(k:tKey24) s:string;
   begin
   SetLength(s,48);
-  BinToHex(@s[1], k, 24);
+  ToHex(@s[1], k, 24);
 end;
 operator :=(a:string) r:tKey24;
   begin
-  if HexToBin(r,@a[1],24)<24 then raise
+  if UnHex(r,@a[1],24)<24 then raise
   eConvertError.Create('Invalid Hex String');
 end;
 
 operator :=(k:tKey32) s:string;
  begin
  Setlength(s,64);
- BinToHex(@s[1],k,32);
+ ToHex(@s[1],k,32);
 end;
 operator :=(a:string) r:tKey32;
   begin
-  if HexToBin(r,@a[1],32)<32 then raise
+  if UnHex(r,@a[1],32)<32 then raise
   eConvertError.Create('Invalid Hex String');
 end;
 
@@ -373,161 +352,185 @@ procedure SC(fn:pointer; retval:longint);
   end;
 end;
 
-procedure tMemoryStream.Seek(absolute:LongWord);
- begin
- if absolute>size then raise eInvalidMemStreamAccess.Create('Seek out of bounds');
- position:=absolute;
-end;
-
-procedure tMemoryStream.Read(out buf; cnt:Word);
- begin
- if (position+cnt)>vlength then raise eReadPastEoF.Create('Read out of bounds');
- Move((base+position)^,buf,cnt);
- position:=position+cnt;
-end;
-
-function tMemoryStream.ReadPtr(cnt:Word):pointer;
- begin
- result:=base+position;
- skip(cnt);
-end;
-
-function  tMemoryStream.ReadWord(cnt:byte): LongWord;
+{
+  FCapacity: Int64;
+  public
+  property Capacity: Int64 read FCapacity;
+}
+constructor tBufferStream.Create(Ptr: Pointer; ASize: PtrInt);
   begin
-  case cnt of
-    1:Read(result,1);
-    2:result:=ReadWord2;
-    4:result:=ReadWord4;
-    else AbstractError;
+  Inherited Create;
+  SetPointer(ptr,asize);
+  fAutoFree:=false;
+end;
+
+destructor tBufferStream.Destroy;
+  begin
+  if fAutoFree and assigned(Memory) then FreeMem(Memory);
+  SetPointer(nil,0);
+  Inherited;
+end;
+
+{constructor tBufferStream.Create(ACapacity: PtrInt);
+  var ad:pointer;
+  begin
+  Inherited Create;
+  SetPointer(nil,0);
+  ad:=GetMem(ACapacity);
+  SetPointer(ad,0);
+  fAutoFree:=true;
+  FCapacity:=ACapacity;
+  fAutoFree:=true;
+end;}
+
+{function tBufferStream.Write( const Buffer; Count: LongInt): LongInt;
+  var NewPos: PtrInt;
+  var fposition:PtrInt;
+  begin
+  fposition:=GetPosition;
+  NewPos:=fposition+count;
+  if NewPos>GetSize then begin
+    if NewPos>FCapacity then begin
+      NewPos:=FCapacity;
+      Count:=NewPos-fposition;
+    end;
+    SetSize(NewPos);
   end;
-end;
- 
-procedure tMemoryStream.Trunc;
- begin vlength:=position; end;
-procedure tMemoryStream.Append;
- begin position:=length; end;
-function tMemoryStream.Tell:LongWord;
- begin Tell:=position; end;
+  System.Move (Buffer,(Memory+fposition)^,Count);
+  Position:=NewPos;
+  Result:=Count;
+end;}
 
-procedure tMemoryStream.Write(const buf; cnt:word);
- begin
- if (position+cnt)>size then raise eInvalidMemStreamAccess.Create('Write out of bounds');
- Move(buf,(base+position)^,cnt);
- position:=position+cnt;
- if position>vlength then vlength:=position;
-end;
-
-procedure tMemoryStream.WriteWord(v:LongWord; cnt:byte);
+function  tBufferStream.Left: LongWord;
   begin
-  case cnt of
-    1: Write(v,1);
-    2: WriteWord2(v);
-    4: WriteWord4(v);
-    else AbstractError;
-  end;
+  result:=Position-Size;
 end;
 
-constructor tMemoryStream.Init(ibuf:pointer; ilen,isize:LongWord);
- begin
- Inherited Init;
- base:=ibuf;
- vlength:=ilen;
- size:=isize;
- seek(0);
-end;
-constructor tMemoryStream.Init(isize:LongWord);
- begin
- Init(GetMem(isize),0,isize);
-end;
-procedure tMemoryStream.Free;
-  begin FreeMem(base,size) end;
-
-function tMemoryStream.Length:LongWord;
- begin result:=vLength end;
-function tMemoryStream.WRBuf:pointer;
- begin result:=base+position end;
-function tMemoryStream.WRBufLen:LongWord;
- begin result:=size-position end;
-procedure tMemoryStream.WREnd(used:LongWord);
- begin RDEnd(used); if position>length then vlength:=position end;
-function tMemoryStream.RDBuf:pointer;
- begin result:=base+position end;
-function tMemoryStream.RDBufLen:LongWord;
+function tBufferStream.ReadPtr(cnt:Word): pointer;
+  var NewPos: PtrInt;
   begin
-  if position>=length then result:=0
-  else result:=length-position
+  NewPos:=Position+cnt;
+  if NewPos<=Size then begin
+    result:=(Memory+Position);
+    Position:=NewPos;
+  end else raise EReadError.Create('Buffer.ReadPtr out of bounds');
 end;
-procedure tMemoryStream.RDEnd(used:LongWord);
- begin skip(used) end;
 
-procedure tCommonStream.Seek(absolute:LongWord); begin AbstractError end;
-function  tCommonStream.Tell:LongWord; begin result:=0; AbstractError end;
-function  tCommonStream.Length:LongWord; begin result:=0; AbstractError end;
-procedure tCommonStream.Read(out buf; cnt:Word); begin AbstractError end;
-procedure tCommonStream.Write(const buf; cnt:word); begin AbstractError end;
+{function TMemoryStream.Realloc(var NewCapacity: PtrInt): Pointer;
+  begin
+  If NewCapacity<0 Then
+    NewCapacity:=0
+  else
+    begin
+      // if growing, grow at least a quarter
+      if (NewCapacity>FCapacity) and (NewCapacity < (5*FCapacity) div 4) then
+        NewCapacity := (5*FCapacity) div 4;
+      // round off to block size.
+      NewCapacity := (NewCapacity + (BlockSize-1)) and not (BlockSize-1);
+    end;
+  // Only now check !
+  If NewCapacity=FCapacity then
+    Result:=FMemory
+  else
+    begin
+      Result:=Reallocmem(FMemory,Newcapacity);
+      If (Result=Nil) and (Newcapacity>0) then
+        Raise EStreamError.Create(SMemoryStreamError);
+    end;
+end;}
 
-constructor tCommonStream.Init;
-  begin end;
-procedure tCommonStream.Skip(dis:LongInt);
+procedure tStreamHelper.Skip(const displacement:LongInt);
   {$PUSH}{$RANGECHECKS ON}
-  begin Seek(Tell+dis) end;{$POP}
-function  tCommonStream.ReadByte:byte;
-  begin self.Read(result,1) end;
-procedure tCommonStream.WriteByte(v:byte);
-  begin self.Write(v,1) end;
-function tCommonStream.Left:LongWord;
-  begin Left:=Length-Tell end;
-function tCommonStream.ReadShortString:shortstring;
+  begin Seek(displacement,soFromCurrent) end;{$POP}
+procedure tStreamHelper.SeekB(const Offset: Int64);
+  begin
+  Seek(Offset,soFromBeginning)
+end;
+function  tStreamHelper.R1:byte;
+  begin self.ReadBuffer(result,1) end;
+procedure tStreamHelper.W1(b:byte);
+  begin self.WriteBuffer(b,1) end;
+function tStreamHelper.Left:LongWord;
+  begin Left:=Size-Position end;
+function tStreamHelper.ReadShortString:ansistring;
   var l:byte;
   begin
   l:=ReadByte;
   SetLength(result,l);
-  Read(result[1],l);
+  ReadBuffer(result[1],l);
 end;
-function tCommonStream.ReadStringAll:shortstring;
+function tStreamHelper.ReadStringAll:ansistring;
   var l:byte;
   begin
   l:=Left;
   SetLength(result,l);
-  Read(result[1],l);
+  ReadBuffer(result[1],l);
 end;
-procedure tCommonStream.WriteShortString(s:shortstring);
+procedure tStreamHelper.WriteShortString(s:ansistring);
   begin
   WriteByte(System.Length(s));
-  Write(s[1],System.Length(s));;
+  WriteBuffer(s[1],System.Length(s));;
+end;
+procedure tStreamHelper.WriteStringAll(s:ansistring);
+  begin
+  WriteBuffer(s[1],System.Length(s));;
 end;
 
-function tCommonStream.ReadWord2:word;
+function tStreamHelper.R2:word;
   begin
-  Read(result,2);
+  ReadBuffer(result,2);
   result:=beton(result);
 end;
-  function tCommonStream.ReadWord4:dword;
+function tStreamHelper.R4:dword;
   begin
-  Read(result,4);
+  ReadBuffer(result,4);
   result:=beton(result);
 end;
-  function tCommonStream.ReadWord6:Int64;
+function tStreamHelper.R6:Int64;
   begin
   result:=0;
-  Read((pointer(@result)+2)^,6);
+  ReadBuffer((pointer(@result)+2)^,6);
   result:=beton(result);
 end;
 
-procedure tCommonStream.WriteWord2(v:word);
+procedure tStreamHelper.W2(b:word);
   begin
-  v:=ntobe(v);
-  Write(v,2);
+  b:=ntobe(b);
+  WriteBuffer(b,2);
 end;
-procedure tCommonStream.WriteWord4(v:dword);
+procedure tStreamHelper.W4(b:dword);
   begin
-  v:=ntobe(v);
-  Write(v,4);
+  b:=ntobe(b);
+  WriteBuffer(b,4);
 end;
-procedure tCommonStream.WriteWord6(v:Int64);
+procedure tStreamHelper.W6(b:Int64);
   begin
-  v:=ntobe(v);
-  Write((pointer(@v)+2)^,6);
+  b:=ntobe(b);
+  WriteBuffer((pointer(@b)+2)^,6);
+end;
+
+procedure tStreamHelper.RB(out buf; cnt:LongWord);
+  begin
+  ReadBuffer(buf,cnt);
+end;
+procedure tStreamHelper.WB(const buf; cnt:LongWord);
+  begin
+  WriteBuffer(buf,cnt);
+end;
+
+procedure tStreamHelper.WriteZero(count:LongWord);
+  var z:QWORD;
+  var rc:LongInt;
+  begin
+  z:=0;
+  while count>=8 do begin
+    rc:=Write(z,8);
+    if rc<=0 then Raise EWriteError.Create('Error while writing zeros');
+    count:=count-rc;
+  end;
+  if (count and 4) =4 then WriteBuffer(z,4);
+  if (count and 2) =2 then WriteBuffer(z,2);
+  if (count and 1) =1 then WriteBuffer(z,1);
 end;
 
 function StrCompAt(const a: string; ofs:longword; const b: string): boolean;
@@ -766,56 +769,111 @@ operator := (host: Int64) net:Word6;
  net[6]:=host and $FF;
 end;
 
+{*** Logging ***}
+
+procedure tEventLog.Error( const Fmt: string; const Args: array of Const );
+  begin  Target.LogMessage(ident,etError,fmt,args)  end;
+procedure tEventLog.Warn( const Fmt: string; const Args: array of Const );
+  begin  Target.LogMessage(ident,etWarning,fmt,args)  end;
+procedure tEventLog.Info( const Fmt: string; const Args: array of Const );
+  begin  Target.LogMessage(ident,etInfo,fmt,args)  end;
+procedure tEventLog.Debug( const Fmt: string; const Args: array of Const );
+  begin  Target.LogMessage(ident,etDebug,fmt,args)  end;
+procedure tEventLog.Log(
+    level: TEventType;
+    const Fmt: string;
+    const Args: array of Const );
+  begin
+  Target.LogMessage(ident,level,fmt,args);
+end;
+
+constructor tEventLog.Create(trg: tEventLogBaseSink; const Aident: string);
+  begin
+  Inherited Create;
+  ident:=aident;
+  target:=trg;
+  assert(assigned(target));
+end;
+
+procedure tEventLogBaseSink.FormatMessage(
+    out msg: string;
+    time: tDateTime;
+    const ident: string;
+    level: TEventType;
+    const Fmt: string;
+    const Args: array of Const );
+  begin
+  msg:=FormatDateTime('DDMM-hh:nn:ss',time);
+  case level of
+    //etInfo: msg:=msg+' Info';
+    etwarning: msg:=msg+' Warning';
+    etError: msg:=msg+' Error';
+    etDebug: msg:=msg+' Debug';
+    //else msg:=msg+' Other';
+  end;
+  msg:=msg+' '+ident+Format(fmt,args);
+end;
+
+procedure tEventLogBaseSink.LogMessage(
+    const ident: string;
+    level: TEventType;
+    const Fmt: string;
+    const Args: array of Const );
+  var msg:String;
+  begin
+  Self.FormatMessage(msg,now,ident,level,fmt,args);
+  writeln(stderr,msg);
+end;
+
 {*** Task ***}
 
 procedure tTask.TaskIntAttach( callback:tTaskCallback; weak:boolean );
   var i:integer;
   begin
   for i:=0 to subscriberSize-1
-    do if not assigned(subscriber[i].cb) then begin
-      subscriber[i].cb:=callback;
-      subscriber[i].weak:=weak;
-      if not weak then inc(ObserversCount);
+    do if not assigned(subscriber[i]) then begin
+      subscriber[i]:=callback;
+      if weak then inc(weakObserversCount)
+              else inc(ObserversCount);
       exit;
   end;
   i:=subscriberSize;
   subscriberSize:=subscriberSize*2;
-  ReAllocMem(subscriber,subscriberSize*sizeof(tTask_SubItem));
-  subscriber[i].cb:=callback;
-  subscriber[i].weak:=weak;
-  if not weak then inc(ObserversCount);
+  ReAllocMem(subscriber,subscriberSize*sizeof(subscriber^));
+  subscriber[i]:=callback;
+  if weak then inc(weakObserversCount)
+          else inc(ObserversCount);
   for i:=i to subscriberSize-1
-    do subscriber[i].cb:=nil;
+    do subscriber[i]:=nil;
 end;
 
 procedure tTask.SendEvent(event:tTaskEvent; data:pointer);
   var i:integer;
   begin
-  inc(inSendEvent);
   if event in [tevComplete,tevError] then complSent:=true;
   for i:=0 to subscriberSize-1
-  do if assigned(subscriber[i].cb)
+  do if assigned(subscriber[i])
   then begin
-    subscriber[i].cb(@self,event,data);
+    subscriber[i](self,event,data);
   end;
-  if (ObserversCount=0) and (inSendEvent=1) then begin
-    SendEvent(tevClose,nil);
-    if not complSent then Abort;
+  if event in [tevComplete,tevError] then begin
     Cleanup;
-  end else dec(inSendEvent);
+  end;
 end;
 
-procedure tTask.Detach( callback:tTaskCallback );
+procedure tTask.TaskIntDetach( callback:tTaskCallback; weak: boolean );
   var i:integer;
   begin
   assert(assigned(callback),'wtf detach nil');
   for i:=0 to subscriberSize-1
-  do if subscriber[i].cb=callback then begin
-    subscriber[i].cb:=nil;
-    if not subscriber[i].weak then dec(ObserversCount);
+  do if subscriber[i]=callback then begin
+    subscriber[i]:=nil;
+    if weak then dec(weakObserversCount)
+            else dec(ObserversCount);
   end;
-  if (ObserversCount=0) and (inSendEvent=0) then begin
-    inc(inSendEvent);
+  if ObserversCount=0 then begin
+    {all non-weak detached -> abort and send event}
+    {only weak observers left, send event to all}
     SendEvent(tevClose,nil);
     if not complSent then Abort;
     Cleanup;
@@ -824,31 +882,38 @@ end;
 
 procedure tTask.Cleanup;
   begin
-  FreeMem(subscriber,subscriberSize*sizeof(tTask_SubItem));
+  FreeMem(subscriber,subscriberSize*sizeof(subscriber^));
 end;
 procedure tTask.Abort;
   begin
 end;
-constructor tTask.Init;
+constructor tTask.Create;
   var i:integer;
   begin
   complSent:=false;
-  typeid:=0;
   inSendEvent:=0;
   subscriberSize:=6;
-  subscriber:=GetMem(subscriberSize*sizeof(tTask_SubItem));
+  subscriber:=GetMem(subscriberSize*sizeof(subscriber^));
   for i:=0 to subscriberSize-1
-    do subscriber[i].cb:=nil;
+    do subscriber[i]:=nil;
 end;
 
-procedure tTask.Attach( subscriber:tTask_ptr; callback:tTaskCallback);
+procedure tTask.Attach( subscriber:tTask; callback:tTaskCallback);
   begin
   TaskIntAttach(callback,false);
-  if assigned(subscriber) then subscriber^.SendEvent(tevSubTask,@self);
+  if assigned(subscriber) then subscriber.SendEvent(tevSubTask,@self);
 end;
 procedure tTask.Attach( callback:tTaskCallback );
   begin
   TaskIntAttach(callback,false);
+end;
+procedure tTask.Detach(callback:tTaskCallback);
+  begin
+  TaskIntDetach(callback,false);
+end;
+procedure tTask.DetachWeak( callback:tTaskCallback );
+  begin
+  TaskIntDetach(callback,true);
 end;
 procedure tTask.AttachWeak( callback:tTaskCallback );
   begin
@@ -858,10 +923,10 @@ function tTask.ProgressPct: single;
   begin ProgressPct:=0.5 end;
 function tTask.GetSubtaskCount: integer;
   begin GetSubTaskCount:=0 end;
-function tTask.GetSubTask(i:integer): tTask_ptr;
+function tTask.GetSubTask(i:integer): tTask;
   begin GetSubTask:=nil end;
 
-{*** FileStream ***}
+{*** FileStream ***
 procedure tFileStream.Seek(absolute:LongWord);
   begin if FileSeek(handle,absolute,fsFromBeginning)<>absolute
   then raise eInOutError.Create('File Seek Error'); end;
@@ -898,7 +963,7 @@ constructor tFileStream.OpenRW(const fn:string);
   begin
   Inherited Init;
   handle:=FileOpen(fn, fmOpenReadWrite or fmShareDenyWrite);
-  if handle=-1 then handle:=FileCreate(fn, %0110000000); {mode: -rw-------}
+  if handle=-1 then handle:=FileCreate(fn, %0110000000); //mode: -rw-------
   if handle=-1 then raise eInOutError.Create('File Open read/write or Create Error '+fn);
 end;
 constructor tFileStream.OpenHandle(const ihandle:tHandle);
@@ -914,12 +979,12 @@ procedure tFileStream.ReadAsMuch(out buf; var cnt:LongWord);
   rv:=FileRead(handle,buf,cnt);
   if rv<0 then raise eInOutError.Create('File Read Error');
   cnt:=rv;
-end;
+end;}
 
-function SizeToString( v:LongWord):string;
+function SizeToString( v:SizeUInt ):string;
   var f:LongWord;
   var e:byte;
-  const chars:array [1..3] of char=('k','M','G');
+  const chars:array [1..4] of char=('k','M','G', 'T');
   begin
   e:=0;
   while v>=1024 do begin
@@ -933,8 +998,6 @@ function SizeToString( v:LongWord):string;
   then result:=IntToStr(v)+chars[e]+IntToStr(round(f/100))
   else result:=IntToStr(v)+chars[e];
 end;
-
-{$I ObjectModel-cfg.pas}
 
 (*** Find ***)
 
