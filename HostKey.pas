@@ -15,19 +15,26 @@ var PublicKey:tEccKey;
 var PublicPoW:tPoWRec;
 var PublicPoWReady:boolean;
 var ZeroDigest:tSha512Digest;
-{$IFDEF ENDIAN_LITTLE}
+{-DEFINE POW_ALT}
+{$IFNDEF POW_ALT}
+  {$IFDEF ENDIAN_LITTLE}{Intel x86}
 const cPowMask0:DWORD=$FF7FFFFF;
-{$ELSE}
+  {$ELSE}{ARM shit}
 const cPowMask0:DWORD=$FFFF0FFF;
-{$ENDIF}
+  {$ENDIF}
 const cPoWValidFor=5*{days}86400;
+{$ELSE}
+const cPowMask0:DWORD=$00FF0000;
+const cPoWValidFor={1 hour}3600;
+{$ENDIF}
 const cHostIdent:array [1..8] of char='BNHosSW'#26;
 procedure CreateChallenge(out Challenge: tKey32);
 procedure CreateResponse(const Challenge: tKey32; out Response: tKey32; const srce:tEccKey);
 function VerifyPoW(const proof:tPoWRec; const RemotePub:tEccKey):boolean;
 
 IMPLEMENTATION
-uses SysUtils{,DateUtils},ServerLoop;
+uses SysUtils{,DateUtils},ServerLoop,Classes,Database;
+var log:tEventLog;
 
 procedure CreateChallenge(out Challenge: tKey32);
  var i:byte;
@@ -73,13 +80,13 @@ procedure GetOSRandom(buf:pointer; cnt:word);
     if q<=0 then break; cnt:=cnt-q; buf:=buf+q;
   end;
   if (f<0) or (q<=0) then begin
-    writeln('ERROR reading /dev/random');
+    raise eInOutError.Create('ERROR reading /dev/random');
     halt(8);
   end else FileClose(f);
   {$ELSE}
   begin
   {$WARNING Random on non-UNIX unimplemented}
-  writeln('[WARNING: No random source! Using all zeros, generated keys will be shit.]');
+  Log.Error(' No random source! Using all zeros, generated keys will be shit',[]);
   FillChar(out,0,cnt);
   {$ENDIF}
 end;
@@ -87,37 +94,43 @@ end;
 type tPoWRefreshObj=object procedure Timer; end;
 var PoWGenBg:tPoWRefreshObj;
 const cSeckeyFN='hostkey.dat';
+const cPowDK='hostpow';
 
 function PoWGenThr(param:pointer):ptrint;
-  var f:tFileStream;
   var i:byte;
   var start:tDateTime;
+  var shactx_initial:tSha256Context;
   var shactx:tSha256Context;
-  var wp:tPoWRec;
-  var counter:LongWord absolute wp.data;
+  var wp:packed record
+    cnt:DWord;
+    data:packed array [4..31] of byte;
+    stamp:Word6;
+    pk:tKey32;
+  end;
   var digest: tKey32;
   var dig_4dw: dword absolute digest[0];
   begin result:=0;
+  assert(sizeof(wp)=70);
+  assert(sizeof(PublicPoW)=38);
   SetThreadName('PoW_Gen');
   wp.stamp:=Word6(UnixNow);
-  for i:=0 to 31 do wp.data[i]:=Random(256);
-  Start:=Now; counter:=0;
+  for i:=4 to 31 do wp.data[i]:=Random(256);
+  SHA256_Init(shactx_initial);
+  wp.pk:=PublicKey;
+  Start:=Now; wp.cnt:=0;
   repeat
-    if counter=high(counter) then raise eXception.Create('some shit happend');
-    inc(counter);
-    SHA256_Init(shactx);
+    if wp.cnt=high(wp.cnt) then raise eXception.Create('some shit happend');
+    inc(wp.cnt);
+    shactx:=shactx_initial;
     SHA256_Update(shactx,wp,sizeof(wp));
-    SHA256_Update(shactx,PublicKey,sizeof(PublicKey));
     SHA256_Final(digest,shactx);
   until (dig_4dw and cPowMask0) =0;
   EnterCriticalSection(GlobalLock);
-  PublicPoW:=wp;
-  writeln('HostKey: PoW found in ',(Now-start)*SecsPerDay:3:0,'s speed=',SizeToString(trunc(counter/((Now-start)*SecsPerDay))),'h/s');
-  writeln('pow ',string(digest));
+  Move(wp,{->}PublicPoW,38);
+  log.info(' PoW found in %.1Fs speed=%Sh/s',[(Now-start)*SecsPerDay,SizeToString(trunc(wp.cnt/((1e-6+Now-start)*SecsPerDay)))]);
+  log.debug(' pow %S',[string(digest)]);
   Assert(VerifyPoW(PublicPoW,PublicKey));
-  f.OpenRW(cSeckeyFN); f.Seek(72); {This is offset of PoW in hostkey file}
-  f.Write(PublicPoW,sizeof(PublicPoW));
-  f.Done;
+  Database.dbSet(dbMisc,cPowDK[1],length(cPowDK),@PublicPoW,sizeof(PublicPoW));
   PoWGenBg.Timer;
   LeaveCriticalSection(GlobalLock);
   EndThread;
@@ -129,40 +142,56 @@ procedure tPoWRefreshObj.Timer;
   if  (not VerifyPoW(PublicPoW,PublicKey))
   or  ( (Int64(PublicPoW.stamp)+cPoWValidFor-UnixNow) <600 )
   then begin
-    writeln('HostKey: Started generating PoW');
-    PublicPoWReady:=false;
+    log.info(' Started generating PoW',[]);
+    //PublicPoWReady:=false;
     BeginThread(@PoWGenThr,nil);
   end
   else Shedule(120000,@timer);
 end;
 
 procedure Load;
-  var f:tFileStream;
+  var f:tStream;
   var ident:array [1..8] of char;
   begin
   PublicPoWReady:=false;
-  f.OpenRW(cSeckeyFN);
+  {$IFDEF POW_ALT}
+  log.info(' Using aternate pow settings',[]);
+  {$endif}
   try
-    f.Read(ident,sizeof(cHostIdent));
-    if CompareByte(ident,cHostIdent,8)<>0 then raise eInOutError.Create(cSeckeyFN+' invalid');
-    f.Read(SecretKey,sizeof(SecretKey));
+    f:=tFileStream.Create(cSeckeyFN,fmOpenRead);
+    try
+      f.Read(ident,sizeof(cHostIdent));
+      if CompareByte(ident,cHostIdent,8)<>0 then raise eInOutError.Create(cSeckeyFN+' invalid');
+      f.Read(SecretKey,sizeof(SecretKey));
+    finally
+      f.Free;
+    end;
   except on e:eInOutError do begin
-    writeln('HostKey: '+cSeckeyFN+' ',e.message,', Generating');
-    f.Seek(0);
-    GetOSRandom(@SecretKey,64);
-    f.Write(cHostIdent,8);
-    f.Write(SecretKey,64);
+    log.warn('.Load %S %S, Generating',[cSeckeyFN,e.message]);
+    f:=tFileStream.Create(cSeckeyFN,fmCreate);
+    try
+      GetOSRandom(@SecretKey,64);
+      f.Write(cHostIdent,8);
+      f.Write(SecretKey,64);
+    finally
+      f.Free;
+    end;
   end end;
   CreatekeyPair(PublicKey,SecretKey);
-  writeln('HostKey: '+cSeckeyFN+' ',string(PublicKey));
-  try f.Read(PublicPoW,sizeof(PublicPoW));
-  except ; end;
-  f.Done;
+  log.info(' %S %S',[cSeckeyFN,string(PublicKey)]);
+  f:=dbGet(dbMisc,cPoWDK,length(cPoWDK));
+  try
+    try f.Read(PublicPoW,sizeof(PublicPoW));
+    except ; end;
+  finally
+    f.Free;
+  end;
   PoWGenBg.Timer;
 end;
 
 BEGIN
- FillChar(ZeroDigest,sizeof(ZeroDigest),0);
+  FillChar(ZeroDigest,sizeof(ZeroDigest),0);
+  ServerLoop.CreateLog(log,'HostKey');
   //writeln('HostKey: Today is D',TSNow);
   Load;
   //writeln('HostKey: ProofOfWork valid for W',BEtoN(PublicPow.Stamp));
