@@ -5,7 +5,7 @@ unit ObjectModel;
 {$mode objfpc}
 {$PACKENUM 1}
 INTERFACE
-USES SysUtils,Sockets,StrUtils,Classes;
+USES SysUtils,Sockets,StrUtils,Classes,StreamEX;
 
 (*** Basic Types ***)
 
@@ -35,7 +35,7 @@ function StrCompAt(const a: string; ofs:longword; const b: string): boolean;
 (*** Base Object types ***)
 
 (*** Additional functions for Streams ***)
-type tStreamHelper = class helper for tStream
+type tStreamHelper = class helper (StreamEX.TStreamHelper) for tStream
   function  ReadShortString:ansistring;
   procedure WriteShortString(s:ansistring);
   function  ReadStringAll:ansistring; inline;
@@ -805,10 +805,10 @@ procedure tEventLogBaseSink.FormatMessage(
   begin
   msg:=FormatDateTime('DDMM-hh:nn:ss',time);
   case level of
-    //etInfo: msg:=msg+' Info';
     etwarning: msg:=msg+' Warning';
     etError: msg:=msg+' Error';
     etDebug: msg:=msg+' Debug';
+    //etInfo: msg:=msg+' Info';
     //else msg:=msg+' Other';
   end;
   msg:=msg+' '+ident+Format(fmt,args);
@@ -830,6 +830,7 @@ end;
 procedure tTask.TaskIntAttach( callback:tTaskCallback; weak:boolean );
   var i:integer;
   begin
+  assert(assigned(callback),'attach nil');
   for i:=0 to subscriberSize-1
     do if not assigned(subscriber[i]) then begin
       subscriber[i]:=callback;
@@ -864,9 +865,9 @@ end;
 procedure tTask.TaskIntDetach( callback:tTaskCallback; weak: boolean );
   var i:integer;
   begin
-  assert(assigned(callback),'wtf detach nil');
+  assert(assigned(callback),'detach nil');
   for i:=0 to subscriberSize-1
-  do if subscriber[i]=callback then begin
+  do if CompareByte(subscriber[i],callback,sizeof(callback))=0 then begin
     subscriber[i]:=nil;
     if weak then dec(weakObserversCount)
             else dec(ObserversCount);
