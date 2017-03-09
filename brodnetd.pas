@@ -4,14 +4,13 @@ uses cmem,cthreads,ServerLoop, ObjectModel
   ,Database
   ,Store
 	,HostKey
-	,OTServer
-	,DHT
-	,Ctrl
-  ,dhlt
-  ,Mutable
+//	,OTServer
+//	,DHT
+//	,Ctrl
+//  ,Mutable
 	;
 
 BEGIN
- Database.FreeKeyList;
+// Database.FreeKeyList;
  ServerLoop.Main
 END.

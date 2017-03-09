@@ -4,27 +4,13 @@ UNIT Store;
 
 }
 INTERFACE
-USES Crypto,ObjectModel,Database,SysUtils;
+USES Crypto,Database,SysUtils,ServerLoop,Classes,StreamEX,ObjectModel;
 
 type tFID=ObjectModel.tKey24;
 type tFID_ptr=^tFID;
 type tsoLocation = (solNormal=1, solInline=2,solReference=3);
 
-type tStoreObject=OBJECT(tCommonStream)
-  StorageMode: tsoLocation;
-  constructor Init(id: tFID); {open existing file}
-  destructor  Done;
-  procedure Seek(abs:longword); virtual;
-  function  Tell:LongWord; virtual;
-  procedure Read(out blk; len:word); virtual;
-  function  Length:LongWord; virtual;
-  private
-  d:record
-    case byte of
-    1:( ms:tDbMemStream; );
-    2:( fs:tFileStream; );
-  end;
-end;
+function StoreOpen( id: tFID ): TStream;
 
 type eObjectNF=CLASS(eFileNotFound)
 end;
@@ -35,18 +21,18 @@ const cInlineThr=8*1024;
 const cStoreDir='obj/';
 
 function GetTempName(const hash:tKey32; const ext:string): string;
-function ObjectExists(const id: tFID): boolean; overload;
+function StoreExists(const id: tFID): boolean;
 procedure GetBlobInfo(const id: tFID; out mode:byte; out path:Ansistring );
 function IsBlob(const id: tFID): boolean; overload;
-procedure DeleteObject(const id: tFID); unimplemented;
+procedure StoreDelete(const id: tFID); unimplemented;
 
-procedure InsertBlobMem( out id: tFID; ms: tMemoryStream );
+procedure InsertBlobMem( out id: tFID; ms: TCustomMemoryStream );
 procedure InsertBlobRename( const name:string; var hash:tKey32 );
 procedure InsertBlobRef( const name:string; var hash:tKey32 );
 
 function ReadLink(const id: tFID): tFID;
-function ReadLinkData(const id: tFID): tDbMemStream;
-procedure InsertLinkData(const id: tFID; s:tMemoryStream);
+function ReadLinkData(const id: tFID): TCustomMemoryStream;
+procedure InsertLinkData(const id: tFID; s:TCustomMemoryStream);
 
 IMPLEMENTATION
 {$IFDEF UNIX}{for the stat() and permissions}
@@ -69,39 +55,48 @@ USES BaseUnix;
 
 
 var opendebug:boolean;
+var log:tEventLog;
 
 function GetTempName(const hash:tKey32; const ext:string): string;
   var t:string[48];
   begin
   setlength(t,48);
-  BinToHex(@t[1],hash,24);
+  ToHex(@t[1],hash,24);
   GetTempName:=cStoreDir+t+'.'+ext;
 end;
 
-constructor tStoreObject.Init(id: tFID);
-  var vl:tDbMemStream;
+function StoreOpen( id: tFID ): TStream;
+  var vl:TStream;
+  var StorageMode:tsoLocation;
+  var linkcnt:integer;
+  var win:tWindowedStream;
   begin
-  Inherited Init;
+  result:=nil;
+  linkcnt:=0;
   StorageMode:=tsoLocation(99);
   while (id[23] and 1) =0 do begin
-    if opendebug then writeln('Store2.Open.Follow: ',string(id));
+    if(linkcnt>15) then raise eObjectNF.Create('Too many Links');
+    if opendebug then log.debug('.Open.Follow: %S',[string(id)]);
     id:=ReadLink(id);
+    inc(linkcnt);
   end;
   vl:=dbGet( dbObject, id, 24 );
   try
-    if vl.length=0 then raise eObjectNF.Create('Object not found'{+' '+string(id)});
+    if vl.size=0 then raise eObjectNF.Create('Object not found'{+' '+string(id)});
     StorageMode:=tsoLocation(vl.ReadByte);
     if StorageMode = solInline then begin
-        d.ms:=vl; {this can cause problems}
-        Seek(0);
-        if opendebug then writeln('Store2.Open.Inline: ',string(id));
+        win:=tWindowedStream.Create(vl,vl.size-4,4);
+        assert(not win.SourceOwner);
+        win.SourceOwner:=true;
+        result:=win;
+        if opendebug then log.debug('.Open.Inline: %S',[string(id)]);
     end else if StorageMode = solNormal then begin
-        d.fs.OpenRO(cStoreDir+string(id));
-        if opendebug then writeln('Store2.Open.Normal: ',string(id));
+        result:=tFileStream.Create(cStoreDir+string(id),fmOpenRead);
+        if opendebug then log.debug('.Open.Normal: %S',[string(id)]);
     end else if StorageMode = solReference then begin
         vl.skip(3);
-        d.fs.OpenRO(vl.ReadStringAll);
-        if opendebug then writeln('Store2.Open.Reference: ',string(id));
+        result:=tFileStream.Create(vl.ReadStringAll,fmOpenRead);
+        if opendebug then log.debug('.Open.Reference: %S',[string(id)]);
     end else begin
         StorageMode:=tsoLocation(99);
         raise Exception.Create('data corrupt');
@@ -112,15 +107,15 @@ constructor tStoreObject.Init(id: tFID);
 end;
 
 
-function ReadLinkData(const id: tFID): tDbMemStream;
+function ReadLinkData(const id: tFID): TCustomMemoryStream;
   begin
   if (id[23] and 1) =1 then raise eObjectNF.Create('Not a Link'); {change exc class!}
   result:=dbGet( dbObject, id, 24 );
-  if result.length=0 then raise eObjectNF.Create('Object not found'{+' '+string(id)});
+  if result.size=0 then raise eObjectNF.Create('Object not found'{+' '+string(id)});
 end;
 
 function ReadLink(const id: tFID): tFID;
-  var vl:tDbMemStream;
+  var vl:TCustomMemoryStream;
   begin
   vl:=ReadLinkData(id);
   vl.Read(result,24);
@@ -134,11 +129,11 @@ end;
 
 
 procedure GetBlobInfo(const id: tFID; out mode:byte; out path:Ansistring );
-  var vl:tDbMemStream;
+  var vl:TCustomMemoryStream;
   begin
   path:='';
   vl:=dbGet( dbObject, id, 24 ); try
-    if vl.length=0
+    if vl.size=0
       then mode:=0
     else begin
       mode:=vl.ReadByte;
@@ -152,55 +147,15 @@ procedure GetBlobInfo(const id: tFID; out mode:byte; out path:Ansistring );
   finally vl.Free end;
 end;
 
-function ObjectExists(const id: tFID): boolean;
-  var vl:tDbMemStream;
+function StoreExists(const id: tFID): boolean;
+  var vl:TCustomMemoryStream;
   begin
   vl:=dbGet( dbObject, id, 24 );
-  result:= (vl.length>0);
+  result:= (vl.size>0);
   vl.Free;
 end;
 
-destructor tStoreObject.Done;
-  begin
-  case StorageMode of
-    solInline: d.ms.Free;
-    solNormal,solReference: d.fs.Done;
-  end;
-  StorageMode:=tsoLocation(99);
-end;
-
-procedure tStoreObject.Seek(abs:longword);
-  begin
-  case StorageMode of
-    solInline: d.ms.Seek(abs+4);
-    solNormal,solReference: d.fs.Seek(abs);
-  end;
-end;
-
-procedure tStoreObject.Read(out blk; len:word);
-  begin
-  case StorageMode of
-    solInline: d.ms.Read(blk,len);
-    solNormal,solReference: d.fs.Read(blk,len);
-  end;
-end;
-
-function tStoreObject.Tell:LongWord;
-  begin
-  case StorageMode of
-    solInline: Tell:=d.ms.position-4;
-    solNormal,solReference: Tell:=d.fs.Tell;
-  end;
-end;
-function tStoreObject.Length:LongWord;
-  begin
-  case StorageMode of
-    solInline: Length:=d.ms.Length-4;
-    solNormal,solReference: Length:=d.fs.Length;
-  end;
-end;
-
-procedure HashAndCopy(var inf:tCommonStream; outf:pCommonStream; out hash:tKey32; left:LongWord);
+procedure HashAndCopy(inf:tStream; outf:tStream; out hash:tKey32; left:LongWord);
   {read input file, copy to output file, hash to id, dont seek/rename/close}
   var ctx:tSha256;
   var buf:packed array [0..1023] of byte;
@@ -210,46 +165,47 @@ procedure HashAndCopy(var inf:tCommonStream; outf:pCommonStream; out hash:tKey32
   while left>0 do begin
     if left<=sizeof(buf) then bs:=left else bs:=sizeof(buf);
     inf.Read(buf,bs);
-    if assigned(outf) then outf^.Write(buf,bs);
+    if assigned(outf) then outf.Write(buf,bs);
     ctx.Update(buf,bs);
     left:=left-bs;
   end;
   ctx.Final(hash);
 end;
 
-procedure DeleteObject(const id: tFID);
+procedure StoreDelete(const id: tFID);
   begin
 end;
 
-procedure InsertBlobInline(out id: tFID; var fs: tCommonStream; len:LongWord);
+procedure InsertBlobInline(out id: tFID; fs: TStream; len:LongWord);
   var vl:tMemoryStream;
   var hash:tKey32;
   begin
-  vl.Init(4+len);
-  vl.WriteByte(Ord(solInline));
-  vl.WriteByte(0);vl.WriteWord2(0);
-  HashAndCopy(fs,@vl,hash,len);
+  vl:=tMemoryStream.Create;
+  vl.SetSize(4+len);
+  vl.W1(Ord(solInline));
+  vl.W1(0);vl.W2(0);
+  HashAndCopy(fs,vl,hash,len);
   Move(hash,{->}id,24);
   id[23]:=id[23] or 1;
   dbSet( dbObject, id, 24, vl );
   vl.Free;
-  writeln('Store2.InsertBlob.Inline: ',string(id));
+  log.info('.InsertBlob.Inline: %S',[string(id)]);
 end;
 
-procedure InsertBlobMem( out id: tFID; ms: tMemoryStream );
+procedure InsertBlobMem( out id: tFID; ms: TCustomMemoryStream );
   {var vl:tMemoryStream;
   var hash:tKey32;}
   begin
-  ms.seek(0);
+  ms.seek(0,soBeginning);
   {if ms.Length < cInlineThr then begin}
-    InsertBlobInline(id, ms, ms.Length);
+    InsertBlobInline(id, ms, ms.Size);
   {end else begin
     todo: use solNormal for biger blobs
   end;}
 end;
 
 procedure InsertBlobRef( const name:string; var hash:tKey32 );
-  var vl2:tDbMemStream;
+  var vl2:TCustomMemoryStream;
   var vl:tMemoryStream;
   var id:tFID;
   var fs:tFileStream;
@@ -258,20 +214,21 @@ procedure InsertBlobRef( const name:string; var hash:tKey32 );
   hash[23]:=hash[23] or 1;
   Move(hash,{->}id,24);
   vl2:=dbGet( dbObject, id, 24 );
-  if vl2.length=0 then begin
-    fs.OpenRO(name);
-    len:=fs.Length;
+  if vl2.size=0 then begin
+    fs:=tFileStream.Create(name,fmOpenRead);
+    len:=fs.size;
     if len > cInlineThr then begin
-      vl.Init(4+length(name));
-      vl.WriteByte(Ord(solReference));
-      vl.WriteByte(0);vl.WriteWord2(0);
+      vl:=tMemoryStream.Create;
+      vl.SetSize(4+length(name));
+      vl.W1(Ord(solReference));
+      vl.W1(0);vl.W2(0);
       vl.Write(name[1],length(name));
       dbSet( dbObject, id, 24, vl );
       vl.Free;
-      writeln('Store.InsertBlob.Ref: ',string(id),'->',name);
+      log.info('.InsertBlob.Ref: %S->%S',[string(id),name]);
     end else try
       InsertBlobInline(id, fs, len);
-      finally  fs.Done;
+      finally  fs.Free;
     end;
   end else begin
     vl2.Free;
@@ -280,7 +237,7 @@ procedure InsertBlobRef( const name:string; var hash:tKey32 );
 end;
 
 procedure InsertBlobRename( const name:string; var hash:tKey32 );
-  var vl2:tDbMemStream;
+  var vl2:TCustomMemoryStream;
   var vl:tMemoryStream;
   var id:tFID;
   var fs:tFileStream;
@@ -290,37 +247,37 @@ procedure InsertBlobRename( const name:string; var hash:tKey32 );
   hash[23]:=hash[23] or 1;
   Move(hash,{->}id,24);
   vl2:=dbGet( dbObject, id, 24 );
-  if vl2.length=0 then begin
-    fs.OpenRO(name);
-    len:=fs.Length;
+  if vl2.size=0 then begin
+    fs:=tFileStream.Create(name,fmOpenRead);
+    len:=fs.size;
     if len > cInlineThr then begin
-      fs.Done;
+      fs.Free;
       dname:=cStoreDir+string(hash);
       if not RenameFile(name,dname) then raise eInOutError.Create('Failed to rename '+name+' to '+dname);
-      vl.Init(4);
-      vl.WriteByte(Ord(solNormal));
-      vl.WriteByte(0);vl.WriteWord2(0);
+      vl:=tMemoryStream.Create;
+      vl.W1(Ord(solNormal));
+      vl.W1(0);vl.W2(0);
       dbSet( dbObject, id, 24, vl );
       vl.Free;
-      writeln('Store.InsertBlob.Rename: ',name,'->',string(id));
+      log.info('.InsertBlob.Rename: %S->%S',[name,string(id)]);
     end else try
       InsertBlobInline(id, fs, len);
       DeleteFile(name);
-      finally  fs.Done;
+      finally  fs.Free;
     end;
   end else begin
     vl2.Free;
     DeleteFile(name);
-    writeln('Store.InsertBlob.Deleted ',name);
+    log.info('.InsertBlob.Deleted %S',[name]);
   end;
 end;
 
-procedure InsertLinkData(const id: tFID; s:tMemoryStream);
+procedure InsertLinkData(const id: tFID; s:tCustomMemoryStream);
   begin
-  if( ((id[23] and 1)=1) or (s.Length<24) )
+  if( ((id[23] and 1)=1) or (s.size<24) )
     then raise eXception.Create('Invalid Link data');
   dbSet( dbObject, id, 24, s );
-  writeln('Store.InsertLinkData ',string(id));
+  log.info('.InsertLinkData %S',[string(id)]);
 end;
 
 {$IF FALSE}
@@ -414,6 +371,7 @@ end;
 {$ENDIF}
 
 BEGIN
+  CreateLog(Log,'Store');
   opendebug:=cDebugPrintOpen;
   CreateDir(cStoreDir);
   //CheckObjects;

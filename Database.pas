@@ -2,19 +2,16 @@ unit Database;
 { database abstraction for brodnetd }
 {$mode objfpc}
 INTERFACE
-uses cmem,ObjectModel;
+uses cmem,ServerLoop,sysutils,ObjectModel,Classes;
 
 {$define TOKYO}
 {define GDBM}
 
-type tDbMemStream=object(tMemoryStream)
-    procedure Free; virtual;
-end;
-type tDbSect=(dbObject,dbObjData,dbProfile);
+type tDbSect=(dbObject,dbObjData,dbProfile,dbMisc='/');
 
-function dbGet(sect:tDbSect; const key; ks:longword ): tDbMemStream;
+function dbGet(sect:tDbSect; const key; ks:longword ): TCustomMemoryStream;
 
-procedure dbSet(sect:tDbSect; const key; ks:longword; s:tMemoryStream );
+procedure dbSet(sect:tDbSect; const key; ks:longword; s:TCustomMemoryStream );
 procedure dbSet(sect:tDbSect; const key; ks:longword; data:pointer; ds:longword );
 procedure dbDelete(sect:tDbSect; const key; ks:longword );
 
@@ -34,17 +31,29 @@ uses tcdb,ctypes;
 var dbHandle:pTCADB;
 {$ENDIF}
 
+type TDbMemStream=class(TCustomMemoryStream)
+    constructor Create(Ptr: Pointer; ASize: PtrInt);
+    destructor Destroy; override;
+end;
+
 {libgdbm/tokyo uses libc malloc, so we must do free from libc}
 procedure LibCFreeMem( P: pointer ); cdecl; external name 'free';
 
-procedure tDbMemStream.Free;
+constructor TDbMemStream.Create(Ptr: Pointer; ASize: PtrInt);
   begin
-  if vlength>0 then
-  LibCFreeMem(base);
+  Inherited Create;
+  SetPointer(ptr,asize);
+end;
+
+destructor TDbMemStream.Destroy;
+  begin
+  if assigned(Memory) then LibCFreeMem(Memory);
+  SetPointer(nil,0);
+  Inherited;
 end;
 
 
-function dbGet(sect:tDbSect; const key; ks:longword ): tDbMemStream;
+function dbGet(sect:tDbSect; const key; ks:longword ): TCustomMemoryStream;
   {$IFDEF GDBM}
   var k,v:tDatum;
   begin
@@ -67,11 +76,11 @@ function dbGet(sect:tDbSect; const key; ks:longword ): tDbMemStream;
   v:=tcadbget(dbHandle, k,ks+1, @vs);
   FreeMem(k);
   if v=nil then vs:=0;
-  result.Init(v,vs,vs);
+  result:=TDbMemStream.Create(v,vs);
   {$ENDIF}
 end;
 
-procedure dbSet(sect:tDbSect; const key; ks:longword; s:tMemoryStream );
+procedure dbSet(sect:tDbSect; const key; ks:longword; s:TCustomMemoryStream );
   {$IFDEF GDBM}
   var k,v:tDatum;
   begin
@@ -90,7 +99,7 @@ procedure dbSet(sect:tDbSect; const key; ks:longword; s:tMemoryStream );
   k:=GetMem(ks+1);
   byte(k^):=ord(sect);
   Move(key,(k+1)^,ks);
-  tcadbput(dbHandle, k, ks+1, s.base, s.vlength);
+  tcadbput(dbHandle, k, ks+1, s.Memory, s.Size);
   FreeMem(k);
   {$ENDIF}
 end;
@@ -197,15 +206,14 @@ FINALIZATION
 {$IFDEF TOKYO}
 const filename='db1.tcb';
 INITIALIZATION
-  write('Database: TOKYO '+filename+' ');flush(output);
   dbhandle:=tcadbnew;
   if (dbhandle=nil) or (tcadbopen(dbhandle,filename)=false) then begin
-    writeln('Database: failed to open or create TOKYO file');
+    raise exception.createfmt ('Database: failed to open or create TOKYO %S file',[filename]);
     //writeln(gdbm_strerror(gdbm_errno)); TODO
     halt(1);
   end;
   LoadListOfKeys;
-  writeln(Length(dbKeyList),' records');
+  log1.LogMessage('Database',etInfo,' TOKYO %S %D records',[filename,Length(dbKeyList)]);
 FINALIZATION
   tcadbclose(dbhandle);
   tcadbdel(dbhandle);
