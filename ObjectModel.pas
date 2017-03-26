@@ -163,6 +163,7 @@ type tBufferStream=class(TCustomMemoryStream)
   {constructor Create(ACapacity: PtrInt);}
   constructor Create(Ptr: Pointer; ASize: PtrInt);
   destructor Destroy; override;
+  procedure SetPointer(Ptr: Pointer; ASize: PtrInt); inline;
   {function Write( const Buffer; Count: LongInt): LongInt; override;}
   {procedure Clear;}
   function  Left: LongWord;
@@ -369,6 +370,11 @@ destructor tBufferStream.Destroy;
   if fAutoFree and assigned(Memory) then FreeMem(Memory);
   SetPointer(nil,0);
   Inherited;
+end;
+
+procedure tBufferStream.SetPointer(Ptr: Pointer; ASize: PtrInt);
+  begin
+  inherited SetPointer(ptr,asize);
 end;
 
 {constructor tBufferStream.Create(ACapacity: PtrInt);

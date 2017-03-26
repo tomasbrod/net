@@ -5,7 +5,7 @@ uses cmem,cthreads,ServerLoop, ObjectModel
   ,Store
 	,HostKey
 //	,OTServer
-//	,DHT
+	,DHT
 //	,Ctrl
 //  ,Mutable
 	;

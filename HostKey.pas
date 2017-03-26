@@ -127,7 +127,7 @@ function PoWGenThr(param:pointer):ptrint;
   until (dig_4dw and cPowMask0) =0;
   EnterCriticalSection(GlobalLock);
   Move(wp,{->}PublicPoW,38);
-  log.info(' PoW found in %.1Fs speed=%Sh/s',[(Now-start)*SecsPerDay,SizeToString(trunc(wp.cnt/((1e-6+Now-start)*SecsPerDay)))]);
+  log.info(' PoW found in %.1Fs speed=%Sh/s',[(Now-start)*SecsPerDay,SizeToString(0)]);
   log.debug(' pow %S',[string(digest)]);
   Assert(VerifyPoW(PublicPoW,PublicKey));
   Database.dbSet(dbMisc,cPowDK[1],length(cPowDK),@PublicPoW,sizeof(PublicPoW));
@@ -138,8 +138,8 @@ end;
 
 procedure tPoWRefreshObj.Timer;
   begin
-  PublicPoWReady:=true;
-  if  (not VerifyPoW(PublicPoW,PublicKey))
+  PublicPoWReady:=VerifyPoW(PublicPoW,PublicKey);
+  if  (not PublicPoWReady)
   or  ( (Int64(PublicPoW.stamp)+cPoWValidFor-UnixNow) <600 )
   then begin
     log.info(' Started generating PoW',[]);

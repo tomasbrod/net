@@ -36,7 +36,7 @@ Hostlist [hostlist]
 
 Experimental HTTP hostlist. currently abandoned
 
-See [current state](hostlist.php) of the hostlist. Hostlist url for brodnetd 
+See [current state](hostlist.php) of the hostlist. Hostlist url for brodnetd
 is: `http://brod.holes.sk/comp.net/hostlist.php`.
 
 Cmd interface for file access
@@ -168,11 +168,13 @@ should not reuse channels for other files immediately.
 
 
 
-When client recieves enough packets it sends report. When different mark ->
-reset packet counters.
+When client recieves enough packets it sends report.
+When different mark -> reset packet counters.
 Server waits some time for the report based on sending speed and estimated rtt.
 If no report arrives, rates are reset to slow and later the session is closed.
 
+ECN: Send otData datagrams as ecn enabled. When CN marked packet is recieved, send
+otInfo immediately with CN flag set.
 
 #### otCtrl [proto-otCtrl]
 
@@ -181,6 +183,7 @@ datagram otRequest is
   opcode : byte = $04;
   channel : byte;
   priority: byte;
+  flags : 1 byte;
   file_id : 24 byte;
   segments : array [until end of datagram] of
     offset : 5 byte word;
@@ -191,9 +194,10 @@ end
 datagram otReport is
   opcode : byte = $05;
   mark : byte;
-  rate : 4 byte word = round((ByteCnt/(mNow-StartT))*16);
-  slen : 2 byte word;
+  flags: byte;
   server_socket_ttl : byte;
+  rate : 4 byte word = round((ByteCnt/(mNow-mStart))*16);
+  slen : 2 byte word;
 end
 
 datagram otStop is
@@ -203,8 +207,8 @@ end
 
 datagram otData is
   opcode : byte = $08;
-  channel : byte;
   mark : 1 byte;
+  channel : byte;
   offset : 5 byte word;
   data : byte [left];
 end;
@@ -212,6 +216,7 @@ end;
 datagram otInfo is
   opcode : byte = $07;
   channel : byte;
+  flags : 1 byte;
   error_code : byte;
     0 OK
     1 End of Transmission
@@ -221,10 +226,13 @@ datagram otInfo is
     5 Storage Error
     6 Overload
     7 other failure
-  if error_code<>2 then
-    max_channels : byte;
-    max_segments : byte;
-    server_socket_ttl : byte;
+    8 Use Multicast
+    9 Use TCP
+  max_channels : byte;
+  max_segments : byte;
+  server_socket_ttl : byte;
+  if channel<>0 then
+    file_id : 24 byte;
     file_length : 5 byte word;
     req_length : 4 byte word;
   end
@@ -233,8 +241,8 @@ end
 
 datagram otDataSync is
   opcode : byte = $09;
-  channel : byte;
   mark : 1 byte;
+  channel : byte;
   offset : 5 byte word;
   data : byte [left];
 end;
@@ -243,6 +251,9 @@ end;
 
 TODO: Update the text to reflect protocol changes. Implement protocol changes.
 Fix error near ObjTrans.pas:382.
+
+For multicast: flag in request, pick group(?) 239/8, special info with mcast address,
+special data with stream identification.
 
 ### dht protocol [proto-dht]
 
@@ -337,7 +348,9 @@ datagram dhtCheckR is
 end
 ~~~
 
-#### dhtGetNodes [proto-dhtGetNodes]
+Add QueryForwardResponse for Checks.
+
+#### dhtGetNodes [proto-dhtNodes]
 
 ~~~
 datagram dhtGetNodes is
@@ -358,7 +371,7 @@ datagram dhtNodes is
 end
 ~~~
 
-#### dhtTestQuery [proto-dhtGetNodes]
+#### dhtTestQuery [proto-dhtTest]
 
 ~~~
 datagram dhtTestQuery is
@@ -384,12 +397,6 @@ has the resource.
 tkQuery returns tkResult. tkAnnounce returns dhtNodes or saves sender id
 and addr and returns tkAnnOK, useful when doing dhtQuery.
 For peer exchange set pex flag on tkAnnounce, returns tkResult.
-
-1. dht query
-2. query to known nodes (order by ttl or ip prefix)
-
-3. dht announce
-4. ???
 
 ~~~
 type flags is 1 byte bitpacked record
@@ -447,7 +454,34 @@ datagram tkAnnOK
     id : 20 byte;
   end
 end
+
+datagram trackerQueryOrig
+  opcode : byte = $?
+  trid : 2 byte;
+  sender : 20 byte;
+  target : 20 byte;
+  flags  : byte;
+end
+datagram trackerQueryFwd
+  opcode : byte = $?
+  trid : 2 byte;
+  orig: tNetAddr 18B;
+  sender : 20 byte;
+  target : 20 byte;
+  flags  : byte;
+end
 ~~~
+
+- UC 1: get peers from dht
+  - DHT(tkQuery) -> dhtNodes + tkResult
+- UC 2: get more peers from peers
+  - (direct) tkQuery -> tkResult
+- UC 3: announce
+  - tkQuery with Announce flag set
+  - to known peers and dht
+
+OP -> nA -> nB   Q1 Q2
+ ^ <-------/     R
 
 ### Profile [proto-prof]
 
