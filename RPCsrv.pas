@@ -100,7 +100,7 @@ procedure tRPCServer.ListenEvent(ev:word);
   cl:=TRPCCon.Create;
   SHA256_Buffer(cl.iphash,32,addr,addrl);
   cl.socket:=s;
-  log.debug(' accepted from iphash=%S',[string(cl.iphash)]);
+  //log.debug(' accepted from iphash=%S',[string(cl.iphash)]);
   cl.Create2;
 end;
 
@@ -163,7 +163,10 @@ procedure tRPCCon.Event(ev:word);
       ArgsSize:=2+a.R2;
     end;
     if ArgsRcvd>=ArgsSize then begin
-      if ArgsSize<4 then goto error;
+      if ArgsSize<4 then begin
+        log.Error('.Client(%P).Event invalid rpc packet length',[@self]);
+        goto error;
+      end;
       a.Size:=ArgsSize;
       a.Position:=2;
       opcode:=a.R2;
@@ -182,13 +185,13 @@ procedure tRPCCon.Event(ev:word);
   Exit;
   error:
     Self.Free;
-    log.Debug('.Client(%P).Event destroy',[@self]);
+    //log.Debug('.Client(%P).Event destroy',[@self]);
     Exit;
 end;
 
 procedure SetupRemoteProc( opcode: TRemoteProcOpcode; handler: tRemoteProc );
   begin
-  log.debug(' register RPC OpCode %D',[opcode]);
+  //log.debug(' register RPC OpCode %D',[opcode]);
   rpctable.Add(@opcode,@handler);
 end;
 
@@ -216,3 +219,56 @@ BEGIN
   rpctable.sorted:=true;
   rpctable.duplicates:=dupError;
 END.
+
+{*** Old Code ***}
+{***Low-Level Part***}
+
+ if (ev and POLLOUT)>0 then begin
+    {$ifdef ctlStore}
+    if SndObjLeft=0 then begin
+      {$endif}
+      ServerLoop.WatchFD(s,nil);
+      ServerLoop.WatchFD(s,@Event);
+      {$ifdef ctlStore}
+      Dispose(SndObj,Done);
+      SndObj:=nil;
+    end else begin
+      arg:=GetMem(cBuf);
+      rc:=SndObjLeft;
+      if rc>cBuf then rc:=cBuf;
+      SndObj^.Read(arg^,rc);
+      sndc:=fpSend(s,arg,rc,0);
+      if sndc<=0 then error:=true
+      else if sndc<rc
+      then SndObj^.Skip(sndc-rc);
+      SndObjLeft:=SndObjLeft-sndc;
+      FreeMem(arg,cBuf);
+    end;
+    {$endif}
+ end;
+  if (ev and (POLLIN or POLLHUP or POLLERR))>0 then begin
+    {$ifdef ctlStore}
+    if RcvObjLeft>0 then begin
+      arg:=GetMem(cBuf);
+      rc:=cBuf; if rc>RcvObjLeft then rc:=RcvObjLeft;
+      rc:=fpRecv(s,arg,rc,0);
+      if rc>0 then begin
+        RcvObj^.Write(arg^,rc);
+        RcvObjHctx.Update(arg^,rc);
+        RcvObjLeft:=RcvObjLeft-rc;
+        if RcvObjLeft=0 then RcvObjComplete;
+        rc:=1;
+      end;
+    end else begin
+    {$endif}
+
+
+{$ifdef ctlStore}
+procedure tClient.SendObject(var o:tStoreObject; ilen:LongWord);
+  begin
+  SndObjLeft:=ilen;
+  SndObj:=@o;
+  ServerLoop.WatchFD(s,nil);
+  ServerLoop.WatchFDRW(s,@Event);
+end;
+{$endif}
