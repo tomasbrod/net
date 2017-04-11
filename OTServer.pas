@@ -4,12 +4,12 @@ unit OTServer;
 
 INTERFACE
 IMPLEMENTATION
-USES Sockets,BaseUnix,Porting,ServerLoop,ObjectModel,opcode,SysUtils,Store;
+USES Sockets,BaseUnix,ServerLoop,ObjectModel,opcode,SysUtils,Store,Classes;
 
 var thread: record
   ID: tThreadID;
-  mutex:po_tmutex;
-  condv:po_tcondv;
+  cs:System.TRTLCriticalSection;
+  ev:System.PRTLEVENT;
   flag:boolean;
   source:tNetAddr;
   dgdata:array [1..1024] of byte;
@@ -31,7 +31,7 @@ tChannel=object
   chn: byte;
   weight,eotrtr:byte;
   opened:boolean;
-  fo:tStoreObject;
+  fo:tStream;
   FID:tFID;
   seg:array [0..47] of tSegDescr;
   si:shortint;
@@ -333,15 +333,11 @@ procedure tClient.RecvReport(const s:tMemoryStream);
   else SendInfo(0,2,0,'Report wrong mark');
 end;
 
-{timers:
- every 1 sec: timeouts (all clients, all channels =>slow)
- every interrupt: TxWait (all clients)
- use GetTickCount!!!!!
-}
+
 var LastSlowTick:tMTime;
 const cSlowTick=100;
 function SFSThread(param:pointer):PtrInt;
- var cmd:tMemoryStream;
+ var cmd:tBufferStream;
  var source:^tNetAddr;
  var op:byte;
  var client:^tClient;
@@ -349,7 +345,7 @@ function SFSThread(param:pointer):PtrInt;
  begin
  result:=0;
  SetThreadName('ObjTransServer');
- cmd.Init(@sharedbuf,0,sizeof(sharedbuf));
+ cmd:=tBufferStream.Create(@sharedbuf,0);
  mNow:=GetMTime;
  LastSlowTick:=mNow;
  PollTimeout:=0;
@@ -359,7 +355,7 @@ function SFSThread(param:pointer):PtrInt;
     mNow:=GetMTime;
     if thread.flag then begin
       po_unlock(thread.mutex);
-      cmd.Init(@thread.dgdata,thread.dglen,sizeof(thread.dgdata));
+      cmd.SetPointer(@thread.dgdata,thread.dglen);
       source:=@thread.source;
       if cmd.left>=2 then begin
         op:=cmd.ReadByte;

@@ -18,7 +18,7 @@ var ZeroDigest:tSha512Digest;
 {-DEFINE POW_ALT}
 {$IFNDEF POW_ALT}
   {$IFDEF ENDIAN_LITTLE}{Intel x86}
-const cPowMask0:DWORD=$FF7FFFFF;
+const cPowMask0:DWORD=$FF0FFFFF;
   {$ELSE}{ARM shit}
 const cPowMask0:DWORD=$FFFF0FFF;
   {$ENDIF}

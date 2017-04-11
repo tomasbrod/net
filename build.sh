@@ -11,7 +11,7 @@ echo "const GIT_VERSION='$gitver';" >gitver.inc
 
 make -C alg
 fpc @fpopt.cfg brodnetd.pas
-fpc @fpopt.cfg bnedit.pas
 fpc @fpopt.cfg bnc.pas
+fpc @fpopt.cfg bnedit.pas
 
 echo Built version: $gitver

@@ -3,7 +3,7 @@ INTERFACE
 IMPLEMENTATION
 {$define ctlDHT}
 {$define ctlStore}
-{$define ctlSignedLink}
+{-define ctlSignedLink}
 {-define ctlProf}
 {-define ctlFetch}
 USES ServerLoop,opcode

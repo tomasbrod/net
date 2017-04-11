@@ -10,7 +10,7 @@ unit DHT;
 {used by: messages, fileshare}
 
 INTERFACE
-uses Classes,sysutils,ObjectModel,HostKey,Crypto,ServerLoop,opcode,inifiles;
+uses Classes,sysutils,ObjectModel,HostKey,Crypto,ServerLoop,RPCsrv,opcode,inifiles;
 
 TYPE
   tPID=tKey20;
@@ -28,6 +28,7 @@ tPeer=object
     procedure Clear;
     function FullyValid: boolean;
     private
+    CRPending:boolean;
     Challenge:tEccKey;
     end;
 
@@ -93,14 +94,14 @@ const
   crdInvalidateThr=4;   {request verify when rd>this}
   crdReplacableThr=2;   {new peer can replace old when rd>this}
   cBanDuration=10*60*1000;
-  cVerifiedDuration=32*60*1000;
+  cVerifiedDuration=43*60*1000;
   cStichRar=7;
   cNudgeQuietThr=12*1000;
   cRefreshWaitBase=18*1000;
   cRefreshWaitMul=600;
   cRefreshWaitOther=30*1000;
   cRefreshWaitRtrDiv=3;
-  cRecheckThr=cRefreshWaitOther;
+  cRecheckThr=cNudgeQuietThr;
   cNodesDat='nodes.dat';
   cMaxNodesDat=12;
   cInitAdd=6;           {n of peers to add from dht}
@@ -132,6 +133,7 @@ procedure tPeer.Clear;
   begin
   ReqDelta:=255;
   Addr.Clear;
+  CRPending:=false;
   {rest is not needed}
   FillChar(ID,20,0);
   LastMsg:=0;
@@ -146,7 +148,7 @@ function tPeer.FullyValid: boolean;
   and(self.VerifiedTill>ServerLoop.mNow)
 end;
 
-procedure VerifyInit(b:tBucket_ptr; i:byte); forward;
+procedure VerifyInit(b:tBucket_ptr; var peer:tPeer); forward;
 
 function tBucket.IDString:string;
   var l:byte;
@@ -259,27 +261,36 @@ function CheckNode(const id: tPID; const addr: tNetAddr; recv:boolean): boolean;
       if ifree=0 then ifree:=i;
     end;
   end;
-  if (idup>0) and ( (recv and (b^.peer[i].ReqDelta>crdReplacableThr))
-      or(not recv and (b^.peer[i].ReqDelta>crdOthersCanReAddThr)) )
+  if (idup>0) and ( (recv and (b^.peer[idup].ReqDelta>crdReplacableThr))
+      or((not recv) and (b^.peer[idup].ReqDelta>crdOthersCanReAddThr)) )
     then begin
-    ifree:=idup; idup:=0
+    ifree:=idup; idup:=0;
   end;
   if idup>0 then begin
     {updating}
-    adm:=(b^.peer[i].Addr=addr);
-    idm:=(b^.peer[i].ID=ID);
+    adm:=(b^.peer[idup].Addr=addr);
+    idm:=(b^.peer[idup].ID=ID);
     if adm and idm then begin
       CheckNode:=true;
-      if recv and ((b^.peer[idup].VerifiedTill > ServerLoop.MNow)
-                     or (not PublicPoWReady)) then begin
-        {only update by self and verified, else waiting for auth}
-        b^.peer[idup].LastReply:=mNow;
-        b^.peer[idup].ReqDelta:=0;
-      end {else dont refresh by others};
-      b^.peer[idup].LastMsg:=mNow;
+      if recv then begin
+        b^.peer[idup].LastMsg:=mNow;
+        if (b^.peer[idup].VerifiedTill > ServerLoop.MNow)
+                     or (not PublicPoWReady) then begin
+          {only update by self and verified, else waiting for auth}
+          b^.peer[idup].LastReply:=mNow;
+          b^.peer[idup].ReqDelta:=0;
+          //log.debug('udpated',[]);
+        end
+          else VerifyInit(b,b^.peer[idup]);
+        b^.peer[idup].LastMsg:=mNow;
+      end;
     end else begin
-      if (b^.peer[idup].VerifiedTill < (ServerLoop.MNow+cNudgeQuietThr)) then
-        VerifyInit(b,idup);
+      {id-addr Conflict!}
+      // v<- wrong condition
+      if (b^.peer[idup].LastMsg<=cVerifiedDuration)
+      or ((b^.peer[idup].LastMsg-cVerifiedDuration+cNudgeQuietThr) < ServerLoop.MNow)
+        then
+        VerifyInit(b,b^.peer[idup]);
     end;
   end else begin
     {inserting}
@@ -300,12 +311,13 @@ function CheckNode(const id: tPID; const addr: tNetAddr; recv:boolean): boolean;
     if recv then b^.peer[i].LastReply:=mNow;
     b^.peer[I].ReqDelta:=0;
     b^.peer[I].VerifiedTill:=0;
-    VerifyInit(b,i);
+    b^.peer[I].CRPending:=false;
+    VerifyInit(b,b^.peer[i]);
     CheckNode:=true;
   end
 end;
 
-procedure GetNodes(r:tStream; const Target: tPID; max: word);
+procedure GetNodes(r:tStream; const Target: tPID; max: word; partial:boolean);
   var i,ctrl:integer;
   var bucket:tBucket_ptr;
   begin
@@ -313,7 +325,9 @@ procedure GetNodes(r:tStream; const Target: tPID; max: word);
   bucket:=DHT.FindBucket(Target);
   while assigned(bucket) do begin
     //if r.WRBufLen<36 then break;
-    for i:=1 to high(bucket^.peer) do if bucket^.peer[i].Assigned then begin
+    for i:=1 to high(bucket^.peer) do if
+          bucket^.peer[i].assigned
+          and (partial or bucket^.peer[i].FullyValid) then begin
       r.Write(bucket^.peer[i].Addr,18);
       r.Write(bucket^.peer[i].ID,20);
     end;
@@ -323,6 +337,12 @@ procedure GetNodes(r:tStream; const Target: tPID; max: word);
       ctrl:=1;
     end;
   end;
+end;
+
+procedure GetNodes(r:tStream; const Target: tPID; max: word);
+  inline;
+  begin
+  GetNodes(r, Target, max, true);
 end;
 
 procedure SendNodes(const rcpt: tNetAddr; const Target: tPID; trid:word);
@@ -352,7 +372,7 @@ procedure RecvBeatQ(msg:tSMsg);
   s.RB(Target,20);
   s.RB(mark,2);
   Hops:=s.R1-msg.TTL;
-  //writeln('DHT.BeatQ: ',string(msg.source),' Request for ',string(Target^),' HC',Hops);
+  //log.debug(' BeatQ: %s Request for %s HC %d',[string(msg.source),string(Target),Hops]);
   Hops:=hops;{???}
   if not CheckNode(sID,msg.source,true) then exit;
   r:=tMemoryStream.Create; try
@@ -360,7 +380,7 @@ procedure RecvBeatQ(msg:tSMsg);
   r.WB(MyID,20);
   r.WB(mark,2);
   r.W1(GetSocketTTL(msg.source));
-  GetNodes(r,target,(cDGramSz-24) div 36);
+  GetNodes(r,target,(cDGramSz-24) div 36,false);
   // todo!     if list.p^.addr=msg.source then continue;
   SendMessage(r.Memory^,r.size,msg.source);
   finally r.Free end;
@@ -369,7 +389,7 @@ end;
 procedure SendBeat(const contact:tNetAddr; const forid: tPID; mark:word);
  var r:tMemoryStream;
  begin
- //writeln('DHT.SendBeat: to ',string(contact),' for ',string(forid));
+ //log.debug(' SendBeat: to %s for %s',[string(contact),string(forid)]);
  r:=tMemoryStream.Create; try
  r.W1(opcode.dhtBeatQ);
  r.WB(MyID,sizeof(tPID));
@@ -387,8 +407,8 @@ procedure RecvBeatR(msg:tSMsg);
   msg.st.skip(1);
   msg.st.RB(ID,20);
   msg.st.skip(3); {todo,ttl}
-  //writeln('DHT.BeatR: ',string(msg.source),' is ',string(ID^));
   if not CheckNode(ID,msg.source,true) then exit;
+  //log.debug(' BeatR: %s is %s',[string(msg.source),string(ID)]);
   while msg.st.Left>36 do begin
     msg.st.RB(Addr,18);
     msg.st.RB(ID,20);
@@ -413,6 +433,7 @@ procedure SendCheck(var p:tPeer);
   r.WB(p.Challenge,sizeof(tEccKey));
   r.WB(VersionString[1],Length(VersionString));
   log.debug(' SendCheck: to %s size=%dB',[string(p.addr),r.Size]);
+  p.LastMsg:=mNow;
   SendMessage(r.Memory^,r.Size,p.Addr);
   r.Free;
 end;
@@ -447,7 +468,7 @@ procedure RecvCheckQ(msg:tSMsg);
     r.wb(HostKey.PublicPoW,sizeof(HostKey.PublicPoW));
     r.wb(right_resp,sizeof(right_resp));
     r.wb(VersionString[1],Length(VersionString));
-    //writeln('DHT.CheckQ: responding to ',string(msg.source),' ',r.length,'B');
+    //writeln('DHT.CheckQ: responding to ',string(msg.source),' ',r.size,'B');
     SendMessage(r.Memory^,r.Size,msg.source);
     r.Free;
   end else log.warn(' CheckQ: not responding to %s, PoW is not ready.',[string(msg.source)]);
@@ -457,9 +478,9 @@ procedure RecvCheckR(msg:tSMsg);
   var b:^tBucket;
   var i:byte;
   var id:tPID;
-  var pub:^tEccKey;
-  var pow:^tPoWRec;
-  var resp:^tEccKey;
+  var pub:tEccKey;
+  var pow:tPoWRec;
+  var resp:tEccKey;
   var right_resp:tEccKey;
   begin
   msg.st.skip(1);
@@ -467,7 +488,7 @@ procedure RecvCheckR(msg:tSMsg);
   msg.st.RB(pow,sizeof(tPoWRec));
   msg.st.RB(resp,sizeof(tEccKey));
   {Pub->ID}
-  SHA256_Buffer(id,sizeof(id),Pub^,sizeof(pub^));
+  SHA256_Buffer(id,sizeof(id),Pub,sizeof(pub));
   {ID->bkt:idx}
   b:=FindBucket(id);
   if not assigned(b) then exit;
@@ -479,19 +500,20 @@ procedure RecvCheckR(msg:tSMsg);
   b^.peer[i].LastMsg:=mNow;
   b^.peer[i].LastReply:=mNow;
   {Verify PoW}
-  if not HostKey.VerifyPoW(pow^,pub^) then begin
+  if not HostKey.VerifyPoW(pow,pub) then begin
     b^.peer[i].ReqDelta:=255;
     log.warn(' CheckR: Invalid PoW in response from %s',[string(msg.source)]);
   exit end;
   {Verify C/R}
-  HostKey.CreateResponse(b^.peer[i].Challenge, right_resp, pub^);
-  if CompareByte(resp^,right_resp,sizeof(right_resp))<>0 then begin
+  HostKey.CreateResponse(b^.peer[i].Challenge, right_resp, pub);
+  if CompareByte(resp,right_resp,sizeof(right_resp))<>0 then begin
     log.warn('DHT.CheckR: Invalid C/R in response from %s',[string(msg.source)]);
     b^.peer[i].ReqDelta:=255;
   exit end;
   {set node verified, rqd, last}
-  b^.peer[i].VerifiedTill:=cVerifiedDuration;
+  b^.peer[i].VerifiedTill:=ServerLoop.mNow+cVerifiedDuration;
   b^.peer[i].ReqDelta:=0;
+  b^.peer[i].CrPending:=false;
   log.info(' CheckR: Valid response from %s',[string(msg.source)]);
 end;
 
@@ -510,8 +532,13 @@ procedure RecvGetNodes(Msg:tSMsg);
 end;
 
 procedure NodeBootstrap(const contact:tNetAddr);
+  var fake_id:tPID;
  begin
- SendBeat(contact,MyID,0);
+ fillchar(fake_id,sizeof(fake_id),0);
+ fake_id[0]:= not MyID[0];
+ Move(contact,fake_id[1],18);
+ CheckNode(fake_id,contact,false);
+ //SendBeat(contact,MyID,0);
  //SendBeat(contact,MyID,0); {xD}
 end;
 
@@ -522,19 +549,31 @@ procedure tBucket.Refresh;
  var i,ol:byte;
  var wait:LongWord;
  var debug:ansistring;
- procedure lSend(var peer:tPeer; const trg:tPID);
-  begin
-  if (peer.VerifiedTill < (ServerLoop.MNow+cRecheckThr)) or (not PublicPoWReady)
-  then SendBeat(peer.addr,trg,0)
-  else SendCheck(peer);
-  Inc(peer.ReqDelta);
- end;
+  procedure lSend(i: byte);
+  var target: tPID;
+  var j,z,k:integer;
+    begin
+    {todo: use random target with prefix}
+    if PublicPoWReady and peer[i].CrPending then SendCheck(peer[i])
+    else if PublicPoWReady and (peer[i].VerifiedTill < (ServerLoop.MNow+cRecheckThr))
+    then VerifyInit(@self,peer[i])
+    else begin
+      target:=prefix;
+      for j:=0 to high(tPID) do begin
+        z:=depth-(j*8);
+        if z<0 then k:=255 else if z>7 then k:=0 else k:=255 shr z;
+        target[j]:=(prefix[j] and not k) or random(k+1);
+      end;
+      SendBeat(peer[i].addr,target,0);
+    end;
+    Inc(peer[i].ReqDelta);
+  end;
  begin
  debug:='';debug:=debug;
  my:=MatchPrefix(MyID);
  ol:=0; rtr:=false;
  {1 of 10 times try to contact dead nodes in attempt to recover from network split}
- //debug:='DHT.Refresh('+self.IDString+')';
+ debug:='DHT.Refresh('+self.IDString+')';
  stich:=Random(cStichRar)=0;
  for i:=1 to high(tBucket.peer)
   do if peer[i].ReqDelta<255 then begin
@@ -542,7 +581,7 @@ procedure tBucket.Refresh;
     if (peer[i].ReqDelta<=crdDontPingThr) xor stich then begin
      {this will get rid of half-dead nodes}
      //writeln(debug,' R',peer[i].ReqDelta,' ',copy(string(peer[i].id),1,6),string(peer[i].addr));
-     lSend(peer[i],prefix);{todo: use random target with prefix}
+     lSend(i);
      rtr:=true;
     end
    end
@@ -551,17 +590,18 @@ procedure tBucket.Refresh;
  end;
  {now nudge the most quiet peer, but not too often}
  if (ol>0) and ((mNow-peer[ol].LastMsg)>cNudgeQuietThr) then begin
-  //writeln(debug,' T',mNow-peer[ol].LastMsgFrom,' ',string(peer[ol].addr));
-  lSend(peer[ol],MyID);
+  //writeln(debug,' T',mNow-peer[ol].LastReply,' ',string(peer[ol].addr));
+  lSend(ol);
  end;
  {try to recover bucket full of bad nodes}
  if (ol=0){and(not rtr)} then begin
+  {$note bucket recovery is not implemented}
   {list.Init(Prefix); TODO
   list.bans:=true;
   list.maxRD:=desperate; list.Next;
   if assigned(list.bkt) then begin
    //writeln(debug,' V ',copy(string(list.p^.id),1,6),string(list.p^.addr));
-   lSend(list.p^,prefix);
+   SendBeat(list.p^.addr,prefix,0);
   end else} inc(desperate);
  end else desperate:=3;
  if my
@@ -570,17 +610,17 @@ procedure tBucket.Refresh;
  if rtr and(not stich) then wait:=wait div cRefreshWaitRtrDiv;
  Shedule(wait,@Refresh);
 end;
- 
-procedure VerifyInit(b:tBucket_ptr; i:byte);
+
+procedure VerifyInit(b:tBucket_ptr; var peer:tPeer);
   begin
-  with b^.peer[i] do begin
-    VerifiedTill:=0;
-    //maybe inside the if?
-    if PublicPoWReady then begin
+  with peer do begin
+    if not CrPending then begin
+      log.debug(' Verifying node %s',[string(peer.addr)]);
+      VerifiedTill:=0;
+      CrPending:=true;
       HostKey.CreateChallenge(challenge);
-      SendCheck(b^.peer[i]);
-    end;
-end end;
+      if PublicPoWReady then SendCheck(peer);
+end end end;
 
 (*** The Search Object ***)
 
@@ -621,11 +661,11 @@ function tCustomSearch.AddNode(const iID:tPID; const iAddr:tNetAddr) :integer;
     if nodes[idx].addr.isNil then break;
     if nodes[idx].addr=iaddr then begin
       result:=idx;
-      {writeln(' update ',idx);}
+      {//writeln(' update ',idx);}
     exit end;
     if PrefixLength(nodes[idx].id,Target)<tpfl then break;
   end;
-  {writeln(' insert ',idx);}
+  {//writeln(' insert ',idx);}
   log.debug(' Lookup@%s: Add [%d] %s',[string(iAddr),string(@self),idx]);
   for j:=high(nodes)-1 downto idx do nodes[j+1]:=nodes[j];
   nodes[idx].id:=iid; nodes[idx].addr:=iaddr;
@@ -782,7 +822,7 @@ procedure tPersist.OpenState;
     statef:=tFileStream.Create(cNodesDat,fmOpenRead);
     shedule(1,@ReadState);
   except
-    on e:eInOutError do begin
+    on e:EFOpenError do begin
       log.error(' Boot: Cannot open %s %s',[cNodesDat,e.Message]);
       readcnt:=0;
       shedule(1,@ReadBS);
@@ -790,12 +830,14 @@ procedure tPersist.OpenState;
 end;
 procedure tPersist.ReadState;
   var addr:tNetAddr;
+  var id:tPID;
   begin
   try
     if statef.Left=0 then raise eReadPastEoF.Create('eof'); //temporary fix
-    statef.Read(addr,sizeof(addr));
+    statef.rb(addr,sizeof(addr));
+    statef.rb(id,sizeof(id));
     //writeln('DHT.ReadState: ',string(addr));
-    NodeBootstrap(addr);
+    CheckNode(id,addr,false);
     shedule(200,@ReadState);
     inc(readcnt);
   except on e: eReadPastEoF do begin
@@ -827,20 +869,58 @@ procedure tPersist.SaveState;
   var cntr:word;
   begin
   //writeln('DHT.SaveState');
-  statef:=tfilestream.create(cNodesDat,fmOpenWrite);
-  FileTruncate(statef.handle,0);
+  statef:=tfilestream.create(cNodesDat,fmCreate);
+  statef.Size:=0;
   bkt:=Table;
   cntr:=0;
   while assigned(bkt) and (cntr<cMaxNodesDat) do begin
-    for p:=1 to high(bkt^.peer) do begin
-      if bkt^.peer[p].Addr.IsNil then continue;
-      statef.Write(bkt^.peer[p].Addr,sizeof(tNetAddr));
+    for p:=1 to high(bkt^.peer)
+      do if bkt^.peer[p].ReqDelta<=crdOthersCanReAddThr
+      then begin
+      statef.wb(bkt^.peer[p].Addr,sizeof(tNetAddr));
+      statef.wb(bkt^.peer[p].id,sizeof(tPID));
       inc(cntr);
     end;
     bkt:=bkt^.next;
   end;
   statef.Free;
   shedule(61273,@SaveState);
+end;
+
+(*** Remote Procedures ***)
+
+procedure rpcPeer(con: tRPCCon);
+  var contact:tNetAddr;
+  begin
+  con.a.RB(contact,sizeof(tNetAddr));
+  DHT.NodeBootstrap(contact);
+  con.r.W2(cRPCSuccess);
+end;
+
+procedure rpcDump(con: tRPCCon);
+  var bkt: ^DHT.tBucket;
+  var i:integer;
+  begin
+  con.r.W2(0);
+  con.r.WB(DHT.MyID,20);
+  bkt:=DHT.GetFirstBucket;
+  while assigned(bkt) do with bkt^ do begin
+    con.r.W1(Depth);
+    con.r.w1(high(peer));
+    con.r.w4(MNow-ModifyTime);
+    for i:=1 to high(peer) do with peer[i] do begin
+      con.r.wb(ID,20);
+      con.r.Wb(Addr,sizeof(tNetAddr));
+      con.r.W2(ReqDelta);
+      con.r.W4(MNow-LastMsg);
+      con.r.W4(MNow-LastReply);
+      if VerifiedTill>MNow then
+        con.r.W4(VerifiedTill-MNow)
+        else con.r.W4(0);
+      con.r.W1( ord(CRPending) or (ord(VerifiedTill>MNow) shl 1));
+    end;
+    bkt:=next;
+  end;
 end;
 
 BEGIN
@@ -851,6 +931,8 @@ BEGIN
   SetupOpcode(opcode.dhtCheckQ,@recvCheckQ);
   SetupOpcode(opcode.dhtCheckR,@recvCheckR);
   SetupOpcode(opcode.dhtGetNodes,@recvGetNodes);
+  SetupRemoteProc(3605,@rpcPeer);
+  SetupRemoteProc(4451,@rpcDump);
   SHA256_Buffer(MyID,sizeof(MyID),PublicKey,sizeof(PublicKey));
   log.info(' set ID to %S from HostKey',[string(MyID)]);
   Persist.OpenState;

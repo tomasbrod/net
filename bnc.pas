@@ -1,31 +1,22 @@
 program bnc;
-USES ObjectModel,SockStream,SysUtils,Sockets,BaseUnix,opcode;
+USES ObjectModel,SockStream,Classes,SysUtils,Sockets,BaseUnix,opcode;
 
 {BrodNet CLI programs}
 {bncmd communicate with daemon}
 {bnedit wiev/edit all types of brodnet files}
 {$INCLUDE gitver.inc}
 
-var sck:tSocketStream;
+var sck:tHandleStream;
 procedure InitUnix;
   var addr:Sockets.sockaddr_un;
+  var h:tSocket;
   begin
   addr.sun_family:=AF_UNIX;
   addr.sun_path:='ctrl';
-  sck.h:=fpSocket(addr.sun_family,SOCK_STREAM,0);
-  SC(@fpSocket,sck.h);
-  SC(@fpConnect,fpConnect(sck.h,@addr,sizeof(addr)));
-  sck.Init(sck.h);
-end;
-
-procedure CopySP(var s1:tCommonStream; var s2:tMemoryStream);
-  var l:word;
-  begin
-  l:=s1.ReadWord2;
-  if l>s2.size then raise eInvalidMemStreamAccess.Create('Message Too Long');
-  s1.Read(s2.base^, l);
-  s2.vLength:=l;
-  s2.position:=0;
+  h:=fpSocket(addr.sun_family,SOCK_STREAM,0);
+  SC(@fpSocket,h);
+  SC(@fpConnect,fpConnect(h,@addr,sizeof(addr)));
+  sck:=tHandleStream.Create(h);
 end;
 
 function IsBlob(const id: tKey24): boolean;
@@ -38,7 +29,7 @@ function StringProfileInfo(var s:tMemoryStream):string;
   var Update:Word4;
   var e:byte;
   begin
-  e:=s.ReadByte;
+  e:=s.R1;
   if e=0 then begin
     s.Read(fid,20);
     s.Read(Update,4);
@@ -50,7 +41,7 @@ end;
 
 var req:tMemoryStream;
 var res:tMemoryStream;
-var resc:byte;
+var resc:word;
 (*
 procedure ShowPUPD;
   var st:byte;
@@ -63,7 +54,7 @@ procedure ShowPUPD;
   tb:=Now;
   repeat
     CopySP(sck,rpl); rpl.seek(0);
-    st:=rpl.ReadByte;
+    st:=rpl.R1;
     ve:=rpl.ReadWord(4);
     rpl.Read(id,20);
     rpl.read(ad,24);
@@ -85,24 +76,26 @@ end;
 
 procedure aSend;
   begin
-  req.Seek(0);
-  req.writeword2(req.length-4);
-  sck.Write(req.base^,req.vlength);
+  req.position:=0;
+  req.W2(req.size-2);
+  sck.WB(req.Memory^,req.size);
+  req.clear;
 end;
 procedure aRecv;
+  var l:Word;
   begin
-  res.vlength:=sck.ReadWord2;
-  if res.vlength>res.size then raise eInvalidMemStreamAccess.Create('Message Too Long');
-  sck.Read(res.base^, res.vlength);
-  res.Seek(0);
-  resc:=res.ReadByte;
+  l:=sck.R2;
+  res.Size:=l+2;
+  sck.RB((res.Memory+2)^, l);
+  res.position:=2;
+  resc:=res.R2;
 end;
 
 procedure cmdINFO;
   begin
   if paramcount>1 then errParams;
   {no input}
-  req.WriteWord2(00);
+  req.W2(00);
   aSend;aRecv;
   Writeln(res.ReadStringAll);
   Writeln('bnc  is  ',GIT_VERSION);
@@ -112,19 +105,20 @@ procedure cmdSTOP;
   begin
   if paramcount>1 then errParams;
   {no input}
-  req.WriteWord2(01);
+  req.W2(01);
   aSend;aRecv;
 end;
 
 procedure cmdPUT;
   var ins:tFileStream;
+  var fid:tKey20;
   var left,bc:longword;
   begin
   if paramcount<>2 then errParams;
-  ins.OpenRO(ParamStr(2));
-  req.WriteWord2(23);
+  ins.Create(ParamStr(2),fmOpenRead);
+  req.W2(23);
   left:=ins.left;
-  req.WriteWord4( Left );
+  req.W4( Left );
   writeln('sending object ',left);
   aSend;
   aRecv;
@@ -133,20 +127,23 @@ procedure cmdPUT;
     exit;
   end;
   while left>0 do begin
-    req.Seek(0);
+    req.position:=0;
+    req.size:=4096;
     if left>req.size then bc:=req.size else bc:=left;
-    ins.Read(req.base^,bc);
-    sck.Write(req.base^,bc);
+    ins.RB(req.Memory^,bc);
+    sck.WB(req.Memory^,bc);
     left:=left-bc;
   end;
   aRecv;
   if (res.Left>=24) and (resc=0) then begin
-    writeln(string(tKey24(res.ReadPtr(24)^)));
+    res.rb(fid,24);
+    writeln(string(fid));
   end else writeln('Failed to send object e=');
 end;
 
 procedure cmdPUT_local(m:integer);
   var path:string;
+  var fid:tKey20;
   var e:byte;
   begin
   if paramcount<>2 then errParams;
@@ -155,15 +152,16 @@ procedure cmdPUT_local(m:integer);
   if m=1 then begin
     {chmod}
   end;
-  if      m=0 then req.WriteWord2(00)
-  else if m=1 then req.WriteWord2(03)
-  else if m=2 then req.WriteWord2(09);
+  if      m=0 then req.W2(00)
+  else if m=1 then req.W2(03)
+  else if m=2 then req.W2(09);
   req.Write(path[1],Length(path));
   aSend;aRecv;
   if (res.Left>=1) then begin
-    e:=res.ReadByte;
+    e:=res.R1;
     if (e=0) and (res.Left>=20) then begin
-      writeln(string(tKey20(res.ReadPtr(20)^)));
+      res.rb(fid,24);
+      writeln(string(fid));
     end else begin
       writeln('error ',e,': ',res.ReadStringAll);
     end;
@@ -174,14 +172,14 @@ procedure cmdGET;
   var left,flen:LongWord;
   begin
   if paramcount<>2 then errParams;
-  req.WriteWord2(22);
+  req.W2(22);
   req.Write(tKey24(paramstr(2)),24);
-  req.WriteWord4(0);
-  req.WriteWord4($FFFFFFFF);
+  req.W4(0);
+  req.W4($FFFFFFFF);
   aSend;aRecv;
   if (res.Left>=8) and (resc=0) then begin
-    flen:=res.ReadWord4;
-    left:=res.ReadWord4;
+    flen:=res.R4;
+    left:=res.R4;
     writeln('FileSize: ',flen);
     writeln('ReqLen: ',left);
         {sck.Read(res.base^, 4);}
@@ -198,7 +196,7 @@ procedure cmdSTAT;
   if paramcount<>2 then errParams;
   id:=tKey24(paramstr(2));
   while not IsBlob(id) do begin
-    req.WriteWord2(24);
+    req.W2(24);
     req.Write(id,24);
     aSend;aRecv;
     if resc<>0 then begin
@@ -208,9 +206,10 @@ procedure cmdSTAT;
     end;
     res.Read(id,24);
     writeln('Link to: ',string(id));
-    req.Seek(0);req.Trunc;
+    req.clear;
+    req.w2(0);
   end;
-  req.WriteWord2(21);
+  req.W2(21);
   req.Write(id,24);
   aSend;aRecv;
   if resc=0 then begin
@@ -226,7 +225,7 @@ end;
 procedure cmdFETCH;
   begin
   if paramcount<>3 then errParams;
-  req.WriteWord2(12);
+  req.W2(12);
   req.Write(tKey20(paramstr(2)),20);
   req.Write(tNetAddr(paramstr(3)),18);
   req.WriteByte(64);
@@ -241,7 +240,7 @@ procedure cmdPEER;
   var st:byte;
   begin
   if paramcount<>2 then errParams;
-  req.WriteWord2(02);
+  req.W2(3605);
   req.Write(tNetAddr(paramstr(2)),18);
   aSend; aRecv; st:=resc;
   if st=0 then begin
@@ -252,35 +251,36 @@ end;
 procedure cmdDhtDump;
   var
     Depth,Ban:byte;
-    ModifyTime,LastMsgFrom,i,bktsize:LongWord;
+    ModifyTime,LastMsg,LastReply,Verified,i,bktsize:LongWord;
     ReqDelta:Word;
     id:tKey20;
     addr:tnetaddr;
   begin
-  req.WriteWord2(14);
+  req.W2(4451);
   aSend; aRecv;
   if resc=0 then begin
     res.Read(ID,20);
     writeln('DHT Dump of node ',string(ID));
     if res.left=0 then writeln('No buckets, DHT is empty.');
     while res.left>0 do begin
-      depth:=res.ReadByte;
-      bktsize:=res.ReadByte;
-      ModifyTime:=res.ReadWord4;
+      depth:=res.R1;
+      bktsize:=res.R1;
+      ModifyTime:=res.R4;
       writeln('Bucket depth ',depth,' mod ',ModifyTime);
       for i:=1 to bktsize do begin
         res.Read(ID,20);
         res.Read(Addr,sizeof(tNetAddr));
-        ReqDelta:=res.ReadWord2();
-        LastMsgFrom:=res.ReadWord4();
-        ban:=res.ReadByte;
+        ReqDelta:=res.R2();
+        LastMsg:=res.R4();
+        LastReply:=res.R4();
+        Verified:=res.R4();
+        ban:=res.R1;
         write('  ',string(ID),' ',string(Addr));
-        if (ban and 1)=1 then writeln(' Banned')
-        else begin
-          if (ban and 2)=0 then write(' Unverified');
-          if ReqDelta>0 then write(' Retry',ReqDelta);
-          writeln(' T',LastMsgFrom div 1000,'s');
-        end;
+        if (ban and 1)=1 then write(' CRPending');
+        if ReqDelta>0 then write(' Retry',ReqDelta);
+        write(' TM',LastMsg div 1000,'s');
+        write(' TR',LastReply div 1000,'s');
+        writeln(' TV',Verified div 1000,'s');
       end;
     end;
   end else writeln('failed e=',resc);
@@ -293,13 +293,13 @@ procedure cmdSETPROF;
   var ver:int64;
   begin
   if paramcount<>2 then errParams;
-  req.WriteWord2(16);
+  req.W2(16);
   id:=paramstr(2);
   req.Write(id,20);
-  aSend; aRecv; st:=res.ReadByte;
+  aSend; aRecv; st:=res.R1;
   if st=0 then begin
     res.read(id,20);
-    ver:=res.readword6;
+    ver:=res.r6;
     writeln(string(ID), ' ',ver);
   end else writeln('error ',st);
 end;
@@ -311,22 +311,22 @@ procedure cmdGETPROF;
   var ver:int64;
   begin
   if paramcount<>2 then errParams;
-  req.WriteWord2(15);
+  req.W2(15);
   id:=paramstr(2);
   req.Write(id,20);
-  aSend; aRecv; st:=res.ReadByte;
+  aSend; aRecv; st:=res.R1;
   if st=0 then begin
     res.read(id,20);
-    ver:=res.readword6;
+    ver:=res.r6;
     writeln(string(ID), ' ',ver);
   end else writeln('error ',st);
 end;
 
 BEGIN
   if paramcount<1 then ErrParams;
-  req.Init(4096);
-  res.Init(req.base,0,req.size);
-  req.skip(2);
+  req:=tMemoryStream.Create;
+  res:=tMemoryStream.Create;
+  req.w2(0);
   InitUnix;
   case upcase(paramstr(1)) of
     'INFO'  : cmdINFO;

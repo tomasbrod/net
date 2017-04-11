@@ -5,7 +5,7 @@ unit ObjectModel;
 {$mode objfpc}
 {$PACKENUM 1}
 INTERFACE
-USES SysUtils,Sockets,StrUtils,Classes,StreamEX;
+USES SysUtils,Sockets,StrUtils,Classes;
 
 (*** Basic Types ***)
 
@@ -35,7 +35,7 @@ function StrCompAt(const a: string; ofs:longword; const b: string): boolean;
 (*** Base Object types ***)
 
 (*** Additional functions for Streams ***)
-type tStreamHelper = class helper (StreamEX.TStreamHelper) for tStream
+type tStreamHelper = class helper for tStream
   function  ReadShortString:ansistring;
   procedure WriteShortString(s:ansistring);
   function  ReadStringAll:ansistring; inline;
@@ -54,6 +54,14 @@ type tStreamHelper = class helper (StreamEX.TStreamHelper) for tStream
   procedure Skip(const displacement: LongInt); inline;
   procedure WriteZero(count:LongWord);
   function  Left: LongWord;
+end;
+
+type tSizeFix=object
+  stream:tStream;
+  pos:Int64;
+  ws:byte;
+  procedure Init(istream:tStream;iws:byte);
+  procedure Fixup;
 end;
 
 type
@@ -537,6 +545,28 @@ procedure tStreamHelper.WriteZero(count:LongWord);
   if (count and 4) =4 then WriteBuffer(z,4);
   if (count and 2) =2 then WriteBuffer(z,2);
   if (count and 1) =1 then WriteBuffer(z,1);
+end;
+
+procedure tSizeFix.Init(istream:tStream; iws:byte);
+  begin
+  stream:=istream;
+  ws:=iws;
+  pos:=stream.position;
+end;
+
+procedure tSizeFix.Fixup;
+  var size:Int64;
+  begin
+  {$PUSH}{$Q+}{$R+}
+  size:=stream.Position-pos;
+  stream.Position:=pos;
+  case ws of
+    1: stream.W1(size);
+    2: stream.W2(size);
+    4: stream.W4(size);
+  end;
+  stream.Position:=pos+size;
+  {$POP}
 end;
 
 function StrCompAt(const a: string; ofs:longword; const b: string): boolean;

@@ -4,9 +4,9 @@ uses cmem,cthreads,ServerLoop, ObjectModel
   ,Database
   ,Store
 	,HostKey
+  ,RPCsrv
 //	,OTServer
 	,DHT
-//	,Ctrl
 //  ,Mutable
 	;
 

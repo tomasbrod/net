@@ -301,7 +301,7 @@ procedure InitConfig;
   end;
   try
     fs:=tFileStream.Create(fn,fmOpenRead);
-    Config:=tIniFile.Create(fs,[]);
+    Config:=tIniFile.Create(fs,false);
   except on e:eInOutError do begin
       Log1.LogMessage('ServerLoop',etError,'.ConfigInit(%S): %S',[fn,e.message]);
       Raise;
