@@ -50,6 +50,7 @@ function OptParamCount(o:word):word;
 
 type tTimeVal=UnixType.timeval;
 type tMTime=DWORD;
+  {49days 17hours to overflow}
 var iNow:tTimeVal;
 var mNow:tMTime;
 function GetMTime:tMTime;

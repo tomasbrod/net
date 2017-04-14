@@ -10,7 +10,7 @@ unit DHT;
 {used by: messages, fileshare}
 
 INTERFACE
-uses Classes,sysutils,ObjectModel,HostKey,Crypto,ServerLoop,RPCsrv,opcode,inifiles;
+uses Classes,sysutils,ObjectModel,HostKey,Crypto,ServerLoop,RPCsrv,opcode,inifiles,Database;
 
 TYPE
   tPID=tKey20;
@@ -507,7 +507,7 @@ procedure RecvCheckR(msg:tSMsg);
   {Verify C/R}
   HostKey.CreateResponse(b^.peer[i].Challenge, right_resp, pub);
   if CompareByte(resp,right_resp,sizeof(right_resp))<>0 then begin
-    log.warn('DHT.CheckR: Invalid C/R in response from %s',[string(msg.source)]);
+    log.warn(' CheckR: Invalid C/R in response from %s',[string(msg.source)]);
     b^.peer[i].ReqDelta:=255;
   exit end;
   {set node verified, rqd, last}
@@ -801,7 +801,7 @@ end;
 (*** Persistent data Manager ***)
 
 type tPersist=object
-  statef:tFileStream;
+  statef:tCustomMemoryStream;
   bootf:tStringList;
   readcnt:longword;
   booti:integer;
@@ -818,15 +818,8 @@ procedure tPersist.OpenState;
   booti:=0;
   bootf:=tStringList.Create;
   ServerLoop.Config.ReadSectionValues('bootstrap',bootf,[svoIncludeInvalid]);
-  try
-    statef:=tFileStream.Create(cNodesDat,fmOpenRead);
-    shedule(1,@ReadState);
-  except
-    on e:EFOpenError do begin
-      log.error(' Boot: Cannot open %s %s',[cNodesDat,e.Message]);
-      readcnt:=0;
-      shedule(1,@ReadBS);
-  end end;
+  statef:=Database.dbGet(dbMisc,cNodesDat,length(cNodesDat));
+  shedule(1,@ReadState);
 end;
 procedure tPersist.ReadState;
   var addr:tNetAddr;
@@ -869,7 +862,7 @@ procedure tPersist.SaveState;
   var cntr:word;
   begin
   //writeln('DHT.SaveState');
-  statef:=tfilestream.create(cNodesDat,fmCreate);
+  statef:=tMemoryStream.create;
   statef.Size:=0;
   bkt:=Table;
   cntr:=0;
@@ -883,6 +876,7 @@ procedure tPersist.SaveState;
     end;
     bkt:=bkt^.next;
   end;
+  Database.dbSet(dbMisc,cNodesDat,length(cNodesDat),statef);
   statef.Free;
   shedule(61273,@SaveState);
 end;

@@ -1,7 +1,6 @@
 unit ObjectModel;
 
 {$HINT bug, netaddr crashes to convert sometimes, isNil fails on port 0, toString fails when port 0 and not isNil}
-
 {$mode objfpc}
 {$PACKENUM 1}
 INTERFACE
@@ -243,12 +242,12 @@ procedure WriteBE(var s:tCommonStream; v:tKey64); overload;
 procedure WriteBE(var s:tCommonStream; v:tNetAddr); overload;
 procedure WriteBE(var s:tCommonStream; v:tNetAddr); overload;
 }
+
 (*** Search ***)
 type tComparePtrKeyFunc = function (a: pointer; key: pointer): ShortInt;
 function FindIndex(a: ppointer; count: LongWord; key: pointer; compare: tComparePtrKeyFunc): LongWord;
 procedure PtrListShiftLeft(a: ppointer; max, i:longword);
 function PtrListShiftRight(a: ppointer; max, i:longword): boolean;
-
 
 (*** Other ***)
 
