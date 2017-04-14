@@ -2,10 +2,7 @@ PROGRAM brodnetd;
 
 uses cmem,cthreads,ServerLoop, ObjectModel
   ,Database
-  ,Store
-	,HostKey
-  ,RPCsrv
-//	,OTServer
+	,OTServer
 	,DHT
 //  ,Mutable
 	;
