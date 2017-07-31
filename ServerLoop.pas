@@ -3,11 +3,23 @@ UNIT ServerLoop;
 INTERFACE
 uses Classes,ObjectModel,UnixType,Sockets,IniFiles;
 
+{#Main#}
 procedure Main;
 procedure RequestTerminate(c:byte);
 var OnTerminate:procedure;
+
+{#Version#}
+const GIT_VERSION='deprecated' deprecated;
+var VER_MINOR: integer external name 'LVER_MINOR';
+var VER_PATCH: integer external name 'LVER_PATCH';
+var VER_CLEAN: boolean external name 'LVER_CLEAN';
+var VER_BUILD: integer external name 'LVER_BUILD';
+var VER_HASH: shortstring external name 'LVER_HASH';
+//const VER_BRANCH='dev';
+//const VER_USER='tomas@manganp';
 var VersionString:AnsiString;
 
+{#Log#}
 var Log1: tEventLogBaseSink;
 procedure CreateLog(out log:tEventLog; ident:string);
 
@@ -45,6 +57,7 @@ procedure Shedule(timeout{ms}: LongWord; h:tOnTimer);
 procedure UnShedule(h:tOnTimer);
  {note unshed will fail when called from OnTimer proc}
 
+{#Obscure things#}
 function OptIndex(o:string):word;
 function OptParamCount(o:word):word;
 
@@ -57,6 +70,7 @@ function GetMTime:tMTime;
 
 procedure SetThreadName(name:pchar);
 
+{#Configuration#}
 var Config: TIniFile;
 function GetCfgStr(name:pchar):String;
 function GetCfgNum(name:pchar):Double;
@@ -311,7 +325,7 @@ procedure InitConfig;
   fs:=nil;
   if not (SetCurrentDir(ExtractFilePath(fn)) and SetCurrentDir(GetCfgStr('directory'))) then
     raise eInOutError.Create('ServerLoop: Error changing working directory');
-  Log1.LogMessage('ServerLoop',etInfo,': cfg=%S pwd=%S pid=%D',[fn,GetCurrentDir,GetProcessID]);
+  Log1.LogMessage('ServerLoop',etInfo,': cfg=%S cwd=%S pid=%D',[fn,GetCurrentDir,GetProcessID]);
 end;
 
 function GetCfgStr(name:pchar):String;
@@ -502,11 +516,10 @@ begin{$NOTE Custom thread mames not supported}
 end;
 {$ENDIF}
 
-{$INCLUDE gitver.inc}
-
 (**** Unit Initialization ****)
 BEGIN
- VersionString:='BrodNetD'+' '+GIT_VERSION;
+ VersionString:=Format('BrodNetD %D.%D.%.8S.%D',[VER_MINOR,VER_PATCH,VER_HASH,VER_BUILD]);
+ if not VER_CLEAN then VersionString:=VersionString+'.dirty';
  Log1:=tEventLogBaseSink.Create;
  Log1.LogMessage('ServerLoop',etInfo,': %S',[VersionString]);
  InitCriticalSection(GlobalLock);
