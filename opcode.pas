@@ -33,10 +33,6 @@ const {dgram opcode}
   profResult=$92;
   (*Messages*)
 
-const {chat init}
- upFileServer=2 deprecated;
- crAuthReq=3;
- testChat=32;
 const (*ObjectTransfer magic numbers*)
   otcOK=0;
   otcEoT=1;
@@ -46,13 +42,8 @@ const (*ObjectTransfer magic numbers*)
   otcStorageError=5;
   otcServerThrottle=6;
   otcFail=7;
-const {Ctrl opcodes}
- crtlGetInfo=0;
- crtlTerminate=1;
- crtlDhtPeer=2;
- crtlStoreLocalCopy=3;
- crtlStorePut=8;
- crtlStoreGet=4;
+  otcMulticast=8;
+  otcUseTCP=9;
 
 IMPLEMENTATION
 END.

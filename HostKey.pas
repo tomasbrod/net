@@ -109,6 +109,7 @@ function PoWGenThr(param:pointer):ptrint;
   end;
   var digest: tKey32;
   var dig_4dw: dword absolute digest[0];
+  var speed:qword;
   begin result:=0;
   assert(sizeof(wp)=70);
   assert(sizeof(PublicPoW)=38);
@@ -127,7 +128,12 @@ function PoWGenThr(param:pointer):ptrint;
   until (dig_4dw and cPowMask0) =0;
   EnterCriticalSection(GlobalLock);
   Move(wp,{->}PublicPoW,38);
-  log.info(' PoW found in %.1Fs speed=%Sh/s',[(Now-start)*SecsPerDay,SizeToString(0)]);
+  try
+    speed:=trunc(wp.cnt*1000/(Now-start));
+  except
+    speed:=0;
+  end;
+  log.info(' PoW found in %.1Fs speed=%Sh/s',[(Now-start)*SecsPerDay,SizeToString(speed)]);
   log.debug(' pow %S',[string(digest)]);
   Assert(VerifyPoW(PublicPoW,PublicKey));
   Database.dbSet(dbMisc,cPowDK[1],length(cPowDK),@PublicPoW,sizeof(PublicPoW));

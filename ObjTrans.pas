@@ -3,10 +3,17 @@ UNIT ObjTrans;
   Object Transfer Client
 }
 INTERFACE
-uses ObjectModel,Store,ServerLoop;
+uses ObjectModel,Classes,Store,ServerLoop;
 
 type
 tAggr_ptr=^tAggr;
+tSeg=object
+  first,after:LongWord;
+  end;
+tSegItem=object(tSeg)
+  next:^tSegItem;
+  end;
+
 tJob=object
   public {writable}
   Weight:0..127;
@@ -14,8 +21,8 @@ tJob=object
   public {read-only}
   Received:LongWord;
   Total:LongWord;
-  error:word;{0progress,1done,2ioerror,3timeout,4full,OT-DLEs}
-  dataf:tFileStream; {do not touch while active}
+  error:integer;{0progress,1done,-2ioerror,-3timeout,-4full,OTinfo}
+  dataf:tStream; {do not touch while active}
   FID:tFID;
   aggr:tAggr_ptr;
   procedure Init;
@@ -24,7 +31,7 @@ tJob=object
   procedure MakeRequest(diag:byte);
   private
   ch:byte;
-  FirstSeg:pointer;
+  FirstSeg:^tSegItem;
   RetryCounter:word;
   DgrCntSinceReq:LongWord;
   procedure OnData(msg:tMemoryStream);
@@ -63,15 +70,6 @@ IMPLEMENTATION
 uses opcode,SysUtils;
 
 var Aggrs: array [0..511] of ^tAggr;
-
-type
-tSeg=object
-  first,after:LongWord;
-  end;
-tSegItem=object(tSeg)
-  next:^tSegItem;
-  end;
-
 
 function compareAggr(a: pointer; key: pointer): ShortInt;
   begin
@@ -119,7 +117,7 @@ procedure tJob.Start;
   {attach to connection}
   aggr^.Add(self);
   if ch=0 then begin
-    error:=4;
+    error:=-4;
   end else begin
     {make the request}
     error:=0;
@@ -158,10 +156,11 @@ procedure tJob.MakeRequest(diag:byte);
   ReqLen:=0;
   ReqCnt:=0;
   {$hint derive request size from connection datagram size}
-  s.Init(27+(40*9));
-  s.WriteByte(opcode.otRequest);
-  s.WriteByte(ch);
-  s.WriteByte(Weight);
+  s:=tMemoryStream.Create;
+  s.w1(opcode.otRequest);
+  s.w1(ch);
+  s.w1(Weight);
+  s.w1(0{flags});
   s.Write(FID,24);
   repeat
     if seg=nil then begin
@@ -179,21 +178,21 @@ procedure tJob.MakeRequest(diag:byte);
     if l=0 then break;
     if (ReqLen+l)>ReqLenLim then l:=ReqLenLim-ReqLen;
     write(' ',b,'+',l);
-    s.WriteByte(0);
-    s.WriteWord4(b);
-    s.WriteWord4(l);
+    s.w1(0);
+    s.w4(b);
+    s.w4(l);
     inc(ReqLen,l);
     inc(ReqCnt);
-  until (s.WrBufLen<9)or(ReqLen>=ReqLenLim)or(ReqCnt>aggr^.max_segments);
+  until (ReqCnt>=40)or(ReqLen>=ReqLenLim)or(ReqCnt>aggr^.max_segments);
   if ReqLen=0 then begin
     writeln(' done');
     s.Free;
     error:=1;
     Callback;
   end else begin
-    writeln(' send ',s.Length);
-    SendMessage(s.Base^,s.Length,aggr^.Remote);
-    FreeMem(s.base,s.size);
+    writeln(' send ',s.size);
+    SendMessage(s.memory^,s.size,aggr^.Remote);
+    s.free;
     UnShedule(@OnTimeout);
     Shedule(750,@OnTimeout);
     DgrCntSinceReq:=0;
@@ -250,12 +249,12 @@ procedure tJob.OnData(msg:tMemoryStream);
     p^:=k;
   end;
   begin
-  hiOfs:=msg.ReadByte;
+  hiOfs:=msg.r1;
   assert(hiOfs=0{!!!});
-  Offset:=msg.ReadWord4;
-  dtlen:=msg.RdBufLen;
-  dataf.Seek(Offset);
-  dataf.Write(msg.RdBuf^,dtlen);
+  Offset:=msg.r4;
+  dtlen:=msg.left;
+  dataf.Position:=Offset;
+  dataf.Write((msg.memory+msg.position)^,dtlen);
   {$hint iocheck todo}
   SetSegment(Offset,Offset+dtlen);
   RetryCounter:=0;
@@ -268,7 +267,7 @@ procedure tJob.OnTimeout;
   begin
   if DgrCntSinceReq=0 then begin
     if RetryCounter>=13 then begin
-      error:=3;
+      error:=-3;
       Callback;
     end else begin
       MakeRequest(4);
@@ -279,28 +278,28 @@ procedure tJob.OnTimeout;
 end;
 
 procedure tAggr.OnInfo(msg:tSMsg);
-  var rr:packed record op,chn,code:byte end;
+  var rr:packed record op,chn,flg,code:byte end;
   var flenhi:byte;
   var flen,rlen:LongWord;
   var s:tMemoryStream absolute msg.st;
   var debugmsg:string[127];
   begin
   {common things}
-  s.Read(rr,3);
+  s.Read(rr,4);
   {handle debug info}
   if rr.code=2 then begin
-    SetLength(debugmsg,s.RdBufLen);
-    s.Read(debugmsg[1],s.RdBufLen);
+    SetLength(debugmsg,s.Left);
+    s.Read(debugmsg[1],length(debugmsg));
     writeln('ObjTrans.',string(remote),'#',rr.chn,'.ServerDebug: '#10+debugmsg);
-  exit end;
-  max_channels:=s.ReadByte;
-  max_segments:=s.ReadByte;
-  distance:=s.ReadByte-msg.ttl;
-  flenhi:=s.ReadByte;
-  flen:=s.ReadWord4;
-  rlen:=s.ReadWord4;
-  assert(flenhi=0{!!!});
+  EXIT end;
+  max_channels:=s.r1;
+  max_segments:=s.r1;
+  distance:=s.r1-msg.ttl;
   if rr.chn>0 then begin
+    flenhi:=s.r1;
+    flen:=s.r4;
+    rlen:=s.r4;
+    assert(flenhi=0{!!!});
     if (rr.chn<=high(channel)) and assigned(channel[rr.chn]) then begin
       channel[rr.chn]^.OnInfo(rr.code,flen,rlen,s);
     end {else invalid info...}
@@ -310,47 +309,51 @@ procedure tAggr.OnInfo(msg:tSMsg);
 end;
 
 procedure tAggr.OnData(msg:tSMsg);
-  var op,chn,code:byte;
+  var op,chn,mark:byte;
   var rate:single;
   var s:tMemoryStream absolute msg.st;
   begin
   {common things}
-  op:=s.ReadByte;
-  chn:=s.ReadByte;
-  code:=s.ReadByte;
+  op:=s.r1;
+  mark:=s.r1;
+  chn:=s.r1;
   {handle invalid channel}
   if chn=0 then exit;
   if (chn>high(channel)) or (not assigned(channel[chn])) then begin
-    s.Seek(0); s.Trunc;
-    s.WriteByte(opcode.otStop);
-    s.WriteByte(chn);
-    SendMessage(s.base^,s.length,Remote);
+    s.clear;
+    s.w1(opcode.otStop);
+    s.w1(chn);
+    SendMessage(s.memory^,s.size,Remote);
   exit end;
   {measurements}
-  if (DgrCnt=0)or(MarkValue<>code) then begin
+  if (DgrCnt=0)or(MarkValue<>mark) then begin
+    {single delayed packet can mess up this}
     StartT:=mNow;
     ByteCnt:=0;
     DgrCnt:=0;
-    MarkValue:=code;
+    MarkValue:=mark;
     LargestDgr:=0;
   end;
-  Inc(ByteCnt,s.Length);
+  Inc(ByteCnt,s.Size);
   Inc(DgrCnt);
   Inc(DgrCntCheck);
-  if LargestDgr<s.Length then LargestDgr:=s.Length;
+  if LargestDgr<s.Size then LargestDgr:=s.Size;
   {give channel data up}
   channel[chn]^.OnData(s);
   {send report}
   if (op=otDataSync) or ((DgrCnt>=3) and ((mNow-StartT)>=100)) then begin
-    s.Seek(0); s.Trunc;
-    s.WriteByte(otReport);
-    s.WriteByte(MarkValue);
+    s.Clear;
+    s.w1(otReport);
+    s.w1(MarkValue);
+    s.w1(0{flags});
+    s.w1(0{TTL});
     rate:=(ByteCnt/(mNow-StartT))*16;
-    s.WriteWord4(round(rate));
-    s.WriteWord2(LargestDgr);
+    s.w4(round(rate));
+    s.w2(LargestDgr);
+    StartT:=mNow;
     ByteCnt:=1;
     DgrCnt:=0;
-    SendMessage(s.base^,s.length,Remote);
+    SendMessage(s.memory^,s.size,Remote);
   end;
 end;
 
@@ -420,8 +423,9 @@ procedure tAggr.Periodic;
       writeln('ObjTrans.tAggr.Periodic.IdleDeleteSelf ',i);
       Aggrs[i]:=nil;
       ReadyForData:=false;
-      FreeMem(@self,sizeof(self)); EXIT;
-    end else inc(idletick);
+      FreeMem(@self,sizeof(self));
+    EXIT end;
+    inc(idletick);
   end;
   Shedule(700,@Periodic);
 end;

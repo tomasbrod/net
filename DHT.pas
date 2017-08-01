@@ -544,6 +544,8 @@ end;
 
 (*** The bucket Refresh procedure ***)
 
+{BUG: after PoW is generated CRPending nodes are not verified}
+
 procedure tBucket.Refresh;
  var my,rtr,stich:boolean;
  var i,ol:byte;
@@ -589,7 +591,8 @@ procedure tBucket.Refresh;
         then ol:=i;
  end;
  {now nudge the most quiet peer, but not too often}
- if (ol>0) and ((mNow-peer[ol].LastMsg)>cNudgeQuietThr) then begin
+ if (ol>0) and (((mNow-peer[ol].LastMsg)>cNudgeQuietThr)
+ or peer[ol].CrPending) then begin
   //writeln(debug,' T',mNow-peer[ol].LastReply,' ',string(peer[ol].addr));
   lSend(ol);
  end;

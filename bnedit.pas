@@ -552,7 +552,7 @@ procedure MessageEncrypt;
     keyring.Done;
   end;
 
-  var kek: array of tKey32;
+  var mack: array of tKey64;
   var session: tkey32;
   var outmsg: tFileStream;
   var hash: tSHA256;
@@ -562,17 +562,23 @@ procedure MessageEncrypt;
     var i,count:integer;
     var rfprof:tFileStream;
     var rprof: tProfileRead;
-    var tmp: tkey32;
+    var tmp: packed record
+    	ss: tkey32;
+    	ts: Word6;
+    	ix: Word2;
+    	end;
+    var kek:tKey32;
     var wrap: array [1..40] of byte;
     var exkek: tAES;
     begin
     count:=ParamCount-4;
-    SetLength(kek,count);
+    SetLength(mack,count);
+    tmp.ts:=UnixNow;
     ob.Init(72+(64*count));
     ob.Write(Message.cMagic,8);
     ob.Write(MyID,20);
     ob.Write(MyKeyPub,32);
-    ob.WriteWord6(UnixNow);
+    ob.Write(tmp.ts,6);
     ob.WriteByte(count);
     ob.WriteByte(0); {flags}
     ob.WriteWord4(1209600); {expire}
@@ -583,9 +589,11 @@ procedure MessageEncrypt;
       rfprof.Done;
       writeln('rcpt ID ':10,string(rprof.profID),' ',rprof.Nick);
       writeln('rcpt encr ':10,string(rprof.encr_key));
-      SharedSecret(tmp, rprof.encr_key, myKey);
-      SHA256_Buffer( kek[i], 32, tmp, 32);
-      writeln('kek ':10,string(kek[i]));
+      SharedSecret(tmp.ss, rprof.encr_key, myKey);
+      tmp.ix:=$424D; SHA256_Buffer( kek, 32, tmp, 40);
+      tmp.ix:=$424F; SHA256_Buffer( mack[i], 32, tmp, 40);
+      writeln('kek ':10,string(kek));
+      writeln('mack ':10,string(mack[i]));
       exkek.InitEnCrypt(kek, 256);
       exkek.Wrap(wrap, session, 32, nil);
       ob.Write(rprof.profid,20);
@@ -606,7 +614,7 @@ procedure MessageEncrypt;
     writeln('hash ':10,string(h1));
     for i:=0 to high(kek) do begin
       hc.Init;
-      hc.Update(kek[i],32);
+      hc.Update(mack[i],32);
       hc.Update(h1,32);
       hc.Final(h2);
       outmsg.Write(h2,32);

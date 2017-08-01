@@ -1,0 +1,29 @@
+
+x:
+  var mdi, mdo: tCtx;
+  begin
+  _init_keyed( mdi, $5C, key, sizeof(key));
+  _init_keyed( mdo, $36, key, sizeof(key));
+  ...
+  finalize(mdi);
+  update( mdo, mdi.state, 64);
+  final( mdo, signature, sizeof(signature));
+end;
+
+
+z:
+  var mdi, mdo: tCtx;
+  var cr: tcfbctx;
+  begin
+  h_init_keyed( mdi, $5C, key, sizeof(key));
+  h_init_keyed( mdo, $36, key, sizeof(key));
+  c_init( cr, key, sizeof(key));
+  ...
+  h_update( mdi, data, sizeof(data) );
+  c_block( cr, data, sizeof(data) );
+  ...
+  h_finalize(mdi);
+  h_update( mdo, mdi.state, 64);
+  h_final( mdo, signature, sizeof(signature));
+end;
+

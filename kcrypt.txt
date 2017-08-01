@@ -1,0 +1,15 @@
+masterencrypt ... KEF( kek = KDF(pwd), keydata )
+sessionkey = RND
+encsessk = KEF( kek = H(DH(r,S)), sessionkey )
+data_check = HMAC( key=sesion_key, header, extra, message )
+enc_msg = BlockCBC( key=session_key, iv=0,
+          DEFLATE( extra, message), data_check )
+
+import openssl/crypto: rijndael, blowfish, sha512, sha256
+ecsignature: 512 (req)
+rest: 256 (min)
+fileid: 256 trunc to 160
+
+KDF:
+pbkdf2,
+bcrypt

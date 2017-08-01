@@ -1,7 +1,5 @@
 unit OTServer;
 
-{$DEFINE USE_UNIXDGQ}
-
 INTERFACE
 IMPLEMENTATION
 USES Sockets,BaseUnix,ServerLoop,ObjectModel,opcode,SysUtils,Store,Classes,Porting;
@@ -26,18 +24,19 @@ tSegDescr=record
   l:LongWord;
 end;
 tChannel=object
+  {states: closed, act, eot}
   cli: tClient_ptr;
   chn: byte;
   weight,eotrtr:byte;
-  opened:boolean;
   fo:tStream;
+  fo_filesize:LongWord;
   FID:tFID;
   seg:array [0..47] of tSegDescr;
   si:shortint;
-  procedure Reset(const cmd:tCustomMemoryStream);
+  procedure Reset( cmd: tCustomMemoryStream);
   procedure Finish;
   procedure Tick;
-  procedure FillBuff(var s:tMemoryStream; sz:LongWord);
+  procedure Turn( s: tMemoryStream; sz: LongWord);
 end;
 tClient=object
   {serverside client object}
@@ -48,7 +47,9 @@ tClient=object
   channel:array [1..32] of ^tChannel;
   ccnt:byte; cur:byte; wcur:word;
   {Transmission Cotroll}
-  MarkData:LongWord; MarkStart:tMTime;
+  MarkValue:byte;
+  MarkData:LongWord;
+  MarkStart:tMTime;
   txDelay:tMTime;
   Rate:single;
   Size,Size2:word;
@@ -56,7 +57,6 @@ tClient=object
   {Timeouts and Acks}
   AckCount:Word;
   idleTicks:Word;
-  MarkValue:byte;
   procedure CalcRates(rxRate:Single);
   procedure Send(const data; len:Word);
   procedure SendInfo(chn: byte; error_code: byte; req_length: LongWord; const msg: string);
@@ -150,13 +150,13 @@ procedure tClient.Tick;
       assert(channel[cur]^.weight>0);
       s:=tMemoryStream.Create;
       s.W1(otData);
-      s.W1(cur);
       s.WB(MarkValue,1);
+      s.W1(cur);
       if Size2>0 then begin
-        channel[cur]^.FillBuff(s,Size2-5);
+        channel[cur]^.Turn(s,Size2);
         Size2:=0;
       end
-      else channel[cur]^.FillBuff(s,Size-2);
+      else channel[cur]^.Turn(s,Size);
       dec(wcur);
       //writeln('txstat: data=',MarkData,' rate=',rate,' time=',mNow-MarkStart,' should=',MarkData/Rate);
       txDelay:= trunc((MarkData/Rate) + MarkStart);
@@ -166,26 +166,34 @@ procedure tClient.Tick;
   end else SetPollTimeout(TxDelay);
 end;
 
-procedure tChannel.Reset(const cmd:tCustomMemoryStream);
+(** Channel Reset, the Request handler **)
+
+procedure tChannel.Reset( cmd:tCustomMemoryStream);
   var id:tFID;
+  var ofshi,flags:byte;
   var prio,s2:integer;
   var tmp:tSegDescr;
   var reqlen:LongWord;
   begin
   {34}
   prio:=cmd.r1;
+  flags:=cmd.r1;
   cmd.rb(id,24);
-  if (not opened)or(FID<>ID) then begin
-    if opened then fo.Destroy;
+  if not IsBlob(id) then begin
+    cli^.SendInfo(chn, 3{ObjectNotFound}, 0, 'Is Link');
+  Finish; exit end;
+  if (fo=nil)or(FID<>ID) then begin
+    if fo<>nil then fo.Destroy;
+    fo:=nil;
     try
-      if not IsBlob(id) then raise eObjectNF.Create('');
       FID:=id;
       fo:=StoreOpen(FID);
-      opened:=true;
-    except on e: eObjectNF do begin
-      cli^.SendInfo(chn, 3, 0, '');
-      Finish; exit;
-    end; end;
+      fo_filesize:=fo.Size;
+    except
+      on e: eObjectNF do begin
+        cli^.SendInfo(chn, 3{ObjectNotFound}, 0, 'NF');
+      Finish; exit end;
+    end;
   end;
   s2:=1+high(seg)-(cmd.Left div 9);
   if s2<0 then s2:=0;
@@ -193,48 +201,55 @@ procedure tChannel.Reset(const cmd:tCustomMemoryStream);
   seg[high(seg)].l:=0;
   seg[high(seg)].b:=0;
   while s2<=high(seg) do begin
-    cmd.r1;
-    tmp.b:=cmd.r4;
-    tmp.l:=Clamp(cmd.r4,tmp.b,fo.size);
-    seg[s2]:=tmp;
-    inc(s2); reqlen:=reqlen+tmp.l;
+    ofshi:=cmd.r1;
+    if ofshi=0 then begin
+      tmp.b:=cmd.r4;
+      tmp.l:=Clamp(cmd.r4,tmp.b,fo_filesize);
+      seg[s2]:=tmp;
+      inc(s2);
+      reqlen:=reqlen+tmp.l;
+    end; {ignore segments with offset_hi set}
   end;
-  cli^.SendInfo(chn, 0, reqlen, '');
-  if reqlen=0 then weight:=0 else begin
+  cli^.SendInfo(chn, 0, reqlen, 'OK');
+  if reqlen>0 then begin
     fo.position:=seg[si].b;
     weight:=prio+1;//*6
     cli^.SwitchChannel(chn); //activate this channel
-  end;
+  end  else weight:=0;
 end;
 
 procedure tChannel.Finish;
   begin
   cli^.SendInfo(chn,2,0,'Finish channel');
-  if opened then fo.Destroy;
-  opened:=false;
+  if fo<>nil then fo.Destroy;
+  fo:=nil;
   cli^.channel[chn]:=nil;
   dec(cli^.ccnt);
   FreeMem(@self,sizeof(self));
 end;
 
-procedure tChannel.FillBuff(var s:tMemoryStream; sz:LongWord);
+procedure tChannel.Turn(s:tMemoryStream; sz:LongWord);
+  var sspos:longword;
+  var ssptr:pointer;
   begin
-  s.w1(0);{high part of offset, must be <128}
+  s.w1(0);{high part of offset}
   s.w4(seg[si].b);
-  sz:=sz-5;
+  sspos:=s.position;
+  sz:=sz-sspos;
   if sz>seg[si].l then sz:=seg[si].l;
-  s.size:=s.position+sz;
-  fo.RB((s.memory+s.position)^,sz); {todo errorcheck}
-  if true then begin
-    seg[si].b:=seg[si].b+sz;
-    seg[si].l:=seg[si].l-sz;
-    cli^.Send(s.memory^,s.size);
-  end;
+  s.size:=sspos+sz; {<allocate space}
+  ssptr:=s.memory;
+  {read file data}
+  fo.RB((ssptr+sspos)^,sz);
+  {$hint todo errorcheck}
+  seg[si].b:=seg[si].b+sz;
+  seg[si].l:=seg[si].l-sz;
+  cli^.Send(ssptr^,sspos+sz);
   if seg[si].l=0 then begin
     si:=si+1;
     if si>high(seg) then begin {or(red<sz)}
       weight:=0; eotrtr:=1;
-      cli^.SendInfo(chn,otcEoT,0,'EoT in FillBuff');
+      cli^.SendInfo(chn,otcEoT,0,'EoT in Turn');
     end
     else fo.position:=seg[si].b;
   end;
@@ -244,9 +259,9 @@ procedure tChannel.Tick;
   begin
   //writeln(format('channel %d tick w %d si %d r %d',[chn,weight,si,eotrtr]));
   if weight>0 then exit;
-  if si<=high(seg) then exit;
+  if si<=high(seg) then exit;{<how?}
   if eotrtr<6 then begin
-      cli^.SendInfo(chn,otcEoT,0,'EoT in FillBuff');
+    cli^.SendInfo(chn,otcEoT,0,'EoT in Tick');
     inc(eotrtr);
   end else Finish;
 end;
@@ -309,11 +324,13 @@ procedure tClient.Send(const data; len:Word);
 end;
 
 procedure tClient.RecvReport(const s:tCustomMemoryStream);
-	var rMark:byte;
+	var rMark,rFlags,rttl:byte;
   var rSize:Word;
 	var rRate:LongWord;
 	begin
 	s.RB(rMark,1);
+  rflags:=s.r1;
+  rttl:=s.r1;
 	rrate:=s.r4;
 	rsize:=s.r2;
   IdleTicks:=0;
@@ -406,7 +423,7 @@ procedure tClient.SendInfo(chn: byte; error_code: byte; req_length: LongWord; co
   var filelen:LongWord;
   var s:tMemoryStream;
   begin
-  writeln('OTServer.',string(addr),'#',chn,'.Debug: '+msg);
+  {writeln('OTServer.',string(addr),'#',chn,'.Debug: '+msg);}
   s:=tMemoryStream.create;
   s.w1(otInfo);
   s.w1(chn);
@@ -415,15 +432,15 @@ procedure tClient.SendInfo(chn: byte; error_code: byte; req_length: LongWord; co
     s.w1(High(tClient.channel));
     s.w1(High(tChannel.seg));
     s.w1(socket_ttl);
-    if (chn>0) and channel[chn]^.opened
-      then filelen:=channel[chn]^.fo.size
-      else filelen:=$FFFFFFFF;
+    if (chn>0) and assigned(channel[chn]^.fo)
+      then filelen:=channel[chn]^.fo_filesize
+      else filelen:=0;
     s.w1(0);
     s.w4(filelen);
     s.w4(req_length);
   end;
   if (error_code=2)and(msg<>'')
-    then writeln('OTServer.',string(addr),'#',chn,'.Debug: '+msg);
+    then ServerLoop.Log1.LogMessage('OTServer',etDebug,' %S #%D %S',[string(addr),chn,msg]);
   s.WB(msg[1],length(msg));
   Send(s.memory^,s.size);
 end;
@@ -456,7 +473,7 @@ procedure tClient.NewChannel(ch:byte);
  with channel[ch]^ do begin
   chn:=ch;
   cli:=@self;
-  opened:=false;
+  fo:=nil;
 end end;
 
 function FindClient(const addr:tNetAddr; creat:boolean):tClient_ptr;

@@ -1,0 +1,56 @@
+I decided that this is too complex. Tracker will be pure DHT based.
+* mind long-term and part-of announcements
+* localized DHT branch
+* optionaly store and verify signature of mutable link
+* mind ephemeral Node IDs
+
+
+Groups, Swarms, Download, Fetch, Sources and DHT.
+
+Fetch is the Encapsulation of all the sub-classes. One FetchJob is started per
+ObjectID. Sources can be added to a fetch as:
+  - directly address
+  - group ID/reference
+
+Fetch class is used to select best peer to download from. It uses data from
+other classes, but remembers the failed sources to not retry them.
+  
+First a DHT lookup is performed, then the closest peers (by RTT or Hop) are
+queried for better peers in few iteretions.
+
+This lookup is performed by a PeerGroup class. Only one instance per GroupID
+should be created, cached and reused for multiple objects. PeerGroup is
+observable and can notify multiple observers for new peers. The peers are
+always kept sorted by distance (Hop, RTT).
+
+Peer addresses can be added to Fetch, so it must have a list for peer refs
+outside of groups.
+
+Fetch:
+  otclient
+  otconnection
+  outputstream
+  observers
+  groups
+  direct peers
+  failed peers
+
+SourceSelect(grop[],direct[],blacklist[])
+
+Group instance is initialized for specific group ID. Group contains peer
+addresses and DHT-IDs. Both can be added manualy, but the group id is present
+by default. When no usable peer is present, a DHT lookup is performed to next
+DHT-ID. Query type is GroupMembersQuery or dhtGetNode, depending on flag.
+Othervise a GetCloserMembers query is sent to closest usable peer to get more,
+possibly better peers.
+
+Results of Group lookup are used after few iterations to ensure good peer
+selection. Subsequent downloads (or retries) from the same group can get better
+peers (the lookup is running in background).
+
+Peer queries:
+  * DHT based
+    * trackerGetPeers
+  * non-dht
+    * direct
+    * indirect

@@ -31,7 +31,7 @@ const VER_PATCH=$gitcnt;
 const VER_BUILD=$VER_BUILD;" >gitver.inc
 
 make -C alg
-fpc @fpopt.cfg brodnetd.pas
+fpc @fpopt.cfg -a brodnetd.pas
 fpc @fpopt.cfg bnc.pas
 fpc @fpopt.cfg bnedit.pas
 
