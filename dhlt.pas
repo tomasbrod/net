@@ -3,53 +3,58 @@ unit dhlt;
 
 INTERFACE
 IMPLEMENTATION
-uses ServerLoop,ObjectModel,opcode,DHT;
+uses Classes,ServerLoop,ObjectModel,opcode,DHT;
 
 TYPE
-  tSampleSearch=object(tSearch)
+  tSampleSearch=class(tCustomSearch)
     Values:ansiString;
-    constructor Init(const iTarget:tPID);
+    constructor Create(const iTarget:tPID);
     protected
-    procedure Cleanup; virtual;
-    procedure HandleReply(var sAddr: tNetAddr; var sPID: tPID; op:byte; var st:tMemoryStream); virtual;
+    procedure Cleanup; override;
+    procedure Exhausted; override;
+    procedure HandleReply(var sAddr: tNetAddr; var sPID: tPID; op:byte; st:tStream); override;
     end;
   t=object
-    SampleSearch:^tSampleSearch;
+    SampleSearch:tSampleSearch;
     procedure DoIt;
-    procedure SearchResult( task:tTask_ptr; event:tTaskEvent; data:pointer );
+    procedure SearchResult( task:tTask; event:tTaskEvent; data:pointer );
     end;
 
 procedure t.DoIt;
   const id1:array [0..19] of byte=($CD,$BF,$75,$83,$B1,$59,$44,$60,$A9,$A5,$CC,$F3,$E8,$E0,$B7,$F1,$3D,$1A,$6B,$DB);
   begin
-  New(SampleSearch);
-  with SampleSearch^ do begin
-    writeln('dhlt: start lookup');
-    Init(id1);
-    Attach(@SearchResult);
-  end;
+  SampleSearch:=tSampleSearch.Create(id1);
+  SampleSearch.Attach(@SearchResult);
+  writeln('dhlt: start lookup');
 end;
 
-procedure t.SearchResult(task:tTask_ptr; event:tTaskEvent; data:pointer );
+procedure t.SearchResult( task:tTask; event:tTaskEvent; data:pointer );
   begin
-  writeln('dhlt: called back ',SampleSearch^.Values);
+  writeln('dhlt: called back ',event,assigned(data),SampleSearch.Values);
 end;
 
-constructor tSampleSearch.Init(const iTarget:tPID);
+constructor tSampleSearch.Create(const iTarget:tPID);
   const cReq:string='Hello!';
   begin
-  tSearch.Init;
+  inherited Create;
   Target:=iTarget;
+  Query:=tMemoryStream.Create;
   with Query do begin
-    Init(cDGramSz);
-    WriteByte(opcode.dhtTestQuery);
-    Write(TrID,2);
-    Write(DHT.MyID,20);
-    Write(Target,20);
-    Write(cReq[1],system.length(cReq));
+    w1(opcode.dhtTestQuery);
+    wb(TrID,2);
+    wb(DHT.MyID,20);
+    wb(Target,20);
+    wb(cReq[1],system.length(cReq));
   end;
   LoadNodes;
   Shedule(1,@Step);
+end;
+
+procedure tSampleSearch.Exhausted;
+  begin
+  if Values=''
+  then SendEvent(tevError,nil)
+  else SendEvent(tevComplete,nil);
 end;
 
 procedure tSampleSearch.Cleanup;
@@ -58,7 +63,7 @@ procedure tSampleSearch.Cleanup;
   inherited;
 end;
 
-procedure tSampleSearch.HandleReply(var sAddr: tNetAddr; var sPID: tPID; op:byte; var st:tMemoryStream);
+procedure tSampleSearch.HandleReply(var sAddr: tNetAddr; var sPID: tPID; op:byte; st:tStream);
   var node:integer;
   begin
   node:=self.AddNode(sPID, sAddr);
@@ -71,6 +76,7 @@ procedure tSampleSearch.HandleReply(var sAddr: tNetAddr; var sPID: tPID; op:byte
     if node<>-1 then nodes[node].rplc:=1;
     setlength(self.values,st.left);
     st.read(self.values[1],length(self.values));
+    SendEvent(tevComplete,nil); exit;
   end else begin
     writeln('SampleSearch@',string(@self),': Unknown from ',string(sAddr));
     {warning, prehaps?}
@@ -81,24 +87,24 @@ procedure TestQueryHandler(msg:tSMsg);
   var r:tMemoryStream;
   const cResp:string='Schmeterling!';
   var trid:word;
-  var sID:^tPID;
-  var Target:^tKey20;
+  var sID:tPID;
+  var Target:tKey20;
   var strmsg:string;
   begin
   msg.st.skip(1);
-  msg.st.read(trid,2);
-  sID:=msg.st.ReadPtr(20);
-  if not DHT.CheckNode(sID^, msg.source, true) then exit;
-  Target:=msg.st.ReadPtr(20);
+  msg.st.rb(trid,2);
+  msg.st.rb(sID,20);
+  if not DHT.CheckNode(sID, msg.source, true) then exit;
+  msg.st.rb(Target,20);
   strmsg:=msg.st.ReadStringAll;
   writeln('dhlt.TestQueryHandler: ',strmsg);
-  r.Init(200);
-  r.WriteByte(opcode.dhtTestResult);
-  r.Write(trid,2);
-  r.Write(dht.MyID,20);
-  r.Write(cResp[1],length(cResp));
-  SendMessage(r.base^,r.length,msg.source);
-  r.Free;
+  r:=tMemoryStream.Create; try
+  r.w1(opcode.dhtTestResult);
+  r.wb(trid,2);
+  r.wb(dht.MyID,20);
+  r.wb(cResp[1],length(cResp));
+  SendMessage(r.Memory^,r.size,msg.source);
+  finally r.Free end;
 end;
 
 var o:t;

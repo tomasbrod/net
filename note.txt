@@ -54,3 +54,7 @@ Peer queries:
   * non-dht
     * direct
     * indirect
+
+Have list of tried nodes for each DHT bucket.  When rcv new node for that bucket
+and not on tried list, send beat. Bucket has few (2) slots for hop-near nodes,
+where closer nodes are prefered. Normal slots prefer older nodes.

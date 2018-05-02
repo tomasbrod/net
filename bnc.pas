@@ -98,7 +98,7 @@ procedure cmdINFO;
   req.W2(00);
   aSend;aRecv;
   Writeln(res.ReadStringAll);
-  Writeln('bnc  is  ',GIT_VERSION);
+  //Writeln('bnc  is  ',GIT_VERSION);
 end;
 
 procedure cmdSTOP;

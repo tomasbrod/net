@@ -4,6 +4,7 @@ uses cmem,cthreads,ServerLoop, ObjectModel
   ,Database
 	,OTServer
 	,DHT
+  ,dhlt
 //  ,Mutable
 	;
 

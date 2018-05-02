@@ -7,6 +7,20 @@ unit DHT;
  TODO: weight nodes by IP-Address common prefix length.
 }
 
+{
+  Coral like behaviour:
+  - backtracking when node full
+  - multilevels
+}
+{
+  Adaption of Coral clusters:
+  The buckets will prefer two kinds of nodes:
+  - 5 long-living nodes as in Kademlia
+  - 3 closest (by ttl or rtt) nodes
+
+  Deeper buckets will naturally contain less close nodes.
+}
+  
 {used by: messages, fileshare}
 
 INTERFACE
@@ -66,6 +80,7 @@ tCustomSearch=class(tTask)
     procedure LoadNodes; {from dht and node cache} virtual;
     procedure Step;
     procedure HandleReply(var sAddr: tNetAddr; var sPID: tPID; op:byte; st:tStream); virtual;
+    procedure Exhausted; virtual;
     private
     procedure IntHandleReply(msg:tSMsg);
     end;
@@ -632,13 +647,13 @@ constructor tCustomSearch.Create;
   begin
   for i:=high(nodes) downto 0 do Nodes[i].Addr.Clear;
   NewMsgTr(TrID, @IntHandleReply);
-  tTask.Create;
+  inherited Create;
   log.debug(' Lookup@%s: Initialize',[string(@self)]);
 end;
   
 constructor tSearch.Create( const iTarget: tPID );
   begin
-  tCustomSearch.Create;
+  inherited Create;
   Target:=iTarget;
   Query:=tMemoryStream.Create;
   with Query do begin
@@ -669,7 +684,7 @@ function tCustomSearch.AddNode(const iID:tPID; const iAddr:tNetAddr) :integer;
     if PrefixLength(nodes[idx].id,Target)<tpfl then break;
   end;
   {//writeln(' insert ',idx);}
-  log.debug(' Lookup@%s: Add [%d] %s',[string(iAddr),string(@self),idx]);
+  log.debug(' Lookup@%s: Add [%d] %s',[string(@self),idx,string(iAddr)]);
   for j:=high(nodes)-1 downto idx do nodes[j+1]:=nodes[j];
   nodes[idx].id:=iid; nodes[idx].addr:=iaddr;
   nodes[idx].reqc:=0; nodes[idx].rplc:=0;
@@ -709,17 +724,22 @@ procedure tCustomSearch.Step;
           ServerLoop.SendMessage(R.memory^,R.size,nodes[ix].Addr);
           r.Free;
         end;
-        log.debug('Lookup@%s: [%d,%d,%d] %s',[string(@self),ix,rqc,nodes[ix].reqc,string(nodes[ix].addr)]);
+        log.debug(' Lookup@%s: [%d,%d,%d] %s',[string(@self),ix,rqc,nodes[ix].reqc,string(nodes[ix].addr)]);
         inc(nodes[ix].reqc);
         nodes[ix].LastReq:=MNow;
     end;
   end; inc(again);
   until (again>1)or(rqc>=cStepRqc)or(rpc>=cStepRplc);
   if rqc=0 then begin
-    log.debug('Lookup@%s: Exhausted',[string(@self)]);
-    SendEvent(tevError,nil);
+    log.debug(' Lookup@%s: Exhausted',[string(@self)]);
+    self.Exhausted;
   end
   else Shedule(cStepPeriod,@Step);
+end;
+
+procedure tCustomSearch.Exhausted;
+  begin
+  SendEvent(tevError,nil);
 end;
 
 procedure tCustomSearch.IntHandleReply(msg:tSMsg);
@@ -771,7 +791,7 @@ end;
 
 procedure tCustomSearch.Cleanup;
   begin
-  log.debug('Lookup@%s: Cleanup',[string(@self)]);
+  log.debug(' Lookup@%s: Cleanup',[string(@self)]);
   Query.Free;
   SetMsgTr(TrID, nil);
   UnShedule(@Step); {this is very important}
@@ -782,7 +802,7 @@ procedure tCustomSearch.LoadNodes;
   var i,n:integer;
   var ctrl:byte;
   begin
-  log.debug('Lookup@%s: Load Nodes',[string(@self)]);
+  log.debug(' Lookup@%s: Load Nodes',[string(@self)]);
   ctrl:=0;
   bucket:=DHT.FindBucket(Target);
   while assigned(bucket) do begin
