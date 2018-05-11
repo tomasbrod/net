@@ -111,7 +111,6 @@ procedure BF_encrypt(var data; var key: tBF_key);
 procedure BF_decrypt(var data; var key: tBF_key);
   cdecl; external name 'BF_decrypt';
 
-
 {**** UTILS ****}
 procedure BlockXOR(out r; const a; const b; len: longword);
 
@@ -126,6 +125,17 @@ type tSHA256HMAC = object (tSHA256)
   procedure Init( const key; keylen: longword);
   procedure Final( out md:tsha256digest);
 end;
+
+{**** Curve 2^255-19 ****}
+
+{procedure CreateSeed(out seed: tKey32);}
+procedure Ed25519_CreatekeyPair(out pub:tKey32; var priv:tKey64);
+procedure Ed25519_Sign(out signature:tKey64; const message; len:LongWord; const pub:tKey32; const priv:tKey64); inline;
+function Ed25519_Verify(const signature:tKey64; const message; len:LongWord; const pub:tKey32):boolean;
+function Ed25519_Verify1(var ctx:tSha512Context):boolean; inline;
+function Ed25519_Verify2(var ctx:tSha512Context; const signature:tKey64; const pub:tKey32):boolean; inline;
+procedure Ed25519_SharedSecret(out shared:tKey32; const pub:tKey32; const priv:tKey64); inline;
+
 
 {**** GZip DEFLATE ****}
 const
@@ -170,7 +180,13 @@ type tGZip = object(tGZipContext)
   procedure InitDeflate;
   procedure Deflate;
 end;
-  
+
+(* CRC with polynomial $04C11DB7 (aka table "B") from Zlib *)
+function CRC32b( crc: culong; const data; len: cuint ): culong;
+  cdecl; external name 'crc32';
+
+(* CRC with polynomial $1EDC6F41 (aka Castagnoli) *)
+function CRC32c( iv: DWord; const data; len: longWord ): DWord;
 
 implementation
 
@@ -321,6 +337,69 @@ procedure tAES_FB.DeCryptCFB(out outp; const inp);
   Move(inp,feedback,16);
 end;
 
+
+{$L alg/sc.o}
+{$L alg/fe.o}
+{$L alg/ge.o}
+{$L alg/sign.o}
+{$L alg/verify.o}
+{$L alg/key_exchange.o}
+
+procedure ed25519_create_keypair(pub,priv,seed:pointer);
+ cdecl;external;
+procedure ed25519_sign_int(sig,msg:pointer; len:LongWord; pub,priv:pointer);
+ cdecl;external name 'ed25519_sign';
+function ed25519_verify_int(sig,msg:pointer; len:LongWord; pub:pointer):integer;
+ cdecl;external name 'ed25519_verify';
+function ed25519_verify_p2(hash,sig,pub:pointer):integer;
+ cdecl;external;
+procedure ed25519_key_exchange(shared,pub,priv:pointer);
+ cdecl;external;
+
+type ge_p3=packed array [1..160] of byte; {opaque}
+procedure ge_scalarmult_base(h,a:pointer); cdecl;external;
+procedure ge_p3_tobytes(s, h:pointer); cdecl;external;
+
+procedure ed25519_CreateKeyPair(out pub:tKey32; var priv:tKey64);
+ var A:ge_p3;
+ begin
+ priv[ 0] := priv[ 0] and 248;
+ priv[31] := priv[31] and  63;
+ priv[31] := priv[31]  or  64;
+ ge_scalarmult_base(@A, @priv);
+ ge_p3_tobytes(@pub, @A);
+end;
+
+procedure ed25519_Sign(out signature:tKey64; const message; len:LongWord; const pub:tKey32; const priv:tKey64);
+ begin
+ ed25519_sign_int(@signature,@message,len,@pub,@priv);
+end;
+
+function ed25519_Verify(const signature:tKey64; const message; len:LongWord; const pub:tKey32):boolean;
+ var hash:tSha512Context;
+ begin
+ Sha512_Init(hash);
+ Sha512_Update(hash,message,len);
+ result:=ed25519_Verify2(hash,signature,pub);
+ //assert(result=(ed25519_verify_int(@signature,@message,len,@pub)=1));
+end;
+
+function ed25519_Verify1(var ctx:tSha512Context):boolean;
+  begin
+  Sha512_Init(ctx);
+  result:=true;
+end;
+function ed25519_Verify2(var ctx:tSha512Context; const signature:tKey64; const pub:tKey32):boolean;
+  begin
+  result:=ed25519_verify_p2(@ctx,@signature,@pub)=1;
+end;
+
+procedure ed25519_SharedSecret(out shared:tKey32; const pub:tKey32; const priv:tKey64);
+ begin
+ ed25519_key_exchange(@shared,@pub,@priv);
+end;
+
+
 procedure tGZip.InitDeflate;
   var rv: integer;
   begin
@@ -353,6 +432,46 @@ procedure tGZip.Deflate;
   else raise eXception.Create('libz: '+self.msg);
 end;
 
+type tCRC32Table=array [byte] of DWord;
+var crc32c_table: tCRC32Table;
+{$IFDEF CRC_CHECK_TABLE}
+{$INCLUDE crc32c-tbl.pas}
+{$ENDIF}
+
+function CRC32c( iv: DWord; const data; len: longWord ): DWord;
+  var p:^byte;
+  begin
+  p:=@data;
+  result:= not iv;
+  while len > 0 do begin
+    result:= crc32c_table[(result xor p^) and $FF] xor (result shr 8);
+    inc(p); dec(len);
+  end;
+  result:= result xor $FFFFFFFF;
+end;
+
+procedure GenerateCRC32Table(out table: tCRC32Table; const Poly: DWord);
+  var acc: DWord;
+  var sub,row: integer;
+  begin
+  row:=0;
+  for row:=high(byte) downto 0 do begin
+    acc:=row;
+    for sub:=0 to 7 do begin
+      if (acc and 1) <>0
+        then acc:=(acc shr 1) xor Poly
+        else acc:=(acc shr 1);
+    end;
+    table[row]:=acc;
+  end;
+end;
+
+
+BEGIN
+  GenerateCRC32Table(crc32c_table,$82F63B78);
+  {$IFDEF CRC_CHECK_TABLE}
+  Assert(CompareByte(crc32c_table,crc32c_table_const,sizeof(crc32c_table_const))=0,'CRC32-C table check failed');
+  {$ENDIF}
 end.
 {
 procedure ExpandKey(out keystruct: tBlowfishKey; const user_key; len: word);

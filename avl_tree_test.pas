@@ -1,4 +1,4 @@
-uses bn_avl_tree,math,sysutils,classes;
+uses bn_avl_tree,math,sysutils,classes,BtrDbase,ObjectModel,Crypto;
 
 var tree:tAvlTree;
 type tItem = class(TAVLTreeItem)
@@ -112,7 +112,20 @@ procedure AssertStructure(const insert: ansistring; const struct: ansistring);
   end;
 end;
 
+procedure  do_crc(what:shortstring);
+  var tmp: dword;
+  begin
+  tmp:=CRC32c(0, what[1], length(what));
+  writeln(what, ' $', ToHexStr(tmp,4));
+end;
+
 BEGIN
+  do_crc('123456789');
+  do_crc('The quick brown fox jumps over the lazy dog');
+  do_crc('');
+  do_crc(#0#0#0#0#0#0#0#0#0#0#0#0#0#0#0#0#0#0#0#0#0#0#0#0#0#0#0#0#0#0#0#0);
+  do_crc('a');
+  do_crc('a'#0);
   AddSomeItems;
   Dump;
   TryFinds;

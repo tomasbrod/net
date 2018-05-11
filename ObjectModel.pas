@@ -14,11 +14,11 @@ type tKey24=packed array [0..23] of byte;
 type tKey32=packed array [0..31] of byte;
 type tKey64=packed array [0..63] of byte;
 
-type Word2=array [1..2] of byte; {0..65535}
-type Word3=array [1..3] of byte; {todo}
-type Word4=array [1..4] of byte; {0..4294967295}
-type Word6=array [1..6] of byte; {todo}
-type Word8=array [1..8] of byte; {todo}
+type Word2=type array [1..2] of byte; {0..65535}
+type Word3=type array [1..3] of byte; {todo}
+type Word4=type array [1..4] of byte; {0..4294967295}
+type Word6=type array [1..6] of byte; {todo}
+type Word8=type array [1..8] of byte; {todo}
 
 (*** Simple Functions ***)
 
@@ -208,14 +208,17 @@ operator := ( aString : string) at : tNetAddr;
 
 (*** Host<>Net conversion operators ***)
 
-operator := (net : Word2) host:word;
-operator := (host : word) net:Word2;
+operator := (net : Word2) host:word; inline;
+operator := (host : word) net:Word2; inline;
 
-operator := (net : Word4) host:Dword;
-operator := (host : Dword) net:Word4;
+operator := (net : Word4) host:Dword; inline;
+operator := (host : Dword) net:Word4; inline;
 
 operator := (net : Word6) host:Int64;
 operator := (host: Int64) net:Word6;
+
+operator := (net : Word8) host:QWord; inline;
+operator := (host: QWord) net:Word8; inline;
 
 operator = (a,b:tKey20) r:boolean;
 operator = (a,b:tKey24) r:boolean;
@@ -772,6 +775,10 @@ operator := (net : Word4) host:Dword;
  begin
  host:=BEtoN( DWORD(pointer(@net)^) );
 end;
+operator := (net : Word8) host:Qword;
+ begin
+ host:=BEtoN( QWORD(pointer(@net)^) );
+end;
 
 operator := (host : word) net:Word2;
  var pnet:^Word;
@@ -782,6 +789,10 @@ end;
 operator := (host : Dword) net:Word4;
  begin
  DWORD(pointer(@net)^):=NtoBE( host );
+end;
+operator := (host : Qword) net:Word8;
+ begin
+ QWORD(pointer(@net)^):=NtoBE( host );
 end;
 
 operator := (net : Word6) host:Int64;
